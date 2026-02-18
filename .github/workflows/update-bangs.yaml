@@ -11,9 +11,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: oven-sh/setup-bun@v2
-
-      - run: bun install
 
       - name: Fetch sources
         run: |
@@ -21,8 +18,10 @@ jobs:
           curl -sfo data/kagi.json https://raw.githubusercontent.com/kagisearch/bangs/main/data/bangs.json
           curl -sfo data/ddg.json https://duckduckgo.com/bang.js
 
-      - name: Build
-        run: bun run build
+      - name: Generate bangs
+        run: |
+          mkdir -p src/generated
+          cargo run --manifest-path build/Cargo.toml --release -- --kagi data/kagi.json --ddg data/ddg.json --custom config/custom.toml --out src/generated
 
       - name: Check for changes
         id: diff
