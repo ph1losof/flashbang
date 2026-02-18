@@ -33,7 +33,7 @@ If the query is just a bang with no search term (e.g. `!g`), Flashbang redirects
 
 ### Use the hosted version
 
-A public instance is available at **[flashbang.pages.dev](https://flashbang.pages.dev)**. Just visit it, then add `https://flashbang.pages.dev?q=%s` as a custom search engine in your browser. Nothing to build or deploy.
+A public instance is available at **[flashbang-dyr.pages.dev](https://flashbang-dyr.pages.dev)**. Just visit it, then add `https://flashbang-dyr.pages.dev?q=%s` as a custom search engine in your browser. Nothing to build or deploy.
 
 ### Self-host locally
 
