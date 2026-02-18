@@ -1,10 +1,11 @@
-// @ts-nocheck
+declare const self: ServiceWorkerGlobalScope;
+
 import { redirect, invalidateCache } from "./redirect";
 
 const CACHE_NAME = "flashbang-v1";
 const ASSETS = ["/", "/index.html", "/app.js"];
 
-self.addEventListener("install", (e) => {
+self.addEventListener("install", (e: ExtendableEvent) => {
   e.waitUntil(
     caches
       .open(CACHE_NAME)
@@ -13,7 +14,7 @@ self.addEventListener("install", (e) => {
   );
 });
 
-self.addEventListener("activate", (e) => {
+self.addEventListener("activate", (e: ExtendableEvent) => {
   e.waitUntil(
     caches
       .keys()
@@ -26,11 +27,11 @@ self.addEventListener("activate", (e) => {
   );
 });
 
-self.addEventListener("message", (e) => {
+self.addEventListener("message", (e: ExtendableMessageEvent) => {
   if (e.data?.type === "invalidate") invalidateCache();
 });
 
-self.addEventListener("fetch", (e) => {
+self.addEventListener("fetch", (e: FetchEvent) => {
   const url = new URL(e.request.url);
   const q = url.searchParams.get("q");
 

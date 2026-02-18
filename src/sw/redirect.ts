@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { BANGS } from "../generated/bangs-min.js";
 
 const DEFAULT_URL = "https://www.google.com/search?q={}";
@@ -47,11 +46,11 @@ async function getDefault(): Promise<string> {
     const tx = db.transaction("settings", "readonly");
     const result = await idbGet(tx.objectStore("settings"), "default-bang");
     const trigger = result?.value || "g";
-    cachedDefault = (BANGS as any)[trigger] || DEFAULT_URL;
+    cachedDefault = BANGS[trigger] || DEFAULT_URL;
   } catch {
     cachedDefault = DEFAULT_URL;
   }
-  return cachedDefault;
+  return cachedDefault!;
 }
 
 async function getCustom(): Promise<Record<string, string>> {
@@ -130,7 +129,7 @@ export async function redirect(query: string): Promise<Response> {
 
   if (bang) {
     const [custom, def] = await Promise.all([getCustom(), getDefault()]);
-    url = custom[bang] || (BANGS as any)[bang];
+    url = custom[bang] || BANGS[bang];
 
     if (!url) {
       return Response.redirect(def.replace("{}", encode(query)), 302);
