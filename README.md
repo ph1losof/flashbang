@@ -31,6 +31,12 @@ If the query is just a bang with no search term (e.g. `!g`), Flashbang redirects
 
 ## Setup as search engine
 
+### Use the hosted version
+
+A public instance is available at **[flashbang.pages.dev](https://flashbang.pages.dev)**. Just visit it, then add `https://flashbang.pages.dev?q=%s` as a custom search engine in your browser. Nothing to build or deploy.
+
+### Self-host locally
+
 No remote hosting required. Service Workers need an HTTP origin (not `file://`), but a local server works fine:
 
 ```sh
@@ -41,12 +47,13 @@ Visit the local URL once — the Service Worker installs in your browser. You ca
 
 To pick up new bangs, pull the latest changes and re-run `bun run build`. If you host it, the daily GitHub Actions CI does this automatically.
 
-If you want to host it (for sharing or syncing across devices):
+### Deploy your own
 
-1. Deploy the `dist/` folder to any static host
-2. Visit the site — your browser will auto-discover it via OpenSearch
-3. In your browser's search engine settings, set Flashbang as the default
-4. Or manually add a custom search engine with the URL template: `https://your-domain?q=%s`
+Deploy the `dist/` folder to any static host (Cloudflare Pages, Netlify, Vercel, etc.):
+
+1. Visit the site — your browser will auto-discover it via OpenSearch
+2. In your browser's search engine settings, set Flashbang as the default
+3. Or manually add a custom search engine with the URL template: `https://your-domain?q=%s`
 
 The settings page has a copy button that gives you the exact URL template.
 

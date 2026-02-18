@@ -1,14 +1,20 @@
 import { $ } from 'bun';
 import { minify } from '@minify-html/node';
 
-console.log('=== Fetch bang sources ===');
-await $`mkdir -p data`;
-await $`curl -sfo data/kagi.json https://raw.githubusercontent.com/kagisearch/bangs/main/data/bangs.json`;
-await $`curl -sfo data/ddg.json https://duckduckgo.com/bang.js`;
+const skipRust = process.env.SKIP_CODEGEN === '1';
 
-console.log('=== Rust: merge + generate ===');
-await $`mkdir -p src/generated`;
-await $`cargo run --manifest-path build/Cargo.toml --release -- --kagi data/kagi.json --ddg data/ddg.json --custom config/custom.toml --out src/generated`;
+if (!skipRust) {
+  console.log('=== Fetch bang sources ===');
+  await $`mkdir -p data`;
+  await $`curl -sfo data/kagi.json https://raw.githubusercontent.com/kagisearch/bangs/main/data/bangs.json`;
+  await $`curl -sfo data/ddg.json https://duckduckgo.com/bang.js`;
+
+  console.log('=== Rust: merge + generate ===');
+  await $`mkdir -p src/generated`;
+  await $`cargo run --manifest-path build/Cargo.toml --release -- --kagi data/kagi.json --ddg data/ddg.json --custom config/custom.toml --out src/generated`;
+} else {
+  console.log('=== Skipping Rust codegen (using committed generated files) ===');
+}
 
 console.log('=== Bundle service worker ===');
 await Bun.build({
