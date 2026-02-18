@@ -4,6 +4,8 @@ Blazingly fast, local-first bang redirects.
 
 Flashbang turns your browser's address bar into a bang-powered launcher. Type `!g kittens` to search Google, `!w dogs` for Wikipedia, `!gh react` for GitHub - across 14,303 bangs from DuckDuckGo, Kagi, and custom sources. Everything runs locally in a Service Worker: zero network latency, no server, no tracking.
 
+**Try it now:** add **`https://flashbang-dyr.pages.dev?q=%s`** as a custom search engine in your browser. That's it.
+
 ## What are bangs?
 
 Bangs are shortcuts prefixed with `!` that redirect your search to a specific site. Instead of going to Google, typing your query, then navigating to the result - you type `!g query` and go straight there. DuckDuckGo popularized the concept, but their bangs require a round-trip to DDG's servers. Flashbang does it locally, instantly.
