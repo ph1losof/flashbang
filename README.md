@@ -34,10 +34,10 @@ If the query is just a bang with no search term (e.g. `!g`), Flashbang redirects
 No remote hosting required. Service Workers need an HTTP origin (not `file://`), but a local server works fine:
 
 ```sh
-bun run build && cd dist && python3 -m http.server 8000
+bun run build && bunx serve dist
 ```
 
-Visit `http://localhost:8000` once and the Service Worker installs in your browser. After that first visit, redirects work offline. Set `http://localhost:8000?q=%s` as your browser's custom search engine and you're done — no deployment, no server running in the background.
+Visit the local URL once — the Service Worker installs in your browser. You can then stop the server. After that first visit, redirects work offline with no server needed. Set the local URL with `?q=%s` as your browser's custom search engine and you're done.
 
 To pick up new bangs, pull the latest changes and re-run `bun run build`. If you host it, the daily GitHub Actions CI does this automatically.
 
