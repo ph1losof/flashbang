@@ -164,7 +164,7 @@ The entire flow happens locally - no request ever leaves your browser until the 
 
 Flashbang is the fastest of all these tools. Unlike every other implementation, Flashbang is split into two independent parts: a thin Service Worker that handles redirects, and a separate settings UI for managing bangs and configuration. The other tools ship a single monolithic bundle — HTML, CSS, JavaScript, UI framework — that loads in full on every query, even though the only thing needed is a redirect. Flashbang's Service Worker intercepts the navigation request before the browser even begins rendering. No HTML, no CSS, no JS execution. Just a direct redirect from the worker thread. The settings UI only loads when you actually visit the page.
 
-Flashbang is also the only one with zero tracking. The others inject third-party analytics scripts (Plausible, Cloudflare) some of them run on every page load — including during redirects. For a tool whose entire purpose is to be fast and private, injecting analytics is a betrayal of user trust: it adds latency to every request and leaks your search queries to third parties.
+Flashbang is also the only one with zero tracking. The others inject third-party analytics scripts (Plausible, Cloudflare Web Analytics) that run on every page load — including during redirects. For a tool whose entire purpose is to be fast and private, adding analytics undermines that promise: it adds latency to every request and sends your search queries to third parties.
 
 > **Note:** Analytics information is accurate as of February 2026. These projects may have since changed their tracking behavior, please feel free to check by yourself. What we know if flashbang is going to stay the way it is right now.
 

@@ -50,6 +50,7 @@ const minified = minify(Buffer.from(html), { minify_css: true, minify_js: true }
 await Bun.write('dist/index.html', minified);
 await $`rm dist/styles.css`;
 await $`cp src/ui/manifest.json dist/`;
+await $`cp src/ui/icon.svg dist/`;
 await $`cp src/ui/opensearch.xml dist/`;
 
 console.log('=== Done ===');
