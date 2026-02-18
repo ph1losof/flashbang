@@ -1,0 +1,10 @@
+{
+  "name": "flashbang",
+  "short_name": "flashbang",
+  "description": "Fast, private bang redirects",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0f",
+  "theme_color": "#0a0a0f",
+  "icons": []
+}

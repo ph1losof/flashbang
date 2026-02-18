@@ -1,0 +1,9 @@
+[bangs.mdn]
+name = "MDN Web Docs"
+url = "https://developer.mozilla.org/en-US/search?q={}"
+domain = "developer.mozilla.org"
+
+[bangs.settings]
+name = "Settings"
+url = "/settings"
+domain = "flashbang"

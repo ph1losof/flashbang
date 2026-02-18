@@ -1,0 +1,6 @@
+dist/
+data/
+src/generated/
+node_modules/
+build/target/
+*.DS_Store

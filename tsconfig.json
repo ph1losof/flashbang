@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "lib": ["ESNext", "WebWorker", "DOM"],
+    "types": ["@types/bun"]
+  },
+  "include": ["src/**/*.ts", "scripts/**/*.ts"]
+}
