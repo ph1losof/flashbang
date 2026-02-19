@@ -1,5 +1,6 @@
 import { $ } from 'bun';
 import { minify } from '@minify-html/node';
+import { parseCookie } from '../src/suggest';
 
 await $`mkdir -p dist`;
 await $`bun run build:sw`;
@@ -23,8 +24,8 @@ Bun.serve({
     const q = url.searchParams.get('q');
 
     if (url.pathname === '/suggest' && q) {
-      const { suggest } = await import('../src/sw/suggest');
-      return suggest(q, { provider: 'default', trigger: 'g', customUrl: null });
+      const { suggest } = await import('../src/suggest');
+      return suggest(q, parseCookie(req));
     }
 
     let path = url.pathname === '/' ? '/index.html' : url.pathname;

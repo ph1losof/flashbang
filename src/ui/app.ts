@@ -21,6 +21,11 @@ function notifySW(type: string) {
   navigator.serviceWorker.controller?.postMessage({ type });
 }
 
+function setSuggestCookie(provider: string, trigger: string, customUrl: string) {
+  const value = `${provider},${trigger},${encodeURIComponent(customUrl)}`;
+  document.cookie = `suggest=${value};path=/;max-age=31536000;SameSite=Lax`;
+}
+
 function flashAnim(el: HTMLElement) {
   el.classList.remove("flash-anim");
   void el.offsetWidth;
@@ -133,6 +138,7 @@ async function init() {
     if (f[val]) {
       await db.setSetting("default-bang", val);
       notifySW("invalidate");
+      setSuggestCookie(suggestSelect.value, val, suggestUrlInput.value.trim());
       flashAnim(defaultInput);
       $("#bang-status").textContent = f[val].s;
       $("#bang-status").className = "text-sm text-success";
@@ -151,12 +157,15 @@ async function init() {
   suggestSelect.value = savedProvider;
   if (savedProvider === "custom") suggestUrlInput.classList.remove("hidden");
 
-  const savedUrl = await db.getSetting("suggest-url");
+  const savedUrl = (await db.getSetting("suggest-url")) || "";
   if (savedUrl) suggestUrlInput.value = savedUrl;
+
+  setSuggestCookie(savedProvider, defaultBang, savedUrl);
 
   suggestSelect.addEventListener("change", async () => {
     await db.setSetting("suggest-provider", suggestSelect.value);
     notifySW("invalidate");
+    setSuggestCookie(suggestSelect.value, defaultInput.value, suggestUrlInput.value.trim());
     if (suggestSelect.value === "custom") {
       suggestUrlInput.classList.remove("hidden");
     } else {
@@ -168,6 +177,7 @@ async function init() {
     const url = suggestUrlInput.value.trim();
     await db.setSetting("suggest-url", url);
     notifySW("invalidate");
+    setSuggestCookie(suggestSelect.value, defaultInput.value, url);
   });
 
   $("#bang-count").textContent =

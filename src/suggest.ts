@@ -1,4 +1,4 @@
-import { BANGS } from "../generated/bangs-min.js";
+import { BANGS } from "./generated/bangs-min.js";
 
 export interface SuggestSettings {
   provider: string;
@@ -74,6 +74,18 @@ function resolveEndpoint(provider: string, trigger: string): string | null {
   if (trigger === "b" || trigger === "bing") return SUGGEST_URLS.bing;
   if (trigger === "brave") return SUGGEST_URLS.brave;
   return null;
+}
+
+export function parseCookie(request: Request): SuggestSettings {
+  const header = request.headers.get("Cookie") || "";
+  const match = header.match(/(?:^|;\s*)suggest=([^;]*)/);
+  if (!match) return { provider: "default", trigger: "g", customUrl: null };
+  const [provider, trigger, customUrl] = match[1].split(",");
+  return {
+    provider: provider || "default",
+    trigger: trigger || "g",
+    customUrl: customUrl ? decodeURIComponent(customUrl) : null,
+  };
 }
 
 export async function suggest(
