@@ -35,6 +35,7 @@ await Bun.build({
   entrypoints: ['src/ui/app.ts'],
   outdir: 'dist',
   naming: 'app.js',
+  splitting: true,
   minify: true,
   target: 'browser',
   format: 'esm',

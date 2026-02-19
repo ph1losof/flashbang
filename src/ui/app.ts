@@ -40,13 +40,19 @@ function shakeAnim(el: HTMLElement) {
   setTimeout(() => el.classList.remove("shake-anim"), 200);
 }
 
-function setupModal() {
+function setupModal(onFirstOpen: () => void) {
   const modal = $("#settings-modal");
   const gearBtn = $("#gear-btn");
   const closeBtn = $("#modal-close");
   const card = modal.querySelector('[role="dialog"]') as HTMLElement;
 
+  let initialized = false;
+
   function openModal() {
+    if (!initialized) {
+      initialized = true;
+      onFirstOpen();
+    }
     modal.classList.replace("opacity-0", "opacity-100");
     modal.classList.replace("invisible", "visible");
     modal.classList.add("open");
@@ -105,32 +111,28 @@ function setupModal() {
   return { openModal };
 }
 
-async function init() {
-  $<HTMLInputElement>("#setup-url").value = `${location.origin}?q=%s`;
-
-  const metal = initLiquidMetal(
-    $<HTMLCanvasElement>("#metal-canvas"),
-    "flashbang",
-    '800 128px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-  );
-  $(".wordmark").classList.add("has-shader");
-
-  $("#copy-btn").addEventListener("click", async () => {
-    await navigator.clipboard.writeText(
-      $<HTMLInputElement>("#setup-url").value,
-    );
-    flashAnim($<HTMLInputElement>("#setup-url"));
-    metal.flash();
-    $("#copy-btn").textContent = "Copied!";
-    setTimeout(() => ($("#copy-btn").textContent = "Copy"), 1500);
-  });
-
-  const defaultBang = (await db.getSetting("default-bang")) || "g";
+async function initSettings() {
   const defaultInput = $<HTMLInputElement>("#default-bang");
+  const suggestSelect = $<HTMLSelectElement>("#suggest-provider");
+  const suggestUrlInput = $<HTMLInputElement>("#suggest-url");
+
+  const [defaultBang, savedProvider, savedUrl] = await Promise.all([
+    db.getSetting("default-bang").then((v) => v || "g"),
+    db.getSetting("suggest-provider").then((v) => v || "default"),
+    db.getSetting("suggest-url").then((v) => v || ""),
+  ]);
+
   defaultInput.value = defaultBang;
+  suggestSelect.value = savedProvider;
+  if (savedProvider === "custom") suggestUrlInput.classList.remove("hidden");
+  if (savedUrl) suggestUrlInput.value = savedUrl;
+
+  setSuggestCookie(savedProvider, defaultBang, savedUrl);
 
   const full = await getFull();
   $("#bang-status").textContent = full[defaultBang]?.s || "Unknown";
+  $("#bang-count").textContent =
+    `${Object.keys(full).length.toLocaleString()} bangs available`;
 
   defaultInput.addEventListener("change", async () => {
     const val = defaultInput.value.replace(/^!+/, "").toLowerCase().trim();
@@ -149,19 +151,6 @@ async function init() {
     }
   });
 
-  // Suggestion provider
-  const suggestSelect = $<HTMLSelectElement>("#suggest-provider");
-  const suggestUrlInput = $<HTMLInputElement>("#suggest-url");
-
-  const savedProvider = (await db.getSetting("suggest-provider")) || "default";
-  suggestSelect.value = savedProvider;
-  if (savedProvider === "custom") suggestUrlInput.classList.remove("hidden");
-
-  const savedUrl = (await db.getSetting("suggest-url")) || "";
-  if (savedUrl) suggestUrlInput.value = savedUrl;
-
-  setSuggestCookie(savedProvider, defaultBang, savedUrl);
-
   suggestSelect.addEventListener("change", async () => {
     await db.setSetting("suggest-provider", suggestSelect.value);
     notifySW("invalidate");
@@ -179,9 +168,6 @@ async function init() {
     notifySW("invalidate");
     setSuggestCookie(suggestSelect.value, defaultInput.value, url);
   });
-
-  $("#bang-count").textContent =
-    `${Object.keys(full).length.toLocaleString()} bangs available`;
 
   let timer: ReturnType<typeof setTimeout>;
   $<HTMLInputElement>("#bang-search").addEventListener("input", (e) => {
@@ -265,12 +251,6 @@ async function init() {
       $("#import-status").className = "text-sm mt-2 block text-danger";
     }
   });
-
-  const { openModal } = setupModal();
-  if (location.pathname === "/settings") {
-    openModal();
-    history.replaceState(null, "", "/");
-  }
 }
 
 async function renderCustom() {
@@ -299,6 +279,34 @@ async function renderCustom() {
         await renderCustom();
       });
     });
+}
+
+function init() {
+  $<HTMLInputElement>("#setup-url").value = `${location.origin}?q=%s`;
+
+  const metal = initLiquidMetal(
+    $<HTMLCanvasElement>("#metal-canvas"),
+    "flashbang",
+    '800 128px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+  );
+  $(".wordmark").classList.add("has-shader");
+
+  $("#copy-btn").addEventListener("click", async () => {
+    await navigator.clipboard.writeText(
+      $<HTMLInputElement>("#setup-url").value,
+    );
+    flashAnim($<HTMLInputElement>("#setup-url"));
+    metal.flash();
+    $("#copy-btn").textContent = "Copied!";
+    setTimeout(() => ($("#copy-btn").textContent = "Copy"), 1500);
+  });
+
+  const { openModal } = setupModal(() => initSettings());
+
+  if (location.pathname === "/settings") {
+    openModal();
+    history.replaceState(null, "", "/");
+  }
 }
 
 init();
