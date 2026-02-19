@@ -7,4 +7,5 @@ pub struct Bang {
     pub name: String,
     pub domain: String,
     pub url: String,
+    pub relevance: u32,
 }

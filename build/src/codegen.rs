@@ -51,7 +51,9 @@ fn generate_full(bangs: &[Bang], out_dir: &Path) {
         js.push_str(&js_escape(&bang.domain));
         js.push_str("',u:'");
         js.push_str(&js_escape(&bang.url));
-        js.push_str("'}");
+        js.push_str("',r:");
+        js.push_str(&bang.relevance.to_string());
+        js.push('}');
     }
 
     js.push_str("};");

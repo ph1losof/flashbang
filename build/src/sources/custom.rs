@@ -24,6 +24,7 @@ pub fn parse(raw: &str) -> Vec<Bang> {
             name: b.name,
             domain: b.domain,
             url: b.url,
+            relevance: 0,
         })
         .collect()
 }

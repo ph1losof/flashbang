@@ -9,6 +9,8 @@ struct RawDdg {
     d: String,
     #[serde(default)]
     ts: Vec<String>,
+    #[serde(default)]
+    r: u32,
 }
 
 pub fn parse(raw: &str) -> Vec<Bang> {
@@ -23,6 +25,7 @@ pub fn parse(raw: &str) -> Vec<Bang> {
             name: entry.s.clone(),
             domain: entry.d.clone(),
             url: url.clone(),
+            relevance: entry.r,
         });
 
         for alias in &entry.ts {
@@ -31,6 +34,7 @@ pub fn parse(raw: &str) -> Vec<Bang> {
                 name: entry.s.clone(),
                 domain: entry.d.clone(),
                 url: url.clone(),
+                relevance: entry.r,
             });
         }
     }

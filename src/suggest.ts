@@ -1,4 +1,4 @@
-import { BANGS } from "./generated/bangs-min.js";
+import { BANGS } from "./generated/bangs-full.js";
 
 export interface SuggestSettings {
   provider: string;
@@ -14,16 +14,8 @@ const SUGGEST_URLS: Record<string, string> = {
   brave: "https://search.brave.com/api/suggest?q={}&rich=false",
 };
 
-// Pre-computed sorted keys + hostname cache for fast bang suggestions
-const BANG_KEYS = Object.keys(BANGS).sort((a, b) => a.length - b.length);
-const HOST_CACHE: Record<string, string> = {};
-for (const k of BANG_KEYS) {
-  try {
-    HOST_CACHE[k] = new URL(BANGS[k].replace("{}", "x")).hostname;
-  } catch {
-    HOST_CACHE[k] = BANGS[k];
-  }
-}
+// Alphabetically sorted keys for binary search
+const BANG_KEYS = Object.keys(BANGS).sort();
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
@@ -52,12 +44,27 @@ function bangSuggestions(query: string, prefix: string, partial: string): Respon
   const completions: string[] = [];
   const descriptions: string[] = [];
 
-  for (let i = 0; i < BANG_KEYS.length && completions.length < 8; i++) {
+  // Binary search to first key >= partial
+  let lo = 0, hi = BANG_KEYS.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (BANG_KEYS[mid] < partial) lo = mid + 1; else hi = mid;
+  }
+
+  // Collect all prefix matches (contiguous since keys are sorted)
+  const matches: [string, number][] = [];
+  for (let i = lo; i < BANG_KEYS.length; i++) {
     const k = BANG_KEYS[i];
-    if (k.startsWith(partial)) {
-      completions.push(`${prefix}!${k}`);
-      descriptions.push(HOST_CACHE[k]);
-    }
+    if (!k.startsWith(partial)) break;
+    matches.push([k, BANGS[k].r || 0]);
+  }
+
+  // Sort by relevance descending, take top 8
+  matches.sort((a, b) => b[1] - a[1]);
+  for (let i = 0; i < Math.min(matches.length, 8); i++) {
+    const k = matches[i][0];
+    completions.push(`${prefix}!${k}`);
+    descriptions.push(BANGS[k].d);
   }
 
   return new Response(JSON.stringify([query, completions, descriptions]), {

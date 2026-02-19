@@ -23,6 +23,7 @@ pub fn parse(raw: &str) -> Vec<Bang> {
             name: entry.s.clone(),
             domain: entry.d.clone(),
             url: url.clone(),
+            relevance: 0,
         });
 
         for alias in &entry.ts {
@@ -31,6 +32,7 @@ pub fn parse(raw: &str) -> Vec<Bang> {
                 name: entry.s.clone(),
                 domain: entry.d.clone(),
                 url: url.clone(),
+                relevance: 0,
             });
         }
     }

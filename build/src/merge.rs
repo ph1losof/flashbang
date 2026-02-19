@@ -6,7 +6,14 @@ pub fn merge(sources: Vec<(&str, Vec<Bang>)>) -> Vec<Bang> {
 
     for (_source_name, bangs) in sources {
         for bang in bangs {
-            map.insert(bang.trigger.clone(), bang);
+            if let Some(existing) = map.get(&bang.trigger) {
+                let relevance = existing.relevance.max(bang.relevance);
+                let mut new_bang = bang;
+                new_bang.relevance = relevance;
+                map.insert(new_bang.trigger.clone(), new_bang);
+            } else {
+                map.insert(bang.trigger.clone(), bang);
+            }
         }
     }
 

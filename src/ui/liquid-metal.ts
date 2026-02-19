@@ -18,26 +18,26 @@ function createTextMaskTexture(
   width: number,
   height: number,
 ): WebGLTexture {
-  const c = document.createElement('canvas');
+  const c = document.createElement("canvas");
   c.width = width;
   c.height = height;
-  const ctx = c.getContext('2d', { willReadFrequently: true })!;
+  const ctx = c.getContext("2d", { willReadFrequently: true })!;
 
-  ctx.fillStyle = '#000';
+  ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, width, height);
   ctx.font = font;
-  ctx.fillStyle = '#fff';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+  ctx.fillStyle = "#fff";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
   ctx.fillText(text, width / 2, height / 2);
   const sharp = ctx.getImageData(0, 0, width, height);
 
-  ctx.filter = 'blur(6px)';
-  ctx.fillStyle = '#000';
+  ctx.filter = "blur(6px)";
+  ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, width, height);
-  ctx.fillStyle = '#fff';
+  ctx.fillStyle = "#fff";
   ctx.fillText(text, width / 2, height / 2);
-  ctx.filter = 'none';
+  ctx.filter = "none";
   const blurred = ctx.getImageData(0, 0, width, height);
 
   // Pack channels: R = edge gradient (blurred), G = alpha (sharp)
@@ -51,7 +51,17 @@ function createTextMaskTexture(
 
   const tex = gl.createTexture()!;
   gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, packed);
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    0,
+    gl.RGBA,
+    width,
+    height,
+    0,
+    gl.RGBA,
+    gl.UNSIGNED_BYTE,
+    packed,
+  );
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -60,7 +70,11 @@ function createTextMaskTexture(
   return tex;
 }
 
-function compileShader(gl: WebGL2RenderingContext, type: number, src: string): WebGLShader {
+function compileShader(
+  gl: WebGL2RenderingContext,
+  type: number,
+  src: string,
+): WebGLShader {
   const s = gl.createShader(type)!;
   gl.shaderSource(s, src);
   gl.compileShader(s);
@@ -72,7 +86,11 @@ function compileShader(gl: WebGL2RenderingContext, type: number, src: string): W
   return s;
 }
 
-function createProgram(gl: WebGL2RenderingContext, vert: string, frag: string): WebGLProgram {
+function createProgram(
+  gl: WebGL2RenderingContext,
+  vert: string,
+  frag: string,
+): WebGLProgram {
   const p = gl.createProgram()!;
   gl.attachShader(p, compileShader(gl, gl.VERTEX_SHADER, vert));
   gl.attachShader(p, compileShader(gl, gl.FRAGMENT_SHADER, frag));
@@ -86,7 +104,9 @@ function createProgram(gl: WebGL2RenderingContext, vert: string, frag: string): 
 }
 
 function getWordmarkFont(canvas: HTMLCanvasElement): string {
-  const wordmarkText = canvas.parentElement?.querySelector('.wordmark-text') as HTMLElement | null;
+  const wordmarkText = canvas.parentElement?.querySelector(
+    ".wordmark-text",
+  ) as HTMLElement | null;
   if (wordmarkText) {
     const style = getComputedStyle(wordmarkText);
     return `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
@@ -98,7 +118,10 @@ export function initLiquidMetal(
   canvas: HTMLCanvasElement,
   text: string,
 ): LiquidMetalControls {
-  const maybeGl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: false });
+  const maybeGl = canvas.getContext("webgl2", {
+    alpha: true,
+    premultipliedAlpha: false,
+  });
   if (!maybeGl) return fallback(canvas);
   const gl: WebGL2RenderingContext = maybeGl;
 
@@ -107,15 +130,19 @@ export function initLiquidMetal(
 
   const buf = gl.createBuffer()!;
   gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
-  const aPos = gl.getAttribLocation(program, 'a_pos');
+  gl.bufferData(
+    gl.ARRAY_BUFFER,
+    new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]),
+    gl.STATIC_DRAW,
+  );
+  const aPos = gl.getAttribLocation(program, "a_pos");
   gl.enableVertexAttribArray(aPos);
   gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
 
-  const uTime = gl.getUniformLocation(program, 'u_time');
-  const uBrightness = gl.getUniformLocation(program, 'u_brightness');
-  const uResolution = gl.getUniformLocation(program, 'u_resolution');
-  const uMask = gl.getUniformLocation(program, 'u_mask');
+  const uTime = gl.getUniformLocation(program, "u_time");
+  const uBrightness = gl.getUniformLocation(program, "u_brightness");
+  const uResolution = gl.getUniformLocation(program, "u_resolution");
+  const uMask = gl.getUniformLocation(program, "u_mask");
 
   let brightness = 1.0;
   let rafId = 0;
@@ -129,11 +156,17 @@ export function initLiquidMetal(
     if (canvas.width !== w || canvas.height !== h) {
       canvas.width = w;
       canvas.height = h;
-      canvas.style.width = rect.width + 'px';
-      canvas.style.height = rect.height + 'px';
+      canvas.style.width = rect.width + "px";
+      canvas.style.height = rect.height + "px";
       gl.viewport(0, 0, w, h);
 
-      const tex = createTextMaskTexture(gl, text, getWordmarkFont(canvas), w, h);
+      const tex = createTextMaskTexture(
+        gl,
+        text,
+        getWordmarkFont(canvas),
+        w,
+        h,
+      );
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.uniform1i(uMask, 0);
@@ -148,7 +181,9 @@ export function initLiquidMetal(
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const reducedMotion = window.matchMedia(
+    "(prefers-reduced-motion: reduce)",
+  ).matches;
 
   function render() {
     const t = (performance.now() - startTime) / 1000;
@@ -191,16 +226,16 @@ export function initLiquidMetal(
 }
 
 function fallback(canvas: HTMLCanvasElement): LiquidMetalControls {
-  canvas.style.display = 'none';
+  canvas.style.display = "none";
   return {
     destroy() {},
     flash() {
-      const wm = canvas.closest('.wordmark');
+      const wm = canvas.closest(".wordmark");
       if (wm) {
-        wm.classList.remove('flash-burst');
+        wm.classList.remove("flash-burst");
         void (wm as HTMLElement).offsetWidth;
-        wm.classList.add('flash-burst');
-        setTimeout(() => wm.classList.remove('flash-burst'), 600);
+        wm.classList.add("flash-burst");
+        setTimeout(() => wm.classList.remove("flash-burst"), 600);
       }
     },
   };
