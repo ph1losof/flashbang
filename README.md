@@ -16,7 +16,7 @@ Bangs are shortcuts prefixed with `!` that redirect your search to a specific si
 - **Private** - No analytics, no tracking, no server. All data stays on your device
 - **14,303 bangs** - Merged from DuckDuckGo, Kagi, and custom sources. Updated daily via CI
 - **Custom bangs** - Add your own bangs through the settings UI. They take priority over built-ins
-- **Search suggestions** - Bang autocomplete and search suggestions directly in your address bar. Type `!g` and see `!gh`, `!ghr`, etc. Regular queries proxy to Google, DuckDuckGo, Bing, Brave, or a custom provider. Requires a server endpoint (included as a Cloudflare Pages Function) since browsers don't route suggestion requests through Service Workers
+- **Search suggestions** - Bang autocomplete and search suggestions directly in your address bar. Type `!y` and see `!yt` (YouTube), `!ya` (Yandex), `!yf` (Yahoo Finance) — ranked by popularity so the most-used bangs surface first. Regular queries proxy to Google, DuckDuckGo, Bing, Brave, or a custom provider. Requires a server endpoint (included as a Cloudflare Pages Function) since browsers don't route suggestion requests through Service Workers
 - **OpenSearch** - Browsers auto-discover Flashbang as a search engine via `/opensearch.xml`, including the suggestions endpoint
 
 ## Bang syntax
@@ -126,7 +126,7 @@ flashbang/
 ├── src/
 │   ├── generated/          # Output of Rust codegen (gitignored)
 │   │   ├── bangs-min.js    # trigger→URL map for Service Worker
-│   │   ├── bangs-full.js   # trigger→{name, domain, url} for UI
+│   │   ├── bangs-full.js   # trigger→{name, domain, url, relevance} for UI & suggestions
 │   │   └── bangs-meta.json # bang count & timestamp
 │   ├── sw/
 │   │   ├── sw.ts           # Service Worker lifecycle & fetch handler
@@ -171,7 +171,7 @@ The bang data is split into two bundles so the Service Worker loads only what it
 
 The entire flow happens locally - no request ever leaves your browser until the final redirect.
 
-**Suggestions** work differently from redirects. Browsers don't route their internal suggestion requests through Service Workers, so the `/suggest` endpoint requires a real server. On Cloudflare Pages this is handled by a Pages Function. For bang queries (containing `!`), the function searches the bang database on the edge. For regular queries, it proxies to the configured suggestion provider (Google, DuckDuckGo, Bing, Brave, or custom).
+**Suggestions** work differently from redirects. Browsers don't route their internal suggestion requests through Service Workers, so the `/suggest` endpoint requires a real server. On Cloudflare Pages this is handled by a Pages Function. For bang queries (containing `!`), the function uses binary search to find prefix matches and ranks them by DuckDuckGo's relevance score — so `!y` returns YouTube first, not obscure y-prefixed bangs. For regular queries, it proxies to the configured suggestion provider (Google, DuckDuckGo, Bing, Brave, or custom).
 
 ## Comparison with other bang tools
 
@@ -192,7 +192,7 @@ The other tools have a fundamental architectural problem: they treat bang redire
 
 Flashbang solves this by separating the two concerns entirely. A thin Service Worker handles redirects — it intercepts the navigation request before the browser even begins rendering. No HTML, no CSS, no JS execution. Just a direct redirect from the worker thread. The settings UI is a completely separate bundle that only loads when you actually visit the page.
 
-Flashbang has zero tracking. Some of the other tools include third-party analytics (Plausible, Cloudflare Web Analytics) — it's unclear whether these can be disabled by self-hosting.
+Flashbang has zero tracking (even hosted version). Some of the other tools include third-party analytics (Plausible, Cloudflare Web Analytics) on each search - it's unclear whether these can be disabled without self-hosting.
 
 > **Note:** Analytics information is accurate as of February 2026. These projects may have since changed their tracking behavior.
 
@@ -202,6 +202,4 @@ A GitHub Actions workflow runs daily at 00:00 UTC to fetch the latest bang defin
 
 ## License
 
-[AGPL-3.0](LICENSE) with an attribution requirement under Section 7(b) — see [NOTICE](NOTICE).
-
-Derivative works that reuse the core architecture (local-first bang redirects via Service Worker) must credit flashbang in their README or documentation.
+[AGPL-3.0](LICENSE) — see [NOTICE](NOTICE).

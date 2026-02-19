@@ -4,15 +4,6 @@ Copyright (c) 2026 Dmytro Pletenskyi
 This software is licensed under the GNU Affero General Public License v3.0.
 See the LICENSE file for the full license text.
 
---- Additional Terms (AGPL-3.0 Section 7(b)) ---
-
-If you modify this software or create derivative works based on its
-architecture (local-first bang redirects via Service Worker interception),
-you must include the following attribution in a prominent location in your
-project's README or equivalent documentation:
-
-  "Based on flashbang (https://github.com/ph1losof/flashbang)"
-
 --- Third-Party Data Sources ---
 
 Bang definitions are sourced from:
