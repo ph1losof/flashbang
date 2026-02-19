@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "codegen": "bun scripts/codegen.ts",
     "build": "bun scripts/build.ts",
     "build:sw": "bun build src/sw/sw.ts --outdir dist --entry-naming sw.js --minify --target browser",
     "build:ui": "bun build src/ui/app.ts --outdir dist --entry-naming app.js --minify --target browser",

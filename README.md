@@ -1,23 +1,24 @@
 # flashbang
 
+[![CI](https://github.com/ph1losof/flashbang/actions/workflows/update-bangs.yml/badge.svg)](https://github.com/ph1losof/flashbang/actions/workflows/update-bangs.yml)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+
 Blazingly fast, local-first bang redirects.
 
-Flashbang turns your browser's address bar into a bang-powered launcher. Type `!g kittens` to search Google, `!w dogs` for Wikipedia, `!gh react` for GitHub - across 14,303 bangs from DuckDuckGo, Kagi, and custom sources. Everything runs locally in a Service Worker: zero network latency, no server, no tracking.
+![Flashbang](docs/landing.png)
+
+Flashbang turns your browser's address bar into a bang-powered launcher. Type `!g kittens` to search Google, `!w dogs` for Wikipedia, `!gh react` for GitHub — across over 14,000 bangs from DuckDuckGo, Kagi, and custom sources. Bangs are shortcuts prefixed with `!` that redirect your search to a specific site. DuckDuckGo popularized the concept, but their bangs require a round-trip to DDG's servers. Flashbang runs everything locally in a Service Worker: zero network latency, no server, no tracking.
 
 **Try it now:** add **`https://flashbang-dyr.pages.dev?q=%s`** as a custom search engine in your browser. That's it.
 
-## What are bangs?
-
-Bangs are shortcuts prefixed with `!` that redirect your search to a specific site. Instead of going to Google, typing your query, then navigating to the result - you type `!g query` and go straight there. DuckDuckGo popularized the concept, but their bangs require a round-trip to DDG's servers. Flashbang does it locally, instantly.
-
 ## Features
 
-- **Local-first** - A Service Worker intercepts requests in your browser before they hit the network. Redirects happen instantly, with no round-trip to a server
-- **Private** - No analytics, no tracking, no server. All data stays on your device
-- **14,303 bangs** - Merged from DuckDuckGo, Kagi, and custom sources. Updated daily via CI
-- **Custom bangs** - Add your own bangs through the settings UI. They take priority over built-ins
-- **Search suggestions** - Bang autocomplete and search suggestions directly in your address bar. Type `!y` and see `!yt` (YouTube), `!ya` (Yandex), `!yf` (Yahoo Finance) — ranked by popularity so the most-used bangs surface first. Regular queries proxy to Google, DuckDuckGo, Bing, Brave, or a custom provider. Requires a server endpoint (included as a Cloudflare Pages Function) since browsers don't route suggestion requests through Service Workers
-- **OpenSearch** - Browsers auto-discover Flashbang as a search engine via `/opensearch.xml`, including the suggestions endpoint
+- **Local-first** — A Service Worker intercepts requests in your browser before they hit the network. Redirects happen instantly, with no round-trip to a server
+- **Private** — No analytics, no tracking, no server. All data stays on your device
+- **14,000+ bangs** — Merged from DuckDuckGo, Kagi, and custom sources. Updated daily via CI
+- **Custom bangs** — Add your own bangs through the settings UI. They take priority over built-ins
+- **Search suggestions** — Bang autocomplete and search suggestions directly in your address bar. Type `!y` and see `!yt` (YouTube), `!ya` (Yandex), `!yf` (Yahoo Finance) — ranked by popularity so the most-used bangs surface first. Regular queries proxy to Google, DuckDuckGo, Bing, Brave, or a custom provider
+- **OpenSearch** — Browsers auto-discover Flashbang as a search engine via `/opensearch.xml`, including the suggestions endpoint
 
 ## Bang syntax
 
@@ -34,6 +35,8 @@ If the query is just a bang with no search term (e.g. `!g`), Flashbang redirects
 
 ## Setup as search engine
 
+> **Note:** Search suggestions require a server endpoint since browsers don't route suggestion requests through Service Workers. Redirects always work offline once installed.
+
 ### Use the hosted version
 
 A public instance is available at **[flashbang-dyr.pages.dev](https://flashbang-dyr.pages.dev)**. Just visit it, then add it as a custom search engine in your browser:
@@ -48,25 +51,23 @@ Nothing to build or deploy.
 Service Workers need an HTTP origin (not `file://`), but a local server works fine:
 
 ```sh
-bun run build && bun run dev
+bun run codegen && bun run dev
 ```
 
-The dev server handles both static files and the `/suggest` endpoint. Visit the local URL once — the Service Worker installs and redirects work offline after that. Set it as your browser's custom search engine:
+`bun run codegen` fetches the latest bang definitions from DuckDuckGo and Kagi and generates the JavaScript bang maps via Rust. `bun run dev` bundles everything and starts the dev server. Visit the local URL once — the Service Worker installs and redirects work offline after that. Set it as your browser's custom search engine:
 
 - **Search URL:** `http://localhost:3000?q=%s`
 - **Suggestion URL:** `http://localhost:3000/suggest?q=%s`
 
-Note: search suggestions require the dev server to be running, since browsers don't route suggestion requests through Service Workers. Redirects work offline.
-
-To pick up new bangs, pull the latest changes and re-run `bun run build`. If you host it, the daily GitHub Actions CI does this automatically.
+To pick up new bangs, pull the latest changes and re-run `bun run codegen`. If you host it, the daily GitHub Actions CI does this automatically.
 
 ### Deploy your own
 
-Redirects work on any static host since they're handled by the Service Worker. However, search suggestions require a server endpoint — browsers don't route suggestion requests through Service Workers.
+Redirects work on any static host since they're handled by the Service Worker.
 
-**Cloudflare Pages** (recommended) — supports both out of the box:
+**Cloudflare Pages** (recommended) — supports both redirects and suggestions out of the box:
 
-1. Deploy the repo to Cloudflare Pages with build command `SKIP_CODEGEN=1 bun run build` and output directory `dist`
+1. Deploy the repo to Cloudflare Pages with build command `bun run build` and output directory `dist`
 2. The `functions/suggest.ts` Pages Function automatically handles the `/suggest` endpoint on the edge
 3. Visit the site — your browser will auto-discover it via OpenSearch
 4. Or manually add a custom search engine:
@@ -84,94 +85,16 @@ Open the settings modal from the gear icon on the home page.
 - **Default bang** — The bang used when no `!` is in the query. Defaults to `g` (Google). Change it to `ddg`, `b`, or any valid bang trigger
 - **Search suggestions** — Choose the source for address bar autocomplete: Default (matches your default bang), Google, DuckDuckGo, Bing, Brave, Custom (provide your own URL template with `{}` as query placeholder), or None
 - **Custom bangs** — Add bangs with a trigger, name, and URL template (use `{}` as the query placeholder). Custom bangs override built-in ones
-- **Search bangs** — Real-time search across all 14,303 bangs by trigger, name, or domain
+- **Search bangs** — Real-time search across all 14,000+ bangs by trigger, name, or domain
 - **Import/Export** — Export your settings and custom bangs as JSON. Import to restore or sync across devices
 
 All settings are stored in IndexedDB locally on your device.
 
-## Development
-
-### Prerequisites
-
-- [Bun](https://bun.sh) (runtime and bundler)
-- [Rust](https://rustup.rs) (for the bang codegen tool)
-
-### Commands
-
-```sh
-bun install        # install dependencies
-bun run build      # full production build
-bun run dev        # dev server on port 3000
-bun run clean      # remove dist/
-```
-
-### Project structure
-
-```
-flashbang/
-├── functions/
-│   └── suggest.ts          # Cloudflare Pages Function for /suggest
-├── build/                  # Rust CLI tool for bang processing
-│   └── src/
-│       ├── main.rs         # CLI entry point
-│       ├── merge.rs        # Bang source merging & dedup
-│       ├── codegen.rs      # JavaScript code generation
-│       ├── validate.rs     # Bang validation
-│       └── sources/        # Parsers for DDG, Kagi, custom TOML
-├── config/
-│   └── custom.toml         # Custom bang definitions
-├── scripts/
-│   ├── build.ts            # Full build pipeline
-│   └── dev.ts              # Dev server
-├── src/
-│   ├── generated/          # Output of Rust codegen (gitignored)
-│   │   ├── bangs-min.js    # trigger→URL map for Service Worker
-│   │   ├── bangs-full.js   # trigger→{name, domain, url, relevance} for UI & suggestions
-│   │   └── bangs-meta.json # bang count & timestamp
-│   ├── sw/
-│   │   ├── sw.ts           # Service Worker lifecycle & fetch handler
-│   │   ├── redirect.ts     # Bang parsing & redirect logic
-│   │   ├── suggest.ts      # Bang autocomplete & search suggestions
-│   │   └── idb.ts          # IndexedDB access & settings cache
-│   └── ui/
-│       ├── index.html       # HTML template
-│       ├── app.ts           # Settings UI & initialization
-│       ├── db.ts            # IndexedDB wrapper
-│       ├── liquid-metal.ts  # WebGL2 shader effect
-│       ├── manifest.json    # PWA manifest
-│       └── opensearch.xml   # OpenSearch descriptor
-├── package.json
-├── uno.config.ts           # UnoCSS theme
-└── LICENSE
-```
-
-## Build pipeline
-
-`bun run build` runs these phases:
-
-1. **Fetch sources** — Downloads bang definitions from DuckDuckGo (`bang.js`) and Kagi (`bangs.json`)
-2. **Rust codegen** — Parses DDG, Kagi, and custom TOML sources. Merges by trigger (deduplicates), validates URLs, and generates two JavaScript bang maps plus a metadata JSON file
-3. **Bundle Service Worker** — Bun bundles `src/sw/sw.ts` with `bangs-min.js` (trigger→URL only, ~847 KB) into `dist/sw.js`. Code splitting lazy-loads `suggest.ts` on first suggestion request
-4. **Bundle UI** — Bun bundles `src/ui/app.ts` with `bangs-full.js` (full metadata for search) into `dist/app.js`
-5. **Generate CSS** — UnoCSS scans source files and emits atomic utility classes
-6. **Inline & minify HTML** — CSS is inlined into `<style>`, HTML is minified with `@minify-html/node`
-
-The bang data is split into two bundles so the Service Worker loads only what it needs for fast redirects, while the UI gets the full metadata for searching.
-
 ## How it works
 
-1. You set Flashbang as your browser's default search engine
-2. When you type `!gh react` in the address bar, your browser navigates to `https://flashbang.example.com?q=!gh react`
-3. The Service Worker intercepts this request before it reaches the network
-4. `redirect.ts` parses the query, extracts the bang trigger (`gh`) and search term (`react`)
-5. It looks up `gh` in the bang map — first checking custom bangs (from IndexedDB), then the built-in 14,303 bangs
-6. It finds the URL template `https://github.com/search?q={}`, replaces `{}` with the encoded search term
-7. The Service Worker responds with a 301 redirect to `https://github.com/search?q=react`
-8. If no bang is found, the default bang is used (Google by default)
+When you type `!gh react` in the address bar, the Service Worker intercepts the request before it reaches the network. It parses the bang trigger, looks it up in the bang map (checking custom bangs first, then built-ins), and responds with a 301 redirect — no HTML, no CSS, no JS execution. If no bang is found, your default search engine is used.
 
-The entire flow happens locally - no request ever leaves your browser until the final redirect.
-
-**Suggestions** work differently from redirects. Browsers don't route their internal suggestion requests through Service Workers, so the `/suggest` endpoint requires a real server. On Cloudflare Pages this is handled by a Pages Function. For bang queries (containing `!`), the function uses binary search to find prefix matches and ranks them by DuckDuckGo's relevance score — so `!y` returns YouTube first, not obscure y-prefixed bangs. For regular queries, it proxies to the configured suggestion provider (Google, DuckDuckGo, Bing, Brave, or custom).
+Search suggestions require a real server since they bypass the Service Worker (handled by a Cloudflare Pages Function). See [DEVELOPMENT.md](DEVELOPMENT.md) for build pipeline and project structure details.
 
 ## Comparison with other bang tools
 
@@ -194,11 +117,19 @@ Flashbang solves this by separating the two concerns entirely. A thin Service Wo
 
 Flashbang has zero tracking (even hosted version). Some of the other tools include third-party analytics (Plausible, Cloudflare Web Analytics) on each search - it's unclear whether these can be disabled without self-hosting.
 
-> **Note:** Analytics information is accurate as of February 2026. These projects may have since changed their tracking behavior.
+> **Note:** Analytics information is accurate at time of writing. These projects may have since changed their tracking behavior.
+
+## Acknowledgments
+
+Flashbang was inspired by [unduck](https://github.com/t3dotgg/unduck) by Theo Browne, which demonstrated the value of fast client-side bang redirects. Bang data is sourced from [DuckDuckGo](https://duckduckgo.com/bang) and [Kagi](https://kagi.com).
 
 ## Daily updates
 
 A GitHub Actions workflow runs daily at 00:00 UTC to fetch the latest bang definitions from DuckDuckGo and Kagi, rebuild the generated JavaScript, and commit any changes. This keeps the bang database current without manual intervention.
+
+## Contributing
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for prerequisites, build commands, and project structure.
 
 ## License
 
