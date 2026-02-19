@@ -17,6 +17,7 @@ if (!skipRust) {
 }
 
 // Clean old JS build outputs
+await $`mkdir -p dist`;
 for (const f of new Bun.Glob('*.js').scanSync('dist')) await $`rm dist/${f}`;
 
 console.log('=== Bundle service worker ===');
