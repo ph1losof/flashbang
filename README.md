@@ -12,11 +12,11 @@ Bangs are shortcuts prefixed with `!` that redirect your search to a specific si
 
 ## Features
 
-- **Local-first** - A Service Worker intercepts requests in your browser before they hit the network. Redirects happen in microseconds, not milliseconds
+- **Local-first** - A Service Worker intercepts requests in your browser before they hit the network. Redirects happen instantly, with no round-trip to a server
 - **Private** - No analytics, no tracking, no server. All data stays on your device
 - **14,303 bangs** - Merged from DuckDuckGo, Kagi, and custom sources. Updated daily via CI
 - **Custom bangs** - Add your own bangs through the settings UI. They take priority over built-ins
-- **Search suggestions** - Bang autocomplete and search suggestions directly in your address bar. Type `!g` and see `!gh`, `!ghr`, etc. Regular queries proxy suggestions from Google, DuckDuckGo, or a custom provider — all handled locally by the Service Worker
+- **Search suggestions** - Bang autocomplete and search suggestions directly in your address bar. Type `!g` and see `!gh`, `!ghr`, etc. Regular queries proxy suggestions from Google, DuckDuckGo, Bing, Brave, or a custom provider — all handled locally by the Service Worker
 - **OpenSearch** - Browsers auto-discover Flashbang as a search engine via `/opensearch.xml`, including the suggestions endpoint
 
 ## Bang syntax
@@ -75,7 +75,7 @@ The settings page has a copy button that gives you the exact search URL template
 Open the settings modal from the gear icon on the home page.
 
 - **Default bang** — The bang used when no `!` is in the query. Defaults to `g` (Google). Change it to `ddg`, `b`, or any valid bang trigger
-- **Search suggestions** — Choose the source for address bar autocomplete: Default (matches your default bang), Google, DuckDuckGo, Custom (provide your own URL template with `{}` as query placeholder), or None
+- **Search suggestions** — Choose the source for address bar autocomplete: Default (matches your default bang), Google, DuckDuckGo, Bing, Brave, Custom (provide your own URL template with `{}` as query placeholder), or None
 - **Custom bangs** — Add bangs with a trigger, name, and URL template (use `{}` as the query placeholder). Custom bangs override built-in ones
 - **Search bangs** — Real-time search across all 14,303 bangs by trigger, name, or domain
 - **Import/Export** — Export your settings and custom bangs as JSON. Import to restore or sync across devices
@@ -181,9 +181,9 @@ The entire flow happens locally - no request ever leaves your browser until the 
 
 Flashbang is the fastest of all these tools. Unlike every other implementation, Flashbang is split into two independent parts: a thin Service Worker that handles redirects, and a separate settings UI for managing bangs and configuration. The other tools ship a single monolithic bundle — HTML, CSS, JavaScript, UI framework — that loads in full on every query, even though the only thing needed is a redirect. Flashbang's Service Worker intercepts the navigation request before the browser even begins rendering. No HTML, no CSS, no JS execution. Just a direct redirect from the worker thread. The settings UI only loads when you actually visit the page.
 
-Flashbang is also the only one with zero tracking. The others inject third-party analytics scripts (Plausible, Cloudflare Web Analytics) that run on every page load — including during redirects. For a tool whose entire purpose is to be fast and private, adding analytics undermines that promise: it adds latency to every request and sends your search queries to third parties.
+Flashbang has zero tracking. Some of the other tools include third-party analytics (Plausible, Cloudflare Web Analytics) — it's unclear whether these can be disabled by self-hosting.
 
-> **Note:** Analytics information is accurate as of February 2026. These projects may have since changed their tracking behavior, please feel free to check by yourself. What we know if flashbang is going to stay the way it is right now.
+> **Note:** Analytics information is accurate as of February 2026. These projects may have since changed their tracking behavior.
 
 ## Daily updates
 

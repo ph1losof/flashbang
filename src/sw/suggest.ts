@@ -6,10 +6,12 @@ export interface SuggestSettings {
   customUrl: string | null;
 }
 
-const SUGGEST_URLS = {
+const SUGGEST_URLS: Record<string, string> = {
   google:
     "https://suggestqueries.google.com/complete/search?client=firefox&q={}",
   ddg: "https://duckduckgo.com/ac/?q={}&type=list",
+  bing: "https://www.bing.com/osjson.aspx?query={}",
+  brave: "https://search.brave.com/api/suggest?q={}&rich=false",
 };
 
 // Pre-computed sorted keys + hostname cache for fast bang suggestions
@@ -64,12 +66,13 @@ function bangSuggestions(query: string, prefix: string, partial: string): Respon
 }
 
 function resolveEndpoint(provider: string, trigger: string): string | null {
-  if (provider === "google") return SUGGEST_URLS.google;
-  if (provider === "ddg") return SUGGEST_URLS.ddg;
+  if (provider in SUGGEST_URLS) return SUGGEST_URLS[provider];
   if (provider === "none") return null;
   // "default" — infer from the default bang trigger
   if (trigger === "g" || trigger === "google") return SUGGEST_URLS.google;
   if (trigger === "ddg" || trigger === "duckduckgo") return SUGGEST_URLS.ddg;
+  if (trigger === "b" || trigger === "bing") return SUGGEST_URLS.bing;
+  if (trigger === "brave") return SUGGEST_URLS.brave;
   return null;
 }
 
