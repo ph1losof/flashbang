@@ -24,11 +24,7 @@ console.log('=== Bundle service worker ===');
 await Bun.build({
   entrypoints: ['src/sw/sw.ts'],
   outdir: 'dist',
-  splitting: true,
-  naming: {
-    entry: 'sw.js',
-    chunk: '[name]-[hash].js',
-  },
+  naming: 'sw.js',
   minify: true,
   target: 'browser',
   format: 'esm',

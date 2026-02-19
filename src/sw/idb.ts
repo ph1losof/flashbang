@@ -1,6 +1,5 @@
 import { BANGS } from "../generated/bangs-min.js";
 import type { RedirectSettings } from "./redirect";
-import type { SuggestSettings } from "./suggest";
 
 const DEFAULT_URL = "https://www.google.com/search?q={}";
 
@@ -43,7 +42,6 @@ function idbGetAll(store: IDBObjectStore): Promise<any[]> {
 // --- Cached settings ---
 
 let cachedRedirect: RedirectSettings | null = null;
-let cachedSuggest: SuggestSettings | null = null;
 
 export async function readRedirectSettings(): Promise<RedirectSettings> {
   if (cachedRedirect) return cachedRedirect;
@@ -65,30 +63,7 @@ export async function readRedirectSettings(): Promise<RedirectSettings> {
   return cachedRedirect!;
 }
 
-export async function readSuggestSettings(): Promise<SuggestSettings> {
-  if (cachedSuggest) return cachedSuggest;
-  try {
-    const db = await getDB();
-    const tx = db.transaction("settings", "readonly");
-    const s = tx.objectStore("settings");
-    const [p, b, u] = await Promise.all([
-      idbGet(s, "suggest-provider"),
-      idbGet(s, "default-bang"),
-      idbGet(s, "suggest-url"),
-    ]);
-    cachedSuggest = {
-      provider: p?.value || "default",
-      trigger: b?.value || "g",
-      customUrl: u?.value || null,
-    };
-  } catch {
-    cachedSuggest = { provider: "default", trigger: "g", customUrl: null };
-  }
-  return cachedSuggest!;
-}
-
 export function invalidateCache() {
   cachedRedirect = null;
-  cachedSuggest = null;
   dbPromise = null;
 }

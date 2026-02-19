@@ -75,7 +75,7 @@
         <div>
           <a href="https://github.com/ph1losof/flashbang">source code</a>
           <span class="mx-1 opacity-50">&middot;</span>
-          all data never leaves your device
+          all data never leaves your device (except for suggestions)
           <span class="mx-1 opacity-50">&middot;</span>
           no monitoring, analytics or tracking
         </div>
@@ -212,7 +212,7 @@
     <script type="module" src="/app.js"></script>
     <script>
       if ("serviceWorker" in navigator)
-        navigator.serviceWorker.register("/sw.js", { type: "module" });
+        navigator.serviceWorker.register("/sw.js");
     </script>
   </body>
 </html>

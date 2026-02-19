@@ -1,7 +1,7 @@
 declare const self: ServiceWorkerGlobalScope;
 
 import { redirect } from "./redirect";
-import { readRedirectSettings, readSuggestSettings, invalidateCache } from "./idb";
+import { readRedirectSettings, invalidateCache } from "./idb";
 
 const CACHE_NAME = "flashbang-v1";
 const ASSETS = ["/", "/index.html", "/app.js", "/icon.svg", "/manifest.json"];
@@ -35,16 +35,6 @@ self.addEventListener("message", (e: ExtendableMessageEvent) => {
 self.addEventListener("fetch", (e: FetchEvent) => {
   const url = new URL(e.request.url);
   const q = url.searchParams.get("q");
-
-  if (url.pathname === "/suggest" && q) {
-    const query = q;
-    e.respondWith(
-      Promise.all([import("./suggest"), readSuggestSettings()]).then(
-        ([m, s]) => m.suggest(query, s),
-      ),
-    );
-    return;
-  }
 
   if (q && (url.pathname === "/" || url.pathname === "/search")) {
     e.respondWith(
