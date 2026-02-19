@@ -55,7 +55,7 @@ export default defineConfig({
       ],
     },
   },
-  safelist: ["opacity-100", "visible", "translate-y-0", "rotate-180"],
+  safelist: ["opacity-100", "visible", "translate-y-0", "rotate-180", "sm:p-8", "sm:grid-cols-2"],
   preflights: [
     // Design tokens & global resets
     {
@@ -150,7 +150,7 @@ export default defineConfig({
           inset: 0;
         }
         .wordmark-text {
-          font-size: 8rem;
+          font-size: clamp(4rem, 15vw, 8rem);
           font-weight: 800;
           letter-spacing: -0.02em;
           line-height: 0.75;

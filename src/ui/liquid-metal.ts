@@ -206,10 +206,18 @@ function createProgram(gl: WebGL2RenderingContext, vert: string, frag: string): 
   return p;
 }
 
+function getWordmarkFont(canvas: HTMLCanvasElement): string {
+  const wordmarkText = canvas.parentElement?.querySelector('.wordmark-text') as HTMLElement | null;
+  if (wordmarkText) {
+    const style = getComputedStyle(wordmarkText);
+    return `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  }
+  return '800 128px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+}
+
 export function initLiquidMetal(
   canvas: HTMLCanvasElement,
   text: string,
-  font: string,
 ): LiquidMetalControls {
   const maybeGl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: false });
   if (!maybeGl) return fallback(canvas);
@@ -246,7 +254,7 @@ export function initLiquidMetal(
       canvas.style.height = rect.height + 'px';
       gl.viewport(0, 0, w, h);
 
-      const tex = createTextMaskTexture(gl, text, font, w, h);
+      const tex = createTextMaskTexture(gl, text, getWordmarkFont(canvas), w, h);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, tex);
       gl.uniform1i(uMask, 0);

@@ -287,7 +287,6 @@ function init() {
   const metal = initLiquidMetal(
     $<HTMLCanvasElement>("#metal-canvas"),
     "flashbang",
-    '800 128px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
   );
   $(".wordmark").classList.add("has-shader");
 
