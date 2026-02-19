@@ -16,7 +16,8 @@ Bangs are shortcuts prefixed with `!` that redirect your search to a specific si
 - **Private** - No analytics, no tracking, no server. All data stays on your device
 - **14,303 bangs** - Merged from DuckDuckGo, Kagi, and custom sources. Updated daily via CI
 - **Custom bangs** - Add your own bangs through the settings UI. They take priority over built-ins
-- **OpenSearch** - Browsers auto-discover Flashbang as a search engine via `/opensearch.xml`
+- **Search suggestions** - Bang autocomplete and search suggestions directly in your address bar. Type `!g` and see `!gh`, `!ghr`, etc. Regular queries proxy suggestions from Google, DuckDuckGo, or a custom provider — all handled locally by the Service Worker
+- **OpenSearch** - Browsers auto-discover Flashbang as a search engine via `/opensearch.xml`, including the suggestions endpoint
 
 ## Bang syntax
 
@@ -35,7 +36,12 @@ If the query is just a bang with no search term (e.g. `!g`), Flashbang redirects
 
 ### Use the hosted version
 
-A public instance is available at **[flashbang-dyr.pages.dev](https://flashbang-dyr.pages.dev)**. Just visit it, then add `https://flashbang-dyr.pages.dev?q=%s` as a custom search engine in your browser. Nothing to build or deploy.
+A public instance is available at **[flashbang-dyr.pages.dev](https://flashbang-dyr.pages.dev)**. Just visit it, then add it as a custom search engine in your browser:
+
+- **Search URL:** `https://flashbang-dyr.pages.dev?q=%s`
+- **Suggestion URL:** `https://flashbang-dyr.pages.dev/suggest?q=%s`
+
+Nothing to build or deploy.
 
 ### Self-host locally
 
@@ -45,7 +51,10 @@ No remote hosting required. Service Workers need an HTTP origin (not `file://`),
 bun run build && bunx serve dist
 ```
 
-Visit the local URL once — the Service Worker installs in your browser. You can then stop the server. After that first visit, redirects work offline with no server needed. Set the local URL with `?q=%s` as your browser's custom search engine and you're done.
+Visit the local URL once — the Service Worker installs in your browser. You can then stop the server. After that first visit, redirects work offline with no server needed. Set it as your browser's custom search engine:
+
+- **Search URL:** `http://localhost:3000?q=%s`
+- **Suggestion URL:** `http://localhost:3000/suggest?q=%s`
 
 To pick up new bangs, pull the latest changes and re-run `bun run build`. If you host it, the daily GitHub Actions CI does this automatically.
 
@@ -53,17 +62,20 @@ To pick up new bangs, pull the latest changes and re-run `bun run build`. If you
 
 Deploy the `dist/` folder to any static host (Cloudflare Pages, Netlify, Vercel, etc.):
 
-1. Visit the site — your browser will auto-discover it via OpenSearch
+1. Visit the site — your browser will auto-discover it via OpenSearch (including suggestions)
 2. In your browser's search engine settings, set Flashbang as the default
-3. Or manually add a custom search engine with the URL template: `https://your-domain?q=%s`
+3. Or manually add a custom search engine:
+   - **Search URL:** `https://your-domain?q=%s`
+   - **Suggestion URL:** `https://your-domain/suggest?q=%s`
 
-The settings page has a copy button that gives you the exact URL template.
+The settings page has a copy button that gives you the exact search URL template.
 
 ## Settings
 
 Open the settings modal from the gear icon on the home page.
 
 - **Default bang** — The bang used when no `!` is in the query. Defaults to `g` (Google). Change it to `ddg`, `b`, or any valid bang trigger
+- **Search suggestions** — Choose the source for address bar autocomplete: Default (matches your default bang), Google, DuckDuckGo, Custom (provide your own URL template with `{}` as query placeholder), or None
 - **Custom bangs** — Add bangs with a trigger, name, and URL template (use `{}` as the query placeholder). Custom bangs override built-in ones
 - **Search bangs** — Real-time search across all 14,303 bangs by trigger, name, or domain
 - **Import/Export** — Export your settings and custom bangs as JSON. Import to restore or sync across devices
@@ -109,7 +121,9 @@ flashbang/
 │   │   └── bangs-meta.json # bang count & timestamp
 │   ├── sw/
 │   │   ├── sw.ts           # Service Worker lifecycle & fetch handler
-│   │   └── redirect.ts     # Bang parsing & redirect logic
+│   │   ├── redirect.ts     # Bang parsing & redirect logic
+│   │   ├── suggest.ts      # Bang autocomplete & search suggestions
+│   │   └── idb.ts          # IndexedDB access & settings cache
 │   └── ui/
 │       ├── index.html       # HTML template
 │       ├── app.ts           # Settings UI & initialization
@@ -128,7 +142,7 @@ flashbang/
 
 1. **Fetch sources** — Downloads bang definitions from DuckDuckGo (`bang.js`) and Kagi (`bangs.json`)
 2. **Rust codegen** — Parses DDG, Kagi, and custom TOML sources. Merges by trigger (deduplicates), validates URLs, and generates two JavaScript bang maps plus a metadata JSON file
-3. **Bundle Service Worker** — Bun bundles `src/sw/sw.ts` with `bangs-min.js` (trigger→URL only, ~847 KB) into `dist/sw.js`
+3. **Bundle Service Worker** — Bun bundles `src/sw/sw.ts` with `bangs-min.js` (trigger→URL only, ~847 KB) into `dist/sw.js`. Code splitting lazy-loads `suggest.ts` on first suggestion request
 4. **Bundle UI** — Bun bundles `src/ui/app.ts` with `bangs-full.js` (full metadata for search) into `dist/app.js`
 5. **Generate CSS** — UnoCSS scans source files and emits atomic utility classes
 6. **Inline & minify HTML** — CSS is inlined into `<style>`, HTML is minified with `@minify-html/node`
@@ -148,6 +162,8 @@ The bang data is split into two bundles so the Service Worker loads only what it
 
 The entire flow happens locally - no request ever leaves your browser until the final redirect.
 
+**Suggestions** work the same way: when you type in the address bar, the browser sends a suggestion request to `/suggest?q=...`. The Service Worker intercepts it and either searches bangs locally (if the query contains `!`) or proxies to your configured suggestion provider (Google, DuckDuckGo, or custom). Bang suggestions are instant — no network needed.
+
 ## Comparison with other bang tools
 
 |                           | **flashbang**                             | **unduck**                            | **unduckified**                       | **rebang**                                            |
@@ -157,6 +173,7 @@ The entire flow happens locally - no request ever leaves your browser until the 
 | **Sources**               | DDG + Kagi + custom                       | DDG                                   | Kagi                                  | DDG + Kagi                                            |
 | **Analytics**             | None                                      | Plausible                             | Cloudflare beacon.min.js              | Plausible                                             |
 | **Server required**       | No                                        | No                                    | No                                    | Yes (Cloudflare Worker)                               |
+| **Search suggestions**    | Yes (bang autocomplete + configurable)    | No                                    | No                                    | No                                                    |
 | **Custom bangs**          | Yes (IndexedDB faster)                    | No                                    | Yes (localStorage)                    | Yes (localStorage)                                    |
 | **Build tool**            | Rust codegen + Bun                        | Vite                                  | Vite                                  | Vite                                                  |
 | **Bang data strategy**    | Two-tier (min for SW, full for UI)        | Single bundle                         | Single bundle                         | Top bangs in worker, full set client-side             |
