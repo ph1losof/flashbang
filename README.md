@@ -1,23 +1,22 @@
 # flashbang
 
-[![CI](https://github.com/ph1losof/flashbang/actions/workflows/update-bangs.yml/badge.svg)](https://github.com/ph1losof/flashbang/actions/workflows/update-bangs.yml)
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
-
-Blazingly fast, local-first bang redirects.
-
 ![Flashbang](docs/landing.png)
 
-Flashbang turns your browser's address bar into a bang-powered launcher. Type `!g kittens` to search Google, `!w dogs` for Wikipedia, `!gh react` for GitHub — across over 14,000 bangs from DuckDuckGo, Kagi, and custom sources. Bangs are shortcuts prefixed with `!` that redirect your search to a specific site. DuckDuckGo popularized the concept, but their bangs require a round-trip to DDG's servers. Flashbang runs everything locally in a Service Worker: zero network latency, no server, no tracking.
+Turn your browser's address bar into a shortcut launcher. Type `!g kittens` to search Google, `!w dogs` for Wikipedia, `!gh react` for GitHub — over 14,000 shortcuts (called "bangs") that take you straight to the right site, instantly. No extra tabs, no round-trips, no waiting for a page to load.
 
-**Try it now:** add **`https://flashbang-dyr.pages.dev?q=%s`** as a custom search engine in your browser. That's it.
+Every other bang tool loads a full page before redirecting. Flashbang is the only one that skips the page entirely — a [Service Worker](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API) handles the redirect before your browser even starts rendering. The fastest, most feature-rich, and the only one with zero tracking.
+
+> **Fully local where it matters.** Core redirects never leave your machine — the Service Worker handles them offline with no server involved. Search suggestions (bang autocomplete, web results in your address bar) are completely optional and do go through our server when enabled and used through our hosted version. That's fine by us — Cloudflare Workers make it practically free — but you should know that "fully local" applies to redirects only. There is no tracking or analytics on our end — we don't know what you search and what bangs you use. Cloudflare collects basic request counts on all hosted sites by default (this can't be turned off), but no query content or personally identifiable information is exposed to us through it.
+
+**Try it now:** add **`https://flashbang-dyr.pages.dev?q=%s`** as a custom search engine in your browser. Optionally, set **`https://flashbang-dyr.pages.dev/suggest?q=%s`** as the suggestion URL for address bar autocomplete. That's it.
 
 ## Features
 
-- **Local-first** — A Service Worker intercepts requests in your browser before they hit the network. Redirects happen instantly, with no round-trip to a server
-- **Private** — No analytics, no tracking, no server. All data stays on your device
+- **Built for speed** — Speed is the #1 focus of this project. A Service Worker intercepts requests before they hit the network — no page load, no framework, no unnecessary code execution. Local-only, direct redirect
+- **Private** — No analytics, no tracking. All data stays on your device for the core feature - redirects
 - **14,000+ bangs** — Merged from DuckDuckGo, Kagi, and custom sources. Updated daily via CI
 - **Custom bangs** — Add your own bangs through the settings UI. They take priority over built-ins
-- **Search suggestions** — Bang autocomplete and search suggestions directly in your address bar. Type `!y` and see `!yt` (YouTube), `!ya` (Yandex), `!yf` (Yahoo Finance) — ranked by popularity so the most-used bangs surface first. Regular queries proxy to Google, DuckDuckGo, Bing, Brave, or a custom provider
+- **Search suggestions** — The only bang tool with bang-aware autocomplete in your browser's native address bar. Type `!y` and the browser itself suggests `!yt` (YouTube), `!ya` (Yandex), `!yf` (Yahoo Finance) — ranked by popularity so the most-used bangs surface first. Regular queries return web search suggestions from Google, DuckDuckGo, Bing, Brave, or a custom provider. Both are unified through a single `/suggest` endpoint that plugs into your browser's built-in suggestion UI
 - **OpenSearch** — Browsers auto-discover Flashbang as a search engine via `/opensearch.xml`, including the suggestions endpoint
 
 ## Bang syntax
@@ -35,14 +34,14 @@ If the query is just a bang with no search term (e.g. `!g`), Flashbang redirects
 
 ## Setup as search engine
 
-> **Note:** Search suggestions require a server endpoint since browsers don't route suggestion requests through Service Workers. Redirects always work offline once installed.
+> **Note:** Search suggestions require a server endpoint since browsers don't route suggestion requests through Service Workers — they are completely optional. Redirects always work offline once installed with no server needed. If you use the hosted version with suggestions enabled, those requests go through our Cloudflare Pages Function. No queries are logged or stored — self-host if you'd rather keep suggestions local too.
 
 ### Use the hosted version
 
 A public instance is available at **[flashbang-dyr.pages.dev](https://flashbang-dyr.pages.dev)**. Just visit it, then add it as a custom search engine in your browser:
 
 - **Search URL:** `https://flashbang-dyr.pages.dev?q=%s`
-- **Suggestion URL:** `https://flashbang-dyr.pages.dev/suggest?q=%s`
+- **Suggestion URL:** `https://flashbang-dyr.pages.dev/suggest?q=%s` (Optional)
 
 Nothing to build or deploy.
 
@@ -57,7 +56,7 @@ bun run codegen && bun run dev
 `bun run codegen` fetches the latest bang definitions from DuckDuckGo and Kagi and generates the JavaScript bang maps via Rust. `bun run dev` bundles everything and starts the dev server. Visit the local URL once — the Service Worker installs and redirects work offline after that. Set it as your browser's custom search engine:
 
 - **Search URL:** `http://localhost:3000?q=%s`
-- **Suggestion URL:** `http://localhost:3000/suggest?q=%s`
+- **Suggestion URL:** `http://localhost:3000/suggest?q=%s` (Optional)
 
 To pick up new bangs, pull the latest changes and re-run `bun run codegen`. If you host it, the daily GitHub Actions CI does this automatically.
 
@@ -92,9 +91,9 @@ All settings are stored in IndexedDB locally on your device.
 
 ## How it works
 
-When you type `!gh react` in the address bar, the Service Worker intercepts the request before it reaches the network. It parses the bang trigger, looks it up in the bang map (checking custom bangs first, then built-ins), and responds with a 301 redirect — no HTML, no CSS, no JS execution. If no bang is found, your default search engine is used.
+When you type `!gh react` in the address bar, the Service Worker intercepts the request before it reaches the network. It parses the bang trigger, looks it up in the bang map (checking custom bangs first, then built-ins), and responds with a 301 redirect. If no bang is found, your default search engine is used.
 
-Search suggestions require a real server since they bypass the Service Worker (handled by a Cloudflare Pages Function). See [DEVELOPMENT.md](DEVELOPMENT.md) for build pipeline and project structure details.
+See [DEVELOPMENT.md](DEVELOPMENT.md) for build pipeline and project structure details.
 
 ## Comparison with other bang tools
 
@@ -113,7 +112,9 @@ Search suggestions require a real server since they bypass the Service Worker (h
 
 The other tools have a fundamental architectural problem: they treat bang redirects as a page. When you type `!g kittens`, unduck, unduckified, and rebang all load a full HTML page — CSS, JavaScript, UI framework, analytics — parse your query client-side, and then redirect. That's the wrong abstraction. A bang redirect is not a page, it's a routing decision. It should never touch the rendering pipeline.
 
-Flashbang solves this by separating the two concerns entirely. A thin Service Worker handles redirects — it intercepts the navigation request before the browser even begins rendering. No HTML, no CSS, no JS execution. Just a direct redirect from the worker thread. The settings UI is a completely separate bundle that only loads when you actually visit the page.
+Flashbang solves this by separating the two concerns entirely. A thin Service Worker handles redirects — it intercepts the navigation request before the browser even begins rendering. The settings UI is a completely separate bundle that only loads when you actually visit the page.
+
+Rebang deserves a special mention: it has a hybrid mode where a Cloudflare Worker handles the top 1,297 bangs at the edge, falling back to client-side for the rest. But if your bang isn't in that top set, you get worse performance than unduck or unduckified (full React page load + redirect). And even when it hits the edge, you're still limited by Cloudflare's network latency on every single search. For something you use dozens of times a day, having it run locally is incomparably better — you don't rely on a hosting provider, and routing every search through a third-party edge server is arguably not great for privacy either. It's worth noting that rebang's privacy page states "zero logging", "no analytics", "no backend server", and that "all redirects happen entirely in your browser". However, their own architecture shows that every request goes through a Cloudflare Worker for a lookup — it redirects the top 1,297 bangs at the edge and falls through to the client for the rest. Plausible analytics is also present on the page, and the client fallback loads a full React app with Tailwind and heavy logic just for redirects. These observations are based on their public source code and documentation.
 
 Flashbang has zero tracking (even hosted version). Some of the other tools include third-party analytics (Plausible, Cloudflare Web Analytics) on each search - it's unclear whether these can be disabled without self-hosting.
 
