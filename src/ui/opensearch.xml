@@ -4,4 +4,5 @@
   <Description>Blazingly fast, local-first bang redirects</Description>
   <InputEncoding>UTF-8</InputEncoding>
   <Url type="text/html" template="{searchTerms}"/>
+  <Url type="application/x-suggestions+json" template="/suggest?q={searchTerms}"/>
 </OpenSearchDescription>

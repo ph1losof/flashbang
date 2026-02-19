@@ -118,6 +118,27 @@
           </div>
         </section>
 
+        <!-- Suggestion Provider -->
+        <section class="card mb-5">
+          <h3 class="section-title">Search Suggestions</h3>
+          <p class="label-text mb-2">
+            Source for address bar autocomplete suggestions
+          </p>
+          <select id="suggest-provider" class="input-field text-sm">
+            <option value="default">Default (match bang)</option>
+            <option value="google">Google</option>
+            <option value="ddg">DuckDuckGo</option>
+            <option value="custom">Custom</option>
+            <option value="none">None</option>
+          </select>
+          <input
+            type="text"
+            id="suggest-url"
+            placeholder="URL with {} for query"
+            class="input-field font-mono text-sm mt-2 hidden"
+          />
+        </section>
+
         <!-- Bang Search -->
         <section class="card mb-5">
           <h3 class="section-title">Search Bangs</h3>
@@ -189,7 +210,7 @@
     <script type="module" src="/app.js"></script>
     <script>
       if ("serviceWorker" in navigator)
-        navigator.serviceWorker.register("/sw.js");
+        navigator.serviceWorker.register("/sw.js", { type: "module" });
     </script>
   </body>
 </html>

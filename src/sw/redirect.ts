@@ -45,8 +45,7 @@ async function getDefault(): Promise<string> {
     const db = await getDB();
     const tx = db.transaction("settings", "readonly");
     const result = await idbGet(tx.objectStore("settings"), "default-bang");
-    const trigger = result?.value || "g";
-    cachedDefault = BANGS[trigger] || DEFAULT_URL;
+    cachedDefault = BANGS[result?.value || "g"] || DEFAULT_URL;
   } catch {
     cachedDefault = DEFAULT_URL;
   }
