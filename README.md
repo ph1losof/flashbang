@@ -179,7 +179,9 @@ The entire flow happens locally - no request ever leaves your browser until the 
 | **Bang data strategy**    | Two-tier (min for SW, full for UI)        | Single bundle                         | Single bundle                         | Top bangs in worker, full set client-side             |
 | **License**               | AGPL-3.0                                  | MIT                                   | MIT                                   | MIT                                                   |
 
-Flashbang is the fastest of all these tools. Unlike every other implementation, Flashbang is split into two independent parts: a thin Service Worker that handles redirects, and a separate settings UI for managing bangs and configuration. The other tools ship a single monolithic bundle — HTML, CSS, JavaScript, UI framework — that loads in full on every query, even though the only thing needed is a redirect. Flashbang's Service Worker intercepts the navigation request before the browser even begins rendering. No HTML, no CSS, no JS execution. Just a direct redirect from the worker thread. The settings UI only loads when you actually visit the page.
+The other tools have a fundamental architectural problem: they treat bang redirects as a page. When you type `!g kittens`, unduck, unduckified, and rebang all load a full HTML page — CSS, JavaScript, UI framework, analytics — parse your query client-side, and then redirect. That's the wrong abstraction. A bang redirect is not a page, it's a routing decision. It should never touch the rendering pipeline.
+
+Flashbang solves this by separating the two concerns entirely. A thin Service Worker handles redirects — it intercepts the navigation request before the browser even begins rendering. No HTML, no CSS, no JS execution. Just a direct redirect from the worker thread. The settings UI is a completely separate bundle that only loads when you actually visit the page.
 
 Flashbang has zero tracking. Some of the other tools include third-party analytics (Plausible, Cloudflare Web Analytics) — it's unclear whether these can be disabled by self-hosting.
 

@@ -53,9 +53,12 @@ self.addEventListener("fetch", (e: FetchEvent) => {
     return;
   }
 
+  // /settings is the same SPA page as /
+  const req = url.pathname === "/settings" ? new Request("/") : e.request;
+
   e.respondWith(
-    caches.match(e.request).then((r) =>
-      r || fetch(e.request).catch(() => new Response("Offline", { status: 503 })),
+    caches.match(req).then((r) =>
+      r || fetch(req).catch(() => new Response("Offline", { status: 503 })),
     ),
   );
 });
