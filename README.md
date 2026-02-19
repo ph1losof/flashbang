@@ -16,7 +16,7 @@ Bangs are shortcuts prefixed with `!` that redirect your search to a specific si
 - **Private** - No analytics, no tracking, no server. All data stays on your device
 - **14,303 bangs** - Merged from DuckDuckGo, Kagi, and custom sources. Updated daily via CI
 - **Custom bangs** - Add your own bangs through the settings UI. They take priority over built-ins
-- **Search suggestions** - Bang autocomplete and search suggestions directly in your address bar. Type `!g` and see `!gh`, `!ghr`, etc. Regular queries proxy suggestions from Google, DuckDuckGo, Bing, Brave, or a custom provider — all handled locally by the Service Worker
+- **Search suggestions** - Bang autocomplete and search suggestions directly in your address bar. Type `!g` and see `!gh`, `!ghr`, etc. Regular queries proxy to Google, DuckDuckGo, Bing, Brave, or a custom provider. Requires a server endpoint (included as a Cloudflare Pages Function) since browsers don't route suggestion requests through Service Workers
 - **OpenSearch** - Browsers auto-discover Flashbang as a search engine via `/opensearch.xml`, including the suggestions endpoint
 
 ## Bang syntax
@@ -45,28 +45,35 @@ Nothing to build or deploy.
 
 ### Self-host locally
 
-No remote hosting required. Service Workers need an HTTP origin (not `file://`), but a local server works fine:
+Service Workers need an HTTP origin (not `file://`), but a local server works fine:
 
 ```sh
-bun run build && bunx serve dist
+bun run build && bun run dev
 ```
 
-Visit the local URL once — the Service Worker installs in your browser. You can then stop the server. After that first visit, redirects work offline with no server needed. Set it as your browser's custom search engine:
+The dev server handles both static files and the `/suggest` endpoint. Visit the local URL once — the Service Worker installs and redirects work offline after that. Set it as your browser's custom search engine:
 
 - **Search URL:** `http://localhost:3000?q=%s`
 - **Suggestion URL:** `http://localhost:3000/suggest?q=%s`
+
+Note: search suggestions require the dev server to be running, since browsers don't route suggestion requests through Service Workers. Redirects work offline.
 
 To pick up new bangs, pull the latest changes and re-run `bun run build`. If you host it, the daily GitHub Actions CI does this automatically.
 
 ### Deploy your own
 
-Deploy the `dist/` folder to any static host (Cloudflare Pages, Netlify, Vercel, etc.):
+Redirects work on any static host since they're handled by the Service Worker. However, search suggestions require a server endpoint — browsers don't route suggestion requests through Service Workers.
 
-1. Visit the site — your browser will auto-discover it via OpenSearch (including suggestions)
-2. In your browser's search engine settings, set Flashbang as the default
-3. Or manually add a custom search engine:
+**Cloudflare Pages** (recommended) — supports both out of the box:
+
+1. Deploy the repo to Cloudflare Pages with build command `SKIP_CODEGEN=1 bun run build` and output directory `dist`
+2. The `functions/suggest.ts` Pages Function automatically handles the `/suggest` endpoint on the edge
+3. Visit the site — your browser will auto-discover it via OpenSearch
+4. Or manually add a custom search engine:
    - **Search URL:** `https://your-domain?q=%s`
    - **Suggestion URL:** `https://your-domain/suggest?q=%s`
+
+**Other static hosts** (Netlify, Vercel, etc.) — redirects work, but suggestions require adding a serverless function for `/suggest`. See `functions/suggest.ts` for the implementation — it reuses `src/sw/suggest.ts` and can be adapted to any serverless platform.
 
 The settings page has a copy button that gives you the exact search URL template.
 
@@ -102,6 +109,8 @@ bun run clean      # remove dist/
 
 ```
 flashbang/
+├── functions/
+│   └── suggest.ts          # Cloudflare Pages Function for /suggest
 ├── build/                  # Rust CLI tool for bang processing
 │   └── src/
 │       ├── main.rs         # CLI entry point
@@ -162,7 +171,7 @@ The bang data is split into two bundles so the Service Worker loads only what it
 
 The entire flow happens locally - no request ever leaves your browser until the final redirect.
 
-**Suggestions** work the same way: when you type in the address bar, the browser sends a suggestion request to `/suggest?q=...`. The Service Worker intercepts it and either searches bangs locally (if the query contains `!`) or proxies to your configured suggestion provider (Google, DuckDuckGo, or custom). Bang suggestions are instant — no network needed.
+**Suggestions** work differently from redirects. Browsers don't route their internal suggestion requests through Service Workers, so the `/suggest` endpoint requires a real server. On Cloudflare Pages this is handled by a Pages Function. For bang queries (containing `!`), the function searches the bang database on the edge. For regular queries, it proxies to the configured suggestion provider (Google, DuckDuckGo, Bing, Brave, or custom).
 
 ## Comparison with other bang tools
 
@@ -172,7 +181,7 @@ The entire flow happens locally - no request ever leaves your browser until the 
 | **When redirect happens** | Service Worker only - nothing unnecessary | After full page loads (HTML, CSS, JS) | After full page loads (HTML, CSS, JS) | At the edge or after full page loads (React included) |
 | **Sources**               | DDG + Kagi + custom                       | DDG                                   | Kagi                                  | DDG + Kagi                                            |
 | **Analytics**             | None                                      | Plausible                             | Cloudflare beacon.min.js              | Plausible                                             |
-| **Server required**       | No                                        | No                                    | No                                    | Yes (Cloudflare Worker)                               |
+| **Server required**       | No (redirects), yes (suggestions)         | No                                    | No                                    | Yes (Cloudflare Worker)                               |
 | **Search suggestions**    | Yes (bang autocomplete + configurable)    | No                                    | No                                    | No                                                    |
 | **Custom bangs**          | Yes (IndexedDB faster)                    | No                                    | Yes (localStorage)                    | Yes (localStorage)                                    |
 | **Build tool**            | Rust codegen + Bun                        | Vite                                  | Vite                                  | Vite                                                  |
