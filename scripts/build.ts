@@ -16,9 +16,8 @@ if (!skipRust) {
   console.log('=== Skipping Rust codegen (using committed generated files) ===');
 }
 
-// Clean old SW chunks
-for (const f of new Bun.Glob('sw-*.js').scanSync('dist')) await $`rm dist/${f}`;
-for (const f of new Bun.Glob('suggest-*.js').scanSync('dist')) await $`rm dist/${f}`;
+// Clean old JS build outputs
+for (const f of new Bun.Glob('*.js').scanSync('dist')) await $`rm dist/${f}`;
 
 console.log('=== Bundle service worker ===');
 await Bun.build({

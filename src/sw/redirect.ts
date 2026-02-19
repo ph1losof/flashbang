@@ -1,69 +1,8 @@
 import { BANGS } from "../generated/bangs-min.js";
 
-const DEFAULT_URL = "https://www.google.com/search?q={}";
-let cachedDefault: string | null = null;
-let cachedCustom: Record<string, string> | null = null;
-let dbPromise: Promise<IDBDatabase> | null = null;
-
-function getDB(): Promise<IDBDatabase> {
-  if (!dbPromise) {
-    dbPromise = new Promise((ok, err) => {
-      const r = indexedDB.open("flashbang", 1);
-      r.onupgradeneeded = () => {
-        const db = r.result;
-        if (!db.objectStoreNames.contains("settings"))
-          db.createObjectStore("settings", { keyPath: "key" });
-        if (!db.objectStoreNames.contains("custom-bangs"))
-          db.createObjectStore("custom-bangs", { keyPath: "trigger" });
-      };
-      r.onsuccess = () => ok(r.result);
-      r.onerror = () => err(r.error);
-    });
-  }
-  return dbPromise;
-}
-
-function idbGet(store: IDBObjectStore, key: string): Promise<any> {
-  return new Promise((ok, err) => {
-    const r = store.get(key);
-    r.onsuccess = () => ok(r.result);
-    r.onerror = () => err(r.error);
-  });
-}
-
-function idbGetAll(store: IDBObjectStore): Promise<any[]> {
-  return new Promise((ok, err) => {
-    const r = store.getAll();
-    r.onsuccess = () => ok(r.result);
-    r.onerror = () => err(r.error);
-  });
-}
-
-async function getDefault(): Promise<string> {
-  if (cachedDefault) return cachedDefault;
-  try {
-    const db = await getDB();
-    const tx = db.transaction("settings", "readonly");
-    const result = await idbGet(tx.objectStore("settings"), "default-bang");
-    cachedDefault = BANGS[result?.value || "g"] || DEFAULT_URL;
-  } catch {
-    cachedDefault = DEFAULT_URL;
-  }
-  return cachedDefault!;
-}
-
-async function getCustom(): Promise<Record<string, string>> {
-  if (cachedCustom) return cachedCustom;
-  try {
-    const db = await getDB();
-    const tx = db.transaction("custom-bangs", "readonly");
-    const all = await idbGetAll(tx.objectStore("custom-bangs"));
-    cachedCustom = {};
-    for (const e of all) cachedCustom[e.trigger] = e.url;
-  } catch {
-    cachedCustom = {};
-  }
-  return cachedCustom;
+export interface RedirectSettings {
+  defaultUrl: string;
+  custom: Record<string, string>;
 }
 
 function encode(s: string): string {
@@ -118,7 +57,10 @@ function parse(q: string): { bang: string | null; term: string } {
   return { bang: null, term: s };
 }
 
-export async function redirect(query: string): Promise<Response> {
+export function redirect(
+  query: string,
+  { defaultUrl, custom }: RedirectSettings,
+): Response {
   if (query === "!") {
     return Response.redirect("/", 302);
   }
@@ -127,14 +69,13 @@ export async function redirect(query: string): Promise<Response> {
   let url: string | undefined;
 
   if (bang) {
-    const [custom, def] = await Promise.all([getCustom(), getDefault()]);
     url = custom[bang] || BANGS[bang];
 
     if (!url) {
-      return Response.redirect(def.replace("{}", encode(query)), 302);
+      return Response.redirect(defaultUrl.replace("{}", encode(query)), 302);
     }
   } else {
-    url = await getDefault();
+    url = defaultUrl;
   }
 
   if (!term) {
@@ -146,10 +87,4 @@ export async function redirect(query: string): Promise<Response> {
   }
 
   return Response.redirect(url!.replace("{}", encode(term)), 302);
-}
-
-export function invalidateCache() {
-  cachedDefault = null;
-  cachedCustom = null;
-  dbPromise = null;
 }

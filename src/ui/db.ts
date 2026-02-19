@@ -61,7 +61,11 @@ export class DB {
 
   async exportAll() {
     return {
-      settings: { defaultBang: await this.getSetting("default-bang") },
+      settings: {
+        defaultBang: await this.getSetting("default-bang"),
+        suggestProvider: await this.getSetting("suggest-provider"),
+        suggestUrl: await this.getSetting("suggest-url"),
+      },
       customBangs: await this.getAllCustomBangs(),
       exported: new Date().toISOString(),
     };
@@ -70,6 +74,10 @@ export class DB {
   async importAll(data: any) {
     if (data.settings?.defaultBang)
       await this.setSetting("default-bang", data.settings.defaultBang);
+    if (data.settings?.suggestProvider)
+      await this.setSetting("suggest-provider", data.settings.suggestProvider);
+    if (data.settings?.suggestUrl)
+      await this.setSetting("suggest-url", data.settings.suggestUrl);
     if (Array.isArray(data.customBangs))
       for (const b of data.customBangs) await this.addCustomBang(b);
   }

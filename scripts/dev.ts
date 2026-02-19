@@ -1,13 +1,5 @@
 import { $ } from 'bun';
 import { minify } from '@minify-html/node';
-import type { SuggestSettings } from '../src/sw/suggest';
-
-// In-memory settings (synced from browser via POST /api/settings)
-const settings: SuggestSettings = {
-  provider: 'default',
-  trigger: 'g',
-  customUrl: null,
-};
 
 await $`mkdir -p dist`;
 await $`bun run build:sw`;
@@ -32,15 +24,7 @@ Bun.serve({
 
     if (url.pathname === '/suggest' && q) {
       const { suggest } = await import('../src/sw/suggest');
-      return suggest(q, settings);
-    }
-
-    if (url.pathname === '/api/settings' && req.method === 'POST') {
-      const body = await req.json() as Record<string, string>;
-      if (body['suggest-provider']) settings.provider = body['suggest-provider'];
-      if (body['default-bang']) settings.trigger = body['default-bang'];
-      if ('suggest-url' in body) settings.customUrl = body['suggest-url'] || null;
-      return new Response('ok');
+      return suggest(q, { provider: 'default', trigger: 'g', customUrl: null });
     }
 
     let path = url.pathname === '/' ? '/index.html' : url.pathname;

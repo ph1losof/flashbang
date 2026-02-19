@@ -29,15 +29,31 @@ function empty(query: string): Response {
   return new Response(JSON.stringify([query, []]), { headers: JSON_HEADERS });
 }
 
-function bangSuggestions(query: string): Response {
-  const partial = query.replace(/^!/, "").toLowerCase();
+// Returns the prefix (text before the bang) and partial trigger, or null if not a partial bang.
+// "!gh"       → { prefix: "", partial: "gh" }
+// "cats !gh"  → { prefix: "cats ", partial: "gh" }
+// "!g cats"   → null (bang already has a query, user is done typing it)
+// "g!"        → null (suffix bang, already complete)
+function parsePartialBang(q: string): { prefix: string; partial: string } | null {
+  const s = q.trim();
+  const trailing = s.lastIndexOf(" !");
+  if (trailing !== -1) {
+    const rest = s.substring(trailing + 2);
+    if (!rest.includes(" ")) return { prefix: s.substring(0, trailing + 1), partial: rest.toLowerCase() };
+  } else if (s.charCodeAt(0) === 33 && !s.includes(" ")) {
+    return { prefix: "", partial: s.substring(1).toLowerCase() };
+  }
+  return null;
+}
+
+function bangSuggestions(query: string, prefix: string, partial: string): Response {
   const completions: string[] = [];
   const descriptions: string[] = [];
 
   for (let i = 0; i < BANG_KEYS.length && completions.length < 8; i++) {
     const k = BANG_KEYS[i];
     if (k.startsWith(partial)) {
-      completions.push(`!${k}`);
+      completions.push(`${prefix}!${k}`);
       descriptions.push(HOST_CACHE[k]);
     }
   }
@@ -51,6 +67,7 @@ function resolveEndpoint(provider: string, trigger: string): string | null {
   if (provider === "google") return SUGGEST_URLS.google;
   if (provider === "ddg") return SUGGEST_URLS.ddg;
   if (provider === "none") return null;
+  // "default" — infer from the default bang trigger
   if (trigger === "g" || trigger === "google") return SUGGEST_URLS.google;
   if (trigger === "ddg" || trigger === "duckduckgo") return SUGGEST_URLS.ddg;
   return null;
@@ -60,7 +77,8 @@ export async function suggest(
   query: string,
   settings: SuggestSettings,
 ): Promise<Response> {
-  if (query.includes("!")) return bangSuggestions(query);
+  const bang = parsePartialBang(query);
+  if (bang) return bangSuggestions(query, bang.prefix, bang.partial);
 
   const { provider, trigger, customUrl } = settings;
   const endpoint =

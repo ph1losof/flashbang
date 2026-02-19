@@ -1,10 +1,10 @@
 declare const self: ServiceWorkerGlobalScope;
 
-import { redirect, invalidateCache } from "./redirect";
-import type { SuggestSettings } from "./suggest";
+import { redirect } from "./redirect";
+import { readRedirectSettings, readSuggestSettings, invalidateCache } from "./idb";
 
 const CACHE_NAME = "flashbang-v1";
-const ASSETS = ["/", "/index.html", "/app.js"];
+const ASSETS = ["/", "/index.html", "/app.js", "/icon.svg", "/manifest.json"];
 
 self.addEventListener("install", (e: ExtendableEvent) => {
   e.waitUntil(
@@ -29,10 +29,7 @@ self.addEventListener("activate", (e: ExtendableEvent) => {
 });
 
 self.addEventListener("message", (e: ExtendableMessageEvent) => {
-  if (e.data?.type === "invalidate") {
-    invalidateCache();
-    cachedSuggestSettings = null;
-  }
+  if (e.data?.type === "invalidate") invalidateCache();
 });
 
 self.addEventListener("fetch", (e: FetchEvent) => {
@@ -40,52 +37,25 @@ self.addEventListener("fetch", (e: FetchEvent) => {
   const q = url.searchParams.get("q");
 
   if (url.pathname === "/suggest" && q) {
+    const query = q;
     e.respondWith(
       Promise.all([import("./suggest"), readSuggestSettings()]).then(
-        ([m, s]) => m.suggest(q!, s),
+        ([m, s]) => m.suggest(query, s),
       ),
     );
     return;
   }
 
   if (q && (url.pathname === "/" || url.pathname === "/search")) {
-    e.respondWith(redirect(q));
+    e.respondWith(
+      readRedirectSettings().then((s) => redirect(q, s)),
+    );
     return;
   }
 
-  e.respondWith(caches.match(e.request).then((r) => r || fetch(e.request)));
+  e.respondWith(
+    caches.match(e.request).then((r) =>
+      r || fetch(e.request).catch(() => new Response("Offline", { status: 503 })),
+    ),
+  );
 });
-
-let cachedSuggestSettings: SuggestSettings | null = null;
-
-async function readSuggestSettings(): Promise<SuggestSettings> {
-  if (cachedSuggestSettings) return cachedSuggestSettings;
-  try {
-    const db = await new Promise<IDBDatabase>((ok, err) => {
-      const r = indexedDB.open("flashbang", 1);
-      r.onsuccess = () => ok(r.result);
-      r.onerror = () => err(r.error);
-    });
-    const tx = db.transaction("settings", "readonly");
-    const s = tx.objectStore("settings");
-    const get = (key: string) =>
-      new Promise<any>((ok, err) => {
-        const r = s.get(key);
-        r.onsuccess = () => ok(r.result);
-        r.onerror = () => err(r.error);
-      });
-    const [p, b, u] = await Promise.all([
-      get("suggest-provider"),
-      get("default-bang"),
-      get("suggest-url"),
-    ]);
-    cachedSuggestSettings = {
-      provider: p?.value || "default",
-      trigger: b?.value || "g",
-      customUrl: u?.value || null,
-    };
-  } catch {
-    cachedSuggestSettings = { provider: "default", trigger: "g", customUrl: null };
-  }
-  return cachedSuggestSettings!;
-}

@@ -21,14 +21,6 @@ function notifySW(type: string) {
   navigator.serviceWorker.controller?.postMessage({ type });
 }
 
-function syncSettings(s: Record<string, string>) {
-  fetch("/api/settings", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(s),
-  }).catch(() => {});
-}
-
 function flashAnim(el: HTMLElement) {
   el.classList.remove("flash-anim");
   void el.offsetWidth;
@@ -141,7 +133,6 @@ async function init() {
     if (f[val]) {
       await db.setSetting("default-bang", val);
       notifySW("invalidate");
-      syncSettings({ "default-bang": val });
       flashAnim(defaultInput);
       $("#bang-status").textContent = f[val].s;
       $("#bang-status").className = "text-sm text-success";
@@ -163,16 +154,9 @@ async function init() {
   const savedUrl = await db.getSetting("suggest-url");
   if (savedUrl) suggestUrlInput.value = savedUrl;
 
-  syncSettings({
-    "default-bang": defaultBang,
-    "suggest-provider": savedProvider,
-    ...(savedUrl ? { "suggest-url": savedUrl } : {}),
-  });
-
   suggestSelect.addEventListener("change", async () => {
     await db.setSetting("suggest-provider", suggestSelect.value);
     notifySW("invalidate");
-    syncSettings({ "suggest-provider": suggestSelect.value });
     if (suggestSelect.value === "custom") {
       suggestUrlInput.classList.remove("hidden");
     } else {
@@ -181,9 +165,9 @@ async function init() {
   });
 
   suggestUrlInput.addEventListener("change", async () => {
-    await db.setSetting("suggest-url", suggestUrlInput.value.trim());
+    const url = suggestUrlInput.value.trim();
+    await db.setSetting("suggest-url", url);
     notifySW("invalidate");
-    syncSettings({ "suggest-url": suggestUrlInput.value.trim() });
   });
 
   $("#bang-count").textContent =
