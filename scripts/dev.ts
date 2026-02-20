@@ -13,10 +13,19 @@ const inlineCSS = (src: string) =>
     `<style>${css}</style>`,
   );
 
-let html = await Bun.file("src/ui/index.html").text();
+let indexHtml = await Bun.file("src/ui/index.html").text();
 await Bun.write(
   "dist/index.html",
-  minify(Buffer.from(inlineCSS(html)), { minify_css: true, minify_js: true }),
+  minify(Buffer.from(indexHtml), { minify_css: true, minify_js: true }),
+);
+
+let homeHtml = await Bun.file("src/ui/home.html").text();
+await Bun.write(
+  "dist/home.html",
+  minify(Buffer.from(inlineCSS(homeHtml)), {
+    minify_css: true,
+    minify_js: true,
+  }),
 );
 
 let benchHtml = await Bun.file("src/ui/bench.html").text();
