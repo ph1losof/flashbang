@@ -18,7 +18,7 @@ Every other bang tool loads a full page before redirecting — adding hundreds o
 - **Custom bangs** — Add your own bangs through the settings UI. They take priority over built-ins
 - **Search suggestions** — The only bang tool with bang-aware autocomplete in your browser's native address bar. Type `!y` and the browser itself suggests `!yt` (YouTube), `!ya` (Yandex), `!yf` (Yahoo Finance) — ranked by popularity so the most-used bangs surface first. Regular queries return web search suggestions from Google, DuckDuckGo, Bing, Brave, or a custom provider. Both are unified through a single `/suggest` endpoint that plugs into your browser's built-in suggestion UI
 - **Feeling Lucky** — Prefix a query with `\`, or add a bare `!` before or after it, to skip the results page and jump straight to the first result. Works with Google's "I'm Feeling Lucky" when that's your default engine, falls back to DuckDuckGo's `\` redirect for others. Configurable per-engine or with a custom URL, or disable it entirely
-- **OpenSearch** — Browsers auto-discover Flashbang as a search engine via `/opensearch.xml`, including the suggestions endpoint
+- **OpenSearch** — Browsers auto-discover Flashbang as a search engine via `/opensearch.xml` (dynamically generated with the correct origin), including the suggestions endpoint
 
 ## Bang syntax
 
@@ -52,7 +52,7 @@ The redirect destination depends on your lucky provider (configurable in setting
 
 ## Setup as search engine
 
-> **Note:** Search suggestions require a server endpoint since browsers don't route suggestion requests through Service Workers — they are completely optional. Redirects always work offline once installed with no server needed. If you use the hosted version with suggestions enabled, those requests go through our Cloudflare Pages Function. No queries are logged or stored — self-host if you'd rather keep suggestions local too.
+> **Note:** Search suggestions and OpenSearch auto-discovery require a server endpoint since browsers don't route these requests through Service Workers — both are completely optional. Redirects always work offline once installed with no server needed. If you use the hosted version, these requests go through our Cloudflare Pages Functions. No queries are logged or stored — self-host if you'd rather keep them local too.
 
 ### Use the hosted version
 
@@ -85,13 +85,13 @@ Redirects work on any static host since they're handled by the Service Worker.
 **Cloudflare Pages** (recommended) — supports both redirects and suggestions out of the box:
 
 1. Deploy the repo to Cloudflare Pages with build command `bun run build` and output directory `dist`
-2. The `functions/suggest.ts` Pages Function automatically handles the `/suggest` endpoint on the edge
+2. The Pages Functions automatically handle `/suggest` (search suggestions) and `/opensearch.xml` (search engine discovery with correct origin) on the edge
 3. Visit the site — your browser will auto-discover it via OpenSearch
 4. Or manually add a custom search engine:
    - **Search URL:** `https://your-domain?q=%s`
    - **Suggestion URL:** `https://your-domain/suggest?q=%s`
 
-**Other static hosts** (Netlify, Vercel, etc.) — redirects work, but suggestions require adding a serverless function for `/suggest`. See `functions/suggest.ts` for the implementation — it reuses `src/sw/suggest.ts` and can be adapted to any serverless platform.
+**Other static hosts** (Netlify, Vercel, etc.) — redirects work, but suggestions and dynamic OpenSearch require adding serverless functions for `/suggest` and `/opensearch.xml`. See `functions/` for the implementations — they reuse shared modules from `src/` and can be adapted to any serverless platform.
 
 The settings page has a copy button that gives you the exact search URL template.
 
@@ -122,7 +122,7 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for build pipeline and project structure de
 | **When redirect happens** | Service Worker only - nothing unnecessary | After full page loads (HTML, CSS, JS) | After full page loads (HTML, CSS, JS) | At the edge or after full page loads (React included) |
 | **Sources**               | DDG + Kagi + custom                       | DDG                                   | Kagi                                  | DDG + Kagi                                            |
 | **Analytics**             | None                                      | Plausible                             | Cloudflare beacon.min.js              | Plausible                                             |
-| **Server required**       | No (redirects), yes (suggestions)         | No                                    | No                                    | Yes (Cloudflare Worker)                               |
+| **Server required**       | No (redirects), yes (suggestions, OpenSearch) | No                                    | No                                    | Yes (Cloudflare Worker)                               |
 | **Feeling Lucky**         | Yes (configurable per-engine)             | No                                    | No                                    | No                                                    |
 | **Search suggestions**    | Yes (bang autocomplete + configurable)    | No                                    | No                                    | No                                                    |
 | **Custom bangs**          | Yes (IndexedDB faster)                    | No                                    | Yes (localStorage)                    | Yes (localStorage)                                    |
