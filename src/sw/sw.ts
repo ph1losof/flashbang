@@ -7,13 +7,13 @@ import {
   invalidateCache,
 } from "./idb";
 
-const CACHE_NAME = "flashbang-v1";
+const CACHE_NAME = "flashbang";
 const ASSETS = [
-  "/home.html",
+  "/home",
   "/app.js",
   "/icon.svg",
   "/manifest.json",
-  "/bench.html",
+  "/bench",
   "/bench.js",
 ];
 
@@ -106,11 +106,11 @@ self.addEventListener("fetch", (e: FetchEvent) => {
   if (raw.endsWith("/bench")) {
     e.respondWith(
       caches
-        .match(new Request("/bench.html"))
+        .match(new Request("/bench"))
         .then(
           (r) =>
             r ||
-            fetch("/bench.html").catch(
+            fetch("/bench").catch(
               () => new Response("Offline", { status: 503 }),
             ),
         )
@@ -132,11 +132,11 @@ self.addEventListener("fetch", (e: FetchEvent) => {
   ) {
     e.respondWith(
       caches
-        .match(new Request("/home.html"))
+        .match(new Request("/home"))
         .then(
           (r) =>
             r ||
-            fetch("/home.html").catch(
+            fetch("/home").catch(
               () => new Response("Offline", { status: 503 }),
             ),
         ),
@@ -150,7 +150,9 @@ self.addEventListener("fetch", (e: FetchEvent) => {
       .then(
         (r) =>
           r ||
-          fetch(e.request).catch(() => new Response("Offline", { status: 503 })),
+          fetch(e.request).catch(
+            () => new Response("Offline", { status: 503 }),
+          ),
       ),
   );
 });
