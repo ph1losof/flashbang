@@ -1,4 +1,5 @@
 import { BANGS } from "./generated/bangs-full.js";
+import { BANG_KEYS } from "./generated/bangs-keys.js";
 
 export interface SuggestSettings {
   provider: string;
@@ -13,9 +14,6 @@ const SUGGEST_URLS: Record<string, string> = {
   bing: "https://www.bing.com/osjson.aspx?query={}",
   brave: "https://search.brave.com/api/suggest?q={}&rich=false",
 };
-
-// Alphabetically sorted keys for binary search
-const BANG_KEYS = Object.keys(BANGS).sort();
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
 const COOKIE_RE = /(?:^|;\s*)suggest=([^;]*)/;

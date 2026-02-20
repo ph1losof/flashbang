@@ -25,14 +25,13 @@ export async function readRedirectSettings(): Promise<RedirectSettings> {
   if (cachedRedirect) return cachedRedirect;
   try {
     const db = await getDB();
-    const stx = db.transaction("settings", "readonly");
-    const store = stx.objectStore("settings");
-    const ctx = db.transaction("custom-bangs", "readonly");
+    const tx = db.transaction(["settings", "custom-bangs"], "readonly");
+    const store = tx.objectStore("settings");
     const [result, luckyProviderResult, luckyUrlResult, all] = await Promise.all([
       idbWrap(store.get("default-bang")),
       idbWrap(store.get("lucky-provider")),
       idbWrap(store.get("lucky-url")),
-      idbWrap(ctx.objectStore("custom-bangs").getAll()),
+      idbWrap(tx.objectStore("custom-bangs").getAll()),
     ]);
     const defaultBang = result?.value || "g";
     const defaultUrl = BANGS[defaultBang] || DEFAULT_URL;

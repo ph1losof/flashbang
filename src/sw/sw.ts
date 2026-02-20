@@ -33,18 +33,27 @@ self.addEventListener("message", (e: ExtendableMessageEvent) => {
 });
 
 self.addEventListener("fetch", (e: FetchEvent) => {
-  const url = new URL(e.request.url);
-  const q = url.searchParams.get("q");
+  const raw = e.request.url;
 
-  if (q && (url.pathname === "/" || url.pathname === "/search")) {
-    e.respondWith(
-      readRedirectSettings().then((s) => redirect(q, s)),
+  // Fast path: extract ?q= without constructing a URL object
+  const qIdx = raw.indexOf("?q=");
+  if (qIdx !== -1) {
+    const vStart = qIdx + 3;
+    const vEnd = raw.indexOf("&", vStart);
+    const q = decodeURIComponent(
+      (vEnd === -1 ? raw.substring(vStart) : raw.substring(vStart, vEnd)).replace(
+        /\+/g,
+        " ",
+      ),
     );
-    return;
+    if (q) {
+      e.respondWith(readRedirectSettings().then((s) => redirect(q, s)));
+      return;
+    }
   }
 
   // /settings is the same SPA page as /
-  const req = url.pathname === "/settings" ? new Request("/") : e.request;
+  const req = raw.endsWith("/settings") ? new Request("/") : e.request;
 
   e.respondWith(
     caches.match(req).then((r) =>

@@ -63,6 +63,25 @@ fn generate_full(bangs: &[Bang], out_dir: &Path) {
     println!("  bangs-full.js: {} bytes", js.len());
 }
 
+fn generate_keys(bangs: &[Bang], out_dir: &Path) {
+    let mut js = String::from("export const BANG_KEYS=[");
+
+    for (i, bang) in bangs.iter().enumerate() {
+        if i > 0 {
+            js.push(',');
+        }
+        js.push('\'');
+        js.push_str(&js_escape(&bang.trigger));
+        js.push('\'');
+    }
+
+    js.push_str("];");
+
+    let path = out_dir.join("bangs-keys.js");
+    std::fs::write(&path, &js).expect("Failed to write bangs-keys.js");
+    println!("  bangs-keys.js: {} bytes", js.len());
+}
+
 fn generate_meta(bangs: &[Bang], out_dir: &Path) {
     let meta = format!(
         r#"{{"count":{},"generated":"{}"}}"#,
@@ -89,5 +108,6 @@ fn chrono_free_now() -> String {
 pub fn generate(bangs: &[Bang], out_dir: &Path) {
     generate_min(bangs, out_dir);
     generate_full(bangs, out_dir);
+    generate_keys(bangs, out_dir);
     generate_meta(bangs, out_dir);
 }
