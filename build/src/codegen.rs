@@ -16,7 +16,7 @@ fn js_escape(s: &str) -> String {
 }
 
 fn generate_min(bangs: &[Bang], out_dir: &Path) {
-    let mut js = String::from("export const BANGS={");
+    let mut js = String::from("export const BANGS={__proto__:null,");
 
     for (i, bang) in bangs.iter().enumerate() {
         if i > 0 {
@@ -37,7 +37,7 @@ fn generate_min(bangs: &[Bang], out_dir: &Path) {
 }
 
 fn generate_full(bangs: &[Bang], out_dir: &Path) {
-    let mut js = String::from("export const BANGS={");
+    let mut js = String::from("export const BANGS={__proto__:null,");
 
     for (i, bang) in bangs.iter().enumerate() {
         if i > 0 {
