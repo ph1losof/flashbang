@@ -11,35 +11,33 @@ const QUERY_TYPES = [
 async function ensureSW(): Promise<void> {
   if (navigator.serviceWorker.controller) return;
 
+  const reg = await navigator.serviceWorker.register("/sw.js");
+
+  if (reg.active) {
+    if (!navigator.serviceWorker.controller) {
+      await new Promise<void>((r) => {
+        navigator.serviceWorker.addEventListener("controllerchange", () => r(), { once: true });
+      });
+    }
+    return;
+  }
+
   const status = document.getElementById("sw-status")!;
   status.textContent = "Installing Service Worker…";
   status.classList.remove("hidden");
 
-  const reg = await navigator.serviceWorker.register("/sw.js");
-  const sw = reg.installing ?? reg.waiting ?? reg.active;
+  const sw = reg.installing ?? reg.waiting;
   if (!sw) throw new Error("SW registration failed");
 
-  if (sw.state === "activated") {
+  await new Promise<void>((resolve) => {
+    sw.addEventListener("statechange", () => {
+      if (sw.state === "activated") resolve();
+    });
+  });
+  if (!navigator.serviceWorker.controller) {
     await new Promise<void>((r) => {
-      navigator.serviceWorker.addEventListener("controllerchange", () => r(), {
-        once: true,
-      });
+      navigator.serviceWorker.addEventListener("controllerchange", () => r(), { once: true });
     });
-  } else {
-    await new Promise<void>((resolve) => {
-      sw.addEventListener("statechange", () => {
-        if (sw.state === "activated") resolve();
-      });
-    });
-    if (!navigator.serviceWorker.controller) {
-      await new Promise<void>((r) => {
-        navigator.serviceWorker.addEventListener(
-          "controllerchange",
-          () => r(),
-          { once: true },
-        );
-      });
-    }
   }
 
   status.textContent = "Service Worker installed.";
