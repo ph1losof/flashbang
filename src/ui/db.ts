@@ -1,62 +1,39 @@
-const DB_NAME = "flashbang";
-const DB_VERSION = 1;
+import { openDB, idbWrap } from "../shared/idb";
 
 export class DB {
-  private dbp: Promise<IDBDatabase>;
-
-  constructor() {
-    this.dbp = new Promise((ok, err) => {
-      const r = indexedDB.open(DB_NAME, DB_VERSION);
-      r.onupgradeneeded = () => {
-        const db = r.result;
-        if (!db.objectStoreNames.contains("settings"))
-          db.createObjectStore("settings", { keyPath: "key" });
-        if (!db.objectStoreNames.contains("custom-bangs"))
-          db.createObjectStore("custom-bangs", { keyPath: "trigger" });
-      };
-      r.onsuccess = () => ok(r.result);
-      r.onerror = () => err(r.error);
-    });
-  }
+  private dbp: Promise<IDBDatabase> = openDB();
 
   private async store(name: string, mode: IDBTransactionMode = "readonly") {
     const db = await this.dbp;
     return db.transaction(name, mode).objectStore(name);
   }
 
-  private wrap<T>(req: IDBRequest<T>): Promise<T> {
-    return new Promise((ok, err) => {
-      req.onsuccess = () => ok(req.result);
-      req.onerror = () => err(req.error);
-    });
-  }
-
   async getSetting(key: string): Promise<string | null> {
     const s = await this.store("settings");
-    const r = await this.wrap(s.get(key));
+    const r = await idbWrap(s.get(key));
     return (r as any)?.value ?? null;
   }
 
   async setSetting(key: string, value: string) {
     const s = await this.store("settings", "readwrite");
-    await this.wrap(s.put({ key, value }));
+    await idbWrap(s.put({ key, value }));
   }
 
   async getAllCustomBangs(): Promise<
     Array<{ trigger: string; name: string; url: string }>
   > {
     const s = await this.store("custom-bangs");
-    return this.wrap(s.getAll()) as any;
+    return idbWrap(s.getAll()) as any;
   }
 
   async addCustomBang(bang: { trigger: string; name: string; url: string }) {
     const s = await this.store("custom-bangs", "readwrite");
-    await this.wrap(s.put(bang));
+    await idbWrap(s.put(bang));
   }
 
   async removeCustomBang(trigger: string) {
     const s = await this.store("custom-bangs", "readwrite");
-    await this.wrap(s.delete(trigger));
+    await idbWrap(s.delete(trigger));
   }
 
   async exportAll() {

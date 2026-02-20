@@ -39,9 +39,12 @@ function parse(q: string): { bang: string | null; term: string; lucky: boolean }
     return { bang: null, term: s.substring(0, s.length - 2), lucky: true };
   }
 
-  // "g! cats" — prefix suffix-bang
+  // All remaining patterns require "!" — find it once, bail if absent
   const excl = s.indexOf("!");
-  if (excl > 0 && excl < s.length - 1 && s.charCodeAt(excl + 1) === 32) {
+  if (excl === -1) return { bang: null, term: s, lucky: false };
+
+  // "g! cats" — prefix suffix-bang
+  if (excl < s.length - 1 && s.charCodeAt(excl + 1) === 32) {
     return {
       bang: s.substring(0, excl).toLowerCase(),
       term: s.substring(excl + 2),
@@ -50,20 +53,20 @@ function parse(q: string): { bang: string | null; term: string; lucky: boolean }
   }
 
   // "g!" — suffix-bang alone
-  if (s.endsWith("!") && !s.includes(" ")) {
-    return { bang: s.slice(0, -1).toLowerCase(), term: "", lucky: false };
+  if (s.charCodeAt(s.length - 1) === 33 && s.indexOf(" ") === -1) {
+    return { bang: s.substring(0, s.length - 1).toLowerCase(), term: "", lucky: false };
   }
 
   // "cats !g" — trailing prefix-bang
   const bi = s.lastIndexOf(" !");
   if (bi !== -1 && bi < s.length - 2) {
     const b = s.substring(bi + 2);
-    if (!b.includes(" "))
+    if (b.indexOf(" ") === -1)
       return { bang: b.toLowerCase(), term: s.substring(0, bi), lucky: false };
   }
 
   // "cats g!" — trailing suffix-bang
-  if (s.endsWith("!")) {
+  if (s.charCodeAt(s.length - 1) === 33) {
     const lastSpace = s.lastIndexOf(" ");
     if (lastSpace !== -1) {
       const b = s.substring(lastSpace + 1, s.length - 1);

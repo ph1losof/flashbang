@@ -18,6 +18,7 @@ const SUGGEST_URLS: Record<string, string> = {
 const BANG_KEYS = Object.keys(BANGS).sort();
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
+const COOKIE_RE = /(?:^|;\s*)suggest=([^;]*)/;
 
 function empty(query: string): Response {
   return new Response(JSON.stringify([query, []]), { headers: JSON_HEADERS });
@@ -30,20 +31,22 @@ function empty(query: string): Response {
 // "g!"        → null (suffix bang, already complete)
 function parsePartialBang(q: string): { prefix: string; partial: string } | null {
   const s = q.trim();
-  const trailing = s.lastIndexOf(" !");
-  if (trailing !== -1) {
-    const rest = s.substring(trailing + 2);
-    if (!rest.includes(" ")) return { prefix: s.substring(0, trailing + 1), partial: rest.toLowerCase() };
-  } else if (s.charCodeAt(0) === 33 && !s.includes(" ")) {
-    return { prefix: "", partial: s.substring(1).toLowerCase() };
+  // "!gh" — prefix bang, still typing if no space
+  if (s.charCodeAt(0) === 33) {
+    return s.indexOf(" ") === -1
+      ? { prefix: "", partial: s.substring(1).toLowerCase() }
+      : null;
   }
-  return null;
+  // "cats !gh" — trailing partial bang
+  const trailing = s.lastIndexOf(" !");
+  if (trailing === -1) return null;
+  const rest = s.substring(trailing + 2);
+  return rest.indexOf(" ") === -1
+    ? { prefix: s.substring(0, trailing + 1), partial: rest.toLowerCase() }
+    : null;
 }
 
 function bangSuggestions(query: string, prefix: string, partial: string): Response {
-  const completions: string[] = [];
-  const descriptions: string[] = [];
-
   // Binary search to first key >= partial
   let lo = 0, hi = BANG_KEYS.length;
   while (lo < hi) {
@@ -61,7 +64,10 @@ function bangSuggestions(query: string, prefix: string, partial: string): Respon
 
   // Sort by relevance descending, take top 8
   matches.sort((a, b) => b[1] - a[1]);
-  for (let i = 0; i < Math.min(matches.length, 8); i++) {
+  const limit = matches.length < 8 ? matches.length : 8;
+  const completions: string[] = [];
+  const descriptions: string[] = [];
+  for (let i = 0; i < limit; i++) {
     const k = matches[i][0];
     completions.push(`${prefix}!${k}`);
     descriptions.push(BANGS[k].d);
@@ -73,7 +79,8 @@ function bangSuggestions(query: string, prefix: string, partial: string): Respon
 }
 
 function resolveEndpoint(provider: string, trigger: string): string | null {
-  if (provider in SUGGEST_URLS) return SUGGEST_URLS[provider];
+  const url = SUGGEST_URLS[provider];
+  if (url) return url;
   if (provider === "none") return null;
   // "default" — infer from the default bang trigger
   if (trigger === "g" || trigger === "google") return SUGGEST_URLS.google;
@@ -85,7 +92,7 @@ function resolveEndpoint(provider: string, trigger: string): string | null {
 
 export function parseCookie(request: Request): SuggestSettings {
   const header = request.headers.get("Cookie") || "";
-  const match = header.match(/(?:^|;\s*)suggest=([^;]*)/);
+  const match = header.match(COOKIE_RE);
   if (!match) return { provider: "default", trigger: "g", customUrl: null };
   const [provider, trigger, customUrl] = match[1].split(",");
   return {

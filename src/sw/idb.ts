@@ -1,4 +1,5 @@
 import { BANGS } from "../generated/bangs-min.js";
+import { openDB, idbWrap } from "../shared/idb";
 import type { RedirectSettings } from "./redirect";
 
 const DEFAULT_URL = "https://www.google.com/search?q={}";
@@ -12,37 +13,8 @@ const DEFAULT_LUCKY_URL = "https://duckduckgo.com/?q=\\{}";
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 function getDB(): Promise<IDBDatabase> {
-  if (!dbPromise) {
-    dbPromise = new Promise((ok, err) => {
-      const r = indexedDB.open("flashbang", 1);
-      r.onupgradeneeded = () => {
-        const db = r.result;
-        if (!db.objectStoreNames.contains("settings"))
-          db.createObjectStore("settings", { keyPath: "key" });
-        if (!db.objectStoreNames.contains("custom-bangs"))
-          db.createObjectStore("custom-bangs", { keyPath: "trigger" });
-      };
-      r.onsuccess = () => ok(r.result);
-      r.onerror = () => err(r.error);
-    });
-  }
+  if (!dbPromise) dbPromise = openDB();
   return dbPromise;
-}
-
-function idbGet(store: IDBObjectStore, key: string): Promise<any> {
-  return new Promise((ok, err) => {
-    const r = store.get(key);
-    r.onsuccess = () => ok(r.result);
-    r.onerror = () => err(r.error);
-  });
-}
-
-function idbGetAll(store: IDBObjectStore): Promise<any[]> {
-  return new Promise((ok, err) => {
-    const r = store.getAll();
-    r.onsuccess = () => ok(r.result);
-    r.onerror = () => err(r.error);
-  });
 }
 
 // --- Cached settings ---
@@ -57,10 +29,10 @@ export async function readRedirectSettings(): Promise<RedirectSettings> {
     const store = stx.objectStore("settings");
     const ctx = db.transaction("custom-bangs", "readonly");
     const [result, luckyProviderResult, luckyUrlResult, all] = await Promise.all([
-      idbGet(store, "default-bang"),
-      idbGet(store, "lucky-provider"),
-      idbGet(store, "lucky-url"),
-      idbGetAll(ctx.objectStore("custom-bangs")),
+      idbWrap(store.get("default-bang")),
+      idbWrap(store.get("lucky-provider")),
+      idbWrap(store.get("lucky-url")),
+      idbWrap(ctx.objectStore("custom-bangs").getAll()),
     ]);
     const defaultBang = result?.value || "g";
     const defaultUrl = BANGS[defaultBang] || DEFAULT_URL;
