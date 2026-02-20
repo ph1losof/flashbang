@@ -12,7 +12,7 @@ Every other bang tool loads a full page before redirecting. Flashbang is the onl
 
 ## Features
 
-- **Built for speed** — Speed is the #1 focus of this project. A Service Worker intercepts requests before they hit the network — no page load, no framework, no unnecessary code execution. Local-only, direct redirect
+- **Built for speed** — The fastest bang redirect tool available. I have benchmarked at ~1ms median redirect latency — the Service Worker intercepts requests before they hit the network, parses the bang, and responds with a redirect before the browser even starts rendering. No page load, no framework, no round-trip to a server. Other tools either load a full page first adding hundreds of milliseconds, or route through an edge server adding network latency. Flashbang's redirect is fully local and runs extremely fast
 - **Private** — No analytics, no tracking. All data stays on your device for the core feature - redirects
 - **14,000+ bangs** — Merged from DuckDuckGo, Kagi, and custom sources. Updated daily via CI
 - **Custom bangs** — Add your own bangs through the settings UI. They take priority over built-ins
@@ -37,11 +37,11 @@ If the query is just a bang with no search term (e.g. `!g`), Flashbang redirects
 
 Skip the search results page and go directly to the first result. Three syntax options:
 
-| Format         | Example       | Result                                  |
-| -------------- | ------------- | --------------------------------------- |
-| Backslash      | `\kittens`    | First result for "kittens"              |
-| Trailing `!`   | `kittens !`   | First result for "kittens"              |
-| Leading `!`    | `! kittens`   | First result for "kittens"              |
+| Format       | Example     | Result                     |
+| ------------ | ----------- | -------------------------- |
+| Backslash    | `\kittens`  | First result for "kittens" |
+| Trailing `!` | `kittens !` | First result for "kittens" |
+| Leading `!`  | `! kittens` | First result for "kittens" |
 
 The redirect destination depends on your lucky provider (configurable in settings):
 
@@ -98,7 +98,6 @@ The settings page has a copy button that gives you the exact search URL template
 ## Settings
 
 Open the settings modal from the gear icon on the home page, or type **`!settings`** in the address bar to jump there directly. Type **`!`** on its own to quickly access the home page.
-
 
 - **Default bang** — The bang used when no `!` is in the query. Defaults to `g` (Google). Change it to `ddg`, `b`, or any valid bang trigger
 - **Feeling Lucky** — Choose how lucky redirects resolve: Default (match your default bang), Google, DuckDuckGo, Custom (your own URL template with `{}` as query placeholder), or Disabled
