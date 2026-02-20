@@ -82,6 +82,27 @@ self.addEventListener("fetch", (e: FetchEvent) => {
     }
   }
 
+  if (raw.endsWith("/opensearch.xml")) {
+    const origin = raw.substring(0, raw.indexOf("/", raw.indexOf("//") + 2));
+    e.respondWith(
+      new Response(
+        `<?xml version="1.0" encoding="UTF-8"?>
+<OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/">
+  <ShortName>flashbang</ShortName>
+  <Description>1ms local first duck-duck-go style bang redirects</Description>
+  <InputEncoding>UTF-8</InputEncoding>
+  <Image width="16" height="16" type="image/svg+xml">${origin}/icon.svg</Image>
+  <Url type="text/html" template="${origin}/?q={searchTerms}"/>
+  <Url type="application/x-suggestions+json" template="${origin}/suggest?q={searchTerms}"/>
+</OpenSearchDescription>`,
+        {
+          headers: { "Content-Type": "application/opensearchdescription+xml" },
+        },
+      ),
+    );
+    return;
+  }
+
   if (raw.endsWith("/bench")) {
     e.respondWith(
       caches
@@ -103,18 +124,33 @@ self.addEventListener("fetch", (e: FetchEvent) => {
     return;
   }
 
-  const p = new URL(raw).pathname;
-  const req =
-    p === "/" || p === "/index.html" || p === "/settings" || p === "/home"
-      ? new Request("/home.html")
-      : e.request;
+  if (
+    raw.endsWith("/") ||
+    raw.endsWith("/index.html") ||
+    raw.endsWith("/settings") ||
+    raw.endsWith("/home")
+  ) {
+    e.respondWith(
+      caches
+        .match(new Request("/home.html"))
+        .then(
+          (r) =>
+            r ||
+            fetch("/home.html").catch(
+              () => new Response("Offline", { status: 503 }),
+            ),
+        ),
+    );
+    return;
+  }
 
   e.respondWith(
     caches
-      .match(req)
+      .match(e.request)
       .then(
         (r) =>
-          r || fetch(req).catch(() => new Response("Offline", { status: 503 })),
+          r ||
+          fetch(e.request).catch(() => new Response("Offline", { status: 503 })),
       ),
   );
 });
