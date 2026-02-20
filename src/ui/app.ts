@@ -21,7 +21,11 @@ function notifySW(type: string) {
   navigator.serviceWorker.controller?.postMessage({ type });
 }
 
-function setSuggestCookie(provider: string, trigger: string, customUrl: string) {
+function setSuggestCookie(
+  provider: string,
+  trigger: string,
+  customUrl: string,
+) {
   const value = `${provider},${trigger},${encodeURIComponent(customUrl)}`;
   document.cookie = `suggest=${value};path=/;max-age=31536000;SameSite=Lax`;
 }
@@ -118,13 +122,14 @@ async function initSettings() {
   const luckySelect = $<HTMLSelectElement>("#lucky-provider");
   const luckyUrlInput = $<HTMLInputElement>("#lucky-url");
 
-  const [defaultBang, savedProvider, savedUrl, savedLucky, savedLuckyUrl] = await Promise.all([
-    db.getSetting("default-bang").then((v) => v || "g"),
-    db.getSetting("suggest-provider").then((v) => v || "default"),
-    db.getSetting("suggest-url").then((v) => v || ""),
-    db.getSetting("lucky-provider").then((v) => v || "default"),
-    db.getSetting("lucky-url").then((v) => v || ""),
-  ]);
+  const [defaultBang, savedProvider, savedUrl, savedLucky, savedLuckyUrl] =
+    await Promise.all([
+      db.getSetting("default-bang").then((v) => v || "g"),
+      db.getSetting("suggest-provider").then((v) => v || "default"),
+      db.getSetting("suggest-url").then((v) => v || ""),
+      db.getSetting("lucky-provider").then((v) => v || "default"),
+      db.getSetting("lucky-url").then((v) => v || ""),
+    ]);
 
   luckySelect.value = savedLucky;
   if (savedLucky === "custom") luckyUrlInput.classList.remove("hidden");
@@ -162,7 +167,11 @@ async function initSettings() {
   suggestSelect.addEventListener("change", async () => {
     await db.setSetting("suggest-provider", suggestSelect.value);
     notifySW("invalidate");
-    setSuggestCookie(suggestSelect.value, defaultInput.value, suggestUrlInput.value.trim());
+    setSuggestCookie(
+      suggestSelect.value,
+      defaultInput.value,
+      suggestUrlInput.value.trim(),
+    );
     if (suggestSelect.value === "custom") {
       suggestUrlInput.classList.remove("hidden");
     } else {

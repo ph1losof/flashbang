@@ -55,9 +55,15 @@ export default defineConfig({
       ],
     },
   },
-  safelist: ["opacity-100", "visible", "translate-y-0", "rotate-180", "sm:p-8", "sm:grid-cols-2"],
+  safelist: [
+    "opacity-100",
+    "visible",
+    "translate-y-0",
+    "rotate-180",
+    "sm:p-8",
+    "sm:grid-cols-2",
+  ],
   preflights: [
-    // Design tokens & global resets
     {
       getCSS: ({ theme }) => `
         :root {
@@ -103,7 +109,6 @@ export default defineConfig({
         }
       `,
     },
-    // Component styles
     {
       getCSS: ({ theme }) => `
         input, select {
@@ -237,7 +242,6 @@ export default defineConfig({
         }
       `,
     },
-    // Animations & transitions
     {
       getCSS: ({ theme }) => `
         @keyframes flash {
@@ -305,7 +309,6 @@ export default defineConfig({
     "input-field":
       "w-full px-3 py-2.5 rounded-lg text-text text-sm transition-all duration-150",
     "label-text": "text-sm text-text-secondary",
-    "section-title":
-      "text-base font-semibold tracking-tight mb-3 text-text",
+    "section-title": "text-base font-semibold tracking-tight mb-3 text-text",
   },
 });

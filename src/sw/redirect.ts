@@ -10,7 +10,11 @@ function encode(s: string): string {
   return encodeURIComponent(s).replace(/%2F/g, "/");
 }
 
-function parse(q: string): { bang: string | null; term: string; lucky: boolean } {
+function parse(q: string): {
+  bang: string | null;
+  term: string;
+  lucky: boolean;
+} {
   const s = q.trim();
 
   // "\query" — feeling lucky
@@ -26,7 +30,8 @@ function parse(q: string): { bang: string | null; term: string; lucky: boolean }
     }
     // "!g cats" or "!g"
     const sp = s.indexOf(" ");
-    if (sp === -1) return { bang: s.substring(1).toLowerCase(), term: "", lucky: false };
+    if (sp === -1)
+      return { bang: s.substring(1).toLowerCase(), term: "", lucky: false };
     return {
       bang: s.substring(1, sp).toLowerCase(),
       term: s.substring(sp + 1),
@@ -54,7 +59,11 @@ function parse(q: string): { bang: string | null; term: string; lucky: boolean }
 
   // "g!" — suffix-bang alone
   if (s.charCodeAt(s.length - 1) === 33 && s.indexOf(" ") === -1) {
-    return { bang: s.substring(0, s.length - 1).toLowerCase(), term: "", lucky: false };
+    return {
+      bang: s.substring(0, s.length - 1).toLowerCase(),
+      term: "",
+      lucky: false,
+    };
   }
 
   // "cats !g" — trailing prefix-bang
@@ -71,7 +80,11 @@ function parse(q: string): { bang: string | null; term: string; lucky: boolean }
     if (lastSpace !== -1) {
       const b = s.substring(lastSpace + 1, s.length - 1);
       if (b.length > 0)
-        return { bang: b.toLowerCase(), term: s.substring(0, lastSpace), lucky: false };
+        return {
+          bang: b.toLowerCase(),
+          term: s.substring(0, lastSpace),
+          lucky: false,
+        };
     }
   }
 

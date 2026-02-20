@@ -8,7 +8,10 @@ pub fn validate(bangs: Vec<Bang>) -> Vec<Bang> {
                 return false;
             }
             if !b.url.contains("{}") {
-                eprintln!("Warning: bang !{} has no {{}} placeholder in URL", b.trigger);
+                eprintln!(
+                    "Warning: bang !{} has no {{}} placeholder in URL",
+                    b.trigger
+                );
             }
             true
         })

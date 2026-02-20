@@ -27,7 +27,9 @@ function empty(query: string): Response {
 // "cats !gh"  → { prefix: "cats ", partial: "gh" }
 // "!g cats"   → null (bang already has a query, user is done typing it)
 // "g!"        → null (suffix bang, already complete)
-function parsePartialBang(q: string): { prefix: string; partial: string } | null {
+function parsePartialBang(
+  q: string,
+): { prefix: string; partial: string } | null {
   const s = q.trim();
   // "!gh" — prefix bang, still typing if no space
   if (s.charCodeAt(0) === 33) {
@@ -44,12 +46,18 @@ function parsePartialBang(q: string): { prefix: string; partial: string } | null
     : null;
 }
 
-function bangSuggestions(query: string, prefix: string, partial: string): Response {
+function bangSuggestions(
+  query: string,
+  prefix: string,
+  partial: string,
+): Response {
   // Binary search to first key >= partial
-  let lo = 0, hi = BANG_KEYS.length;
+  let lo = 0,
+    hi = BANG_KEYS.length;
   while (lo < hi) {
     const mid = (lo + hi) >>> 1;
-    if (BANG_KEYS[mid] < partial) lo = mid + 1; else hi = mid;
+    if (BANG_KEYS[mid] < partial) lo = mid + 1;
+    else hi = mid;
   }
 
   // Collect all prefix matches (contiguous since keys are sorted)
@@ -114,9 +122,7 @@ export async function suggest(
   if (!endpoint) return empty(query);
 
   try {
-    const res = await fetch(
-      endpoint.replace("{}", encodeURIComponent(query)),
-    );
+    const res = await fetch(endpoint.replace("{}", encodeURIComponent(query)));
     return new Response(res.body, { headers: JSON_HEADERS });
   } catch {
     return empty(query);

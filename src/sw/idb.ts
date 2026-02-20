@@ -17,8 +17,6 @@ function getDB(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
-// --- Cached settings ---
-
 let cachedRedirect: RedirectSettings | null = null;
 
 export function getCachedSettings(): RedirectSettings | null {
@@ -31,12 +29,13 @@ export async function readRedirectSettings(): Promise<RedirectSettings> {
     const db = await getDB();
     const tx = db.transaction(["settings", "custom-bangs"], "readonly");
     const store = tx.objectStore("settings");
-    const [result, luckyProviderResult, luckyUrlResult, all] = await Promise.all([
-      idbWrap(store.get("default-bang")),
-      idbWrap(store.get("lucky-provider")),
-      idbWrap(store.get("lucky-url")),
-      idbWrap(tx.objectStore("custom-bangs").getAll()),
-    ]);
+    const [result, luckyProviderResult, luckyUrlResult, all] =
+      await Promise.all([
+        idbWrap(store.get("default-bang")),
+        idbWrap(store.get("lucky-provider")),
+        idbWrap(store.get("lucky-url")),
+        idbWrap(tx.objectStore("custom-bangs").getAll()),
+      ]);
     const defaultBang = result?.value || "g";
     const defaultUrl = BANGS[defaultBang] || DEFAULT_URL;
     const luckyProvider = luckyProviderResult?.value ?? "default";
@@ -63,7 +62,11 @@ export async function readRedirectSettings(): Promise<RedirectSettings> {
 
     cachedRedirect = { defaultUrl, custom, luckyUrl };
   } catch {
-    cachedRedirect = { defaultUrl: DEFAULT_URL, custom: {}, luckyUrl: DEFAULT_LUCKY_URL };
+    cachedRedirect = {
+      defaultUrl: DEFAULT_URL,
+      custom: {},
+      luckyUrl: DEFAULT_LUCKY_URL,
+    };
   }
   return cachedRedirect!;
 }

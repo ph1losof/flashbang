@@ -8,7 +8,6 @@ const QUERY_TYPES = [
   { label: "Bang only", example: "!g", query: "!g" },
 ];
 
-// --- Ensure SW is active ---
 async function ensureSW(): Promise<void> {
   if (navigator.serviceWorker.controller) return;
 
@@ -21,9 +20,10 @@ async function ensureSW(): Promise<void> {
   if (!sw) throw new Error("SW registration failed");
 
   if (sw.state === "activated") {
-    // Registered but no controller — need a claim
     await new Promise<void>((r) => {
-      navigator.serviceWorker.addEventListener("controllerchange", () => r(), { once: true });
+      navigator.serviceWorker.addEventListener("controllerchange", () => r(), {
+        once: true,
+      });
     });
   } else {
     await new Promise<void>((resolve) => {
@@ -31,10 +31,13 @@ async function ensureSW(): Promise<void> {
         if (sw.state === "activated") resolve();
       });
     });
-    // Wait for the SW to claim this page
     if (!navigator.serviceWorker.controller) {
       await new Promise<void>((r) => {
-        navigator.serviceWorker.addEventListener("controllerchange", () => r(), { once: true });
+        navigator.serviceWorker.addEventListener(
+          "controllerchange",
+          () => r(),
+          { once: true },
+        );
       });
     }
   }
@@ -43,7 +46,6 @@ async function ensureSW(): Promise<void> {
   setTimeout(() => status.classList.add("hidden"), 1500);
 }
 
-// --- Stats ---
 interface Stats {
   median: number;
   mean: number;
@@ -53,7 +55,9 @@ interface Stats {
   max: number;
 }
 
-type BenchResult = ({ error: false } & Stats) | { error: true; message: string };
+type BenchResult =
+  | ({ error: false } & Stats)
+  | { error: true; message: string };
 
 function computeStats(times: number[]): Stats {
   const sorted = [...times].sort((a, b) => a - b);
@@ -76,7 +80,6 @@ function fmt(ms: number): string {
   return (ms / 1000).toFixed(2) + "s";
 }
 
-// --- Benchmark a single query type ---
 async function benchQuery(
   query: string,
   iterations: number,
@@ -85,9 +88,10 @@ async function benchQuery(
   const url = "/?q=" + encodeURIComponent(query);
   const opts: RequestInit = { redirect: "manual" };
 
-  // Warmup (50 iterations, discarded)
   for (let i = 0; i < 50; i++) {
-    try { await fetch(url, opts); } catch {}
+    try {
+      await fetch(url, opts);
+    } catch {}
   }
 
   const times: number[] = [];
@@ -105,7 +109,6 @@ async function benchQuery(
   return { error: false, ...computeStats(times) };
 }
 
-// --- Render ---
 function renderResults(results: BenchResult[]) {
   document.getElementById("results-section")!.classList.remove("hidden");
 
@@ -114,7 +117,6 @@ function renderResults(results: BenchResult[]) {
     .map((r) => r.median);
   const minMedian = validMedians.length > 0 ? Math.min(...validMedians) : 0;
 
-  // Stats table
   const tbody = document.getElementById("stats-body")!;
   tbody.innerHTML = "";
   for (let i = 0; i < results.length; i++) {
@@ -140,7 +142,6 @@ function renderResults(results: BenchResult[]) {
     tbody.appendChild(tr);
   }
 
-  // Summary
   if (validMedians.length > 0) {
     const sorted = [...validMedians].sort((a, b) => a - b);
     const overallMedian = sorted[Math.floor(sorted.length * 0.5)];
@@ -151,7 +152,6 @@ function renderResults(results: BenchResult[]) {
   }
 }
 
-// --- Run button ---
 const runBtn = document.getElementById("run-btn") as HTMLButtonElement;
 const progressEl = document.getElementById("progress")!;
 const progressFill = document.getElementById("progress-fill")!;
@@ -160,7 +160,10 @@ const progressText = document.getElementById("progress-text")!;
 runBtn.addEventListener("click", async () => {
   const iterations = Math.max(
     100,
-    Math.min(5000, +(document.getElementById("iterations") as HTMLInputElement).value || 500),
+    Math.min(
+      5000,
+      +(document.getElementById("iterations") as HTMLInputElement).value || 500,
+    ),
   );
 
   runBtn.disabled = true;
@@ -169,7 +172,8 @@ runBtn.addEventListener("click", async () => {
     await ensureSW();
   } catch {
     const status = document.getElementById("sw-status")!;
-    status.textContent = "Could not install Service Worker. Results will measure server response.";
+    status.textContent =
+      "Could not install Service Worker. Results will measure server response.";
     status.classList.remove("hidden");
   }
 
@@ -190,8 +194,6 @@ runBtn.addEventListener("click", async () => {
 
     results.push(result);
     renderResults(results);
-
-    // Yield for UI update between query types
     await new Promise((r) => setTimeout(r, 0));
   }
 

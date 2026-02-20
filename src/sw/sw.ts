@@ -1,10 +1,22 @@
 declare const self: ServiceWorkerGlobalScope;
 
 import { redirect } from "./redirect";
-import { readRedirectSettings, getCachedSettings, invalidateCache } from "./idb";
+import {
+  readRedirectSettings,
+  getCachedSettings,
+  invalidateCache,
+} from "./idb";
 
 const CACHE_NAME = "flashbang-v1";
-const ASSETS = ["/", "/index.html", "/app.js", "/icon.svg", "/manifest.json", "/bench.html", "/bench.js"];
+const ASSETS = [
+  "/",
+  "/index.html",
+  "/app.js",
+  "/icon.svg",
+  "/manifest.json",
+  "/bench.html",
+  "/bench.js",
+];
 
 self.addEventListener("install", (e: ExtendableEvent) => {
   e.waitUntil(
@@ -37,19 +49,17 @@ self.addEventListener("message", (e: ExtendableMessageEvent) => {
 self.addEventListener("fetch", (e: FetchEvent) => {
   const raw = e.request.url;
 
-  // Fast path: extract ?q= without constructing a URL object
   const qIdx = raw.indexOf("?q=");
   if (qIdx !== -1) {
     const vStart = qIdx + 3;
     const vEnd = raw.indexOf("&", vStart);
     const q = decodeURIComponent(
-      (vEnd === -1 ? raw.substring(vStart) : raw.substring(vStart, vEnd)).replace(
-        /\+/g,
-        " ",
-      ),
+      (vEnd === -1
+        ? raw.substring(vStart)
+        : raw.substring(vStart, vEnd)
+      ).replace(/\+/g, " "),
     );
     if (q) {
-      // Synchronous when settings are cached (every redirect after the first)
       const cached = getCachedSettings();
       if (cached) {
         e.respondWith(redirect(q, cached));
@@ -60,14 +70,18 @@ self.addEventListener("fetch", (e: FetchEvent) => {
     }
   }
 
-  // /settings is the same SPA page as /
-  const req = raw.endsWith("/settings") ? new Request("/")
-            : raw.endsWith("/bench") ? new Request("/bench.html")
-            : e.request;
+  const req = raw.endsWith("/settings")
+    ? new Request("/")
+    : raw.endsWith("/bench")
+      ? new Request("/bench.html")
+      : e.request;
 
   e.respondWith(
-    caches.match(req).then((r) =>
-      r || fetch(req).catch(() => new Response("Offline", { status: 503 })),
-    ),
+    caches
+      .match(req)
+      .then(
+        (r) =>
+          r || fetch(req).catch(() => new Response("Offline", { status: 503 })),
+      ),
   );
 });
