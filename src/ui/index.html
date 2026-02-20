@@ -2,243 +2,35 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>flashbang</title>
-    <link rel="stylesheet" href="/styles.css" />
-    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
-    <link rel="manifest" href="/manifest.json" />
-    <link
-      rel="search"
-      type="application/opensearchdescription+xml"
-      title="flashbang"
-      href="/opensearch.xml"
-    />
     <meta name="theme-color" content="#0a0a0f" />
+    <style>html{background:#0a0a0f}</style>
   </head>
   <body>
-    <div
-      id="app"
-      class="min-h-screen flex flex-col items-center justify-center relative"
-    >
-      <header
-        class="absolute top-0 inset-x-0 flex items-center justify-end px-6 py-5"
-      >
-        <button
-          id="gear-btn"
-          class="bg-transparent border-none cursor-pointer text-text-secondary p-2 rounded-lg flex items-center justify-center hover:text-text hover:bg-bg-hover"
-          aria-label="Settings"
-        >
-          <svg
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <path
-              d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"
-            />
-            <circle cx="12" cy="12" r="3" />
-          </svg>
-        </button>
-      </header>
-
-      <main
-        class="flex flex-col items-center gap-1 text-center px-6 max-w-[480px] w-full"
-      >
-        <h1 class="wordmark" aria-label="flashbang">
-          <canvas id="metal-canvas"></canvas>
-          <span class="wordmark-text">flashbang</span>
-        </h1>
-        <div class="flex gap-2 items-center w-full mt-2">
-          <input
-            type="text"
-            id="setup-url"
-            readonly
-            class="input-field font-mono text-xs flex-1"
-          />
-          <button id="copy-btn" class="btn max-w-[5rem] min-w-[5rem]">
-            Copy
-          </button>
-        </div>
-        <p class="text-[0.95rem] text-text-secondary mt-2.5">
-          the
-          <a href="/bench" class="text-success font-semibold hover:underline"
-            >1ms</a
-          >
-          local first duck-duck-go style bang redirects.
-        </p>
-      </main>
-
-      <footer
-        class="absolute bottom-0 inset-x-0 text-center p-5 text-sm text-text-secondary"
-      >
-        <div>
-          <a href="https://github.com/ph1losof/flashbang">source code</a>
-          <span class="mx-1 opacity-50">&middot;</span>
-          all data never leaves your device (except when using suggestions)
-          <span class="mx-1 opacity-50">&middot;</span>
-          no monitoring, analytics or tracking
-        </div>
-        <div class="mt-2.5 opacity-80">
-          made with &lt;3 by Dmytro Pletenskyi
-        </div>
-      </footer>
-    </div>
-
-    <div
-      id="settings-modal"
-      class="fixed inset-0 z-100 flex items-center justify-center bg-black/60 opacity-0 invisible"
-      aria-hidden="true"
-    >
-      <div
-        class="modal-card relative bg-bg rounded-2xl p-5 sm:p-8 max-w-[520px] w-[calc(100%-2rem)] max-h-[calc(100vh-4rem)] overflow-y-auto translate-y-2"
-        role="dialog"
-        aria-label="Settings"
-      >
-        <button
-          id="modal-close"
-          class="absolute top-4 right-4 bg-transparent border-none text-2xl leading-none cursor-pointer text-text-secondary py-1 px-2 rounded-md hover:text-text hover:bg-bg-hover"
-          aria-label="Close"
-        >
-          &times;
-        </button>
-        <h2 class="section-title mb-5">Settings</h2>
-
-        <!-- Default Bang -->
-        <section class="card mb-5">
-          <h3 class="section-title">Default Search Engine</h3>
-          <div class="flex gap-2 items-center">
-            <span class="text-text-secondary font-mono text-sm">!</span>
-            <input
-              type="text"
-              id="default-bang"
-              class="input-field w-20 font-mono text-sm"
-            />
-            <span id="bang-status" class="text-sm text-text-secondary"></span>
-          </div>
-        </section>
-
-        <!-- Feeling Lucky -->
-        <section class="card mb-5">
-          <h3 class="section-title">Feeling Lucky</h3>
-          <p class="label-text mb-2">
-            Use <code>\query</code>, <code>query !</code>, or
-            <code>! query</code> to jump to the first search result
-          </p>
-          <select id="lucky-provider" class="input-field text-sm">
-            <option value="default">Default (match bang)</option>
-            <option value="google">Google</option>
-            <option value="ddg">DuckDuckGo</option>
-            <option value="custom">Custom</option>
-            <option value="none">Disabled</option>
-          </select>
-          <input
-            type="text"
-            id="lucky-url"
-            placeholder="URL with {} for query"
-            class="input-field font-mono text-sm mt-2 hidden"
-          />
-        </section>
-
-        <!-- Suggestion Provider -->
-        <section class="card mb-5">
-          <h3 class="section-title">Search Suggestions</h3>
-          <p class="label-text mb-2">
-            Source for address bar autocomplete suggestions
-          </p>
-          <select id="suggest-provider" class="input-field text-sm">
-            <option value="default">Default (match bang)</option>
-            <option value="google">Google</option>
-            <option value="ddg">DuckDuckGo</option>
-            <option value="bing">Bing</option>
-            <option value="brave">Brave</option>
-            <option value="custom">Custom</option>
-            <option value="none">None</option>
-          </select>
-          <input
-            type="text"
-            id="suggest-url"
-            placeholder="URL with {} for query"
-            class="input-field font-mono text-sm mt-2 hidden"
-          />
-        </section>
-
-        <!-- Bang Search -->
-        <section class="card mb-5">
-          <h3 class="section-title">Search Bangs</h3>
-          <p id="bang-count" class="label-text mb-2"></p>
-          <input
-            type="text"
-            id="bang-search"
-            placeholder="Search by name or shortcut..."
-            class="input-field text-sm"
-          />
-          <div
-            id="bang-results"
-            class="max-h-60 overflow-y-auto mt-2 rounded-lg pr-1.5 pt-1"
-          ></div>
-        </section>
-
-        <!-- Custom Bangs -->
-        <section class="card mb-5">
-          <h3 class="section-title">Custom Bangs</h3>
-          <form id="add-bang-form" class="space-y-2 mb-4">
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <input
-                type="text"
-                name="shortcut"
-                placeholder="Shortcut (e.g. gh)"
-                class="input-field font-mono text-sm"
-                required
-              />
-              <input
-                type="text"
-                name="name"
-                placeholder="Name"
-                class="input-field text-sm"
-                required
-              />
-            </div>
-            <input
-              type="text"
-              name="url"
-              placeholder="URL with {} for query"
-              class="input-field font-mono text-sm"
-              required
-            />
-            <button type="submit" class="btn-primary w-full">Add Bang</button>
-          </form>
-          <div id="custom-list"></div>
-        </section>
-
-        <!-- Import/Export -->
-        <section class="card mb-5">
-          <h3 class="section-title">Import / Export</h3>
-          <div class="flex gap-2">
-            <button id="export-btn" class="btn flex-1">Export</button>
-            <label class="btn flex-1 text-center cursor-pointer">
-              Import
-              <input
-                type="file"
-                id="import-file"
-                accept=".json"
-                class="hidden"
-              />
-            </label>
-          </div>
-          <span id="import-status" class="text-sm mt-2 block"></span>
-        </section>
-      </div>
-    </div>
-
-    <script type="module" src="/app.js"></script>
     <script>
-      if ("serviceWorker" in navigator)
-        navigator.serviceWorker.register("/sw.js");
+      (function () {
+        var hasQuery =
+          location.search.startsWith("?q=") ||
+          location.search.includes("&q=");
+
+        if (
+          "serviceWorker" in navigator &&
+          hasQuery &&
+          !navigator.serviceWorker.controller
+        ) {
+          navigator.serviceWorker.addEventListener(
+            "controllerchange",
+            function () {
+              location.replace(location.href);
+            },
+            { once: true },
+          );
+          navigator.serviceWorker.register("/sw.js");
+        } else {
+          if ("serviceWorker" in navigator)
+            navigator.serviceWorker.register("/sw.js");
+          location.replace("/home");
+        }
+      })();
     </script>
   </body>
 </html>

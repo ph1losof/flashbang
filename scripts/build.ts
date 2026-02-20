@@ -36,7 +36,7 @@ await Bun.build({
 });
 
 console.log("=== Generate CSS ===");
-await $`bunx unocss "src/ui/index.html" "src/ui/bench.html" "src/ui/app.ts" "src/ui/bench.ts" "src/ui/liquid-metal.ts" -o dist/styles.css --minify`;
+await $`bunx unocss "src/ui/home.html" "src/ui/bench.html" "src/ui/app.ts" "src/ui/bench.ts" "src/ui/liquid-metal.ts" -o dist/styles.css --minify`;
 
 console.log("=== Inline CSS + minify HTML ===");
 const css = await Bun.file("dist/styles.css").text();
@@ -46,10 +46,19 @@ const inlineCSS = (src: string) =>
     `<style>${css}</style>`,
   );
 
-let html = await Bun.file("src/ui/index.html").text();
+let indexHtml = await Bun.file("src/ui/index.html").text();
 await Bun.write(
   "dist/index.html",
-  minify(Buffer.from(inlineCSS(html)), { minify_css: true, minify_js: true }),
+  minify(Buffer.from(indexHtml), { minify_css: true, minify_js: true }),
+);
+
+let homeHtml = await Bun.file("src/ui/home.html").text();
+await Bun.write(
+  "dist/home.html",
+  minify(Buffer.from(inlineCSS(homeHtml)), {
+    minify_css: true,
+    minify_js: true,
+  }),
 );
 
 let benchHtml = await Bun.file("src/ui/bench.html").text();

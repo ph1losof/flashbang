@@ -9,8 +9,7 @@ import {
 
 const CACHE_NAME = "flashbang-v1";
 const ASSETS = [
-  "/",
-  "/index.html",
+  "/home.html",
   "/app.js",
   "/icon.svg",
   "/manifest.json",
@@ -92,7 +91,11 @@ self.addEventListener("fetch", (e: FetchEvent) => {
     return;
   }
 
-  const req = raw.endsWith("/settings") ? new Request("/") : e.request;
+  const p = new URL(raw).pathname;
+  const req =
+    p === "/" || p === "/index.html" || p === "/settings" || p === "/home"
+      ? new Request("/home.html")
+      : e.request;
 
   e.respondWith(
     caches
