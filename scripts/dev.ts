@@ -50,6 +50,11 @@ Bun.serve({
       return suggest(q, parseCookie(req));
     }
 
+    if (url.pathname === "/opensearch.xml") {
+      const { opensearch } = await import("../src/opensearch");
+      return opensearch(url.origin);
+    }
+
     if (url.pathname === "/bench")
       return new Response(Bun.file("dist/bench.html"), {
         headers: {

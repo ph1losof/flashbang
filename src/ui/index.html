@@ -46,10 +46,22 @@
             { once: true },
           );
           navigator.serviceWorker.register("/sw.js");
-        } else {
-          if ("serviceWorker" in navigator)
-            navigator.serviceWorker.register("/sw.js");
-          location.replace("/home");
+        } else if ("serviceWorker" in navigator) {
+          navigator.serviceWorker.register("/sw.js");
+          Promise.all([
+            fetch("/opensearch.xml").catch(function () {}),
+            new Promise(function (resolve) {
+              if (navigator.serviceWorker.controller) resolve();
+              else
+                navigator.serviceWorker.addEventListener(
+                  "controllerchange",
+                  resolve,
+                  { once: true },
+                );
+            }),
+          ]).then(function () {
+            location.replace(location.href);
+          });
         }
       })();
     </script>

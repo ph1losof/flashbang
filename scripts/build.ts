@@ -73,7 +73,7 @@ await Bun.write(
 await $`rm dist/styles.css`;
 await $`cp src/ui/manifest.json dist/`;
 await $`cp src/ui/icon.svg dist/`;
-await $`cp src/ui/opensearch.xml dist/`;
+await $`cp src/ui/_headers dist/`;
 
 console.log("=== Done ===");
 await $`ls -lh dist/`;
