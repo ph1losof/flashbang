@@ -18,26 +18,26 @@ const ASSETS = [
 ];
 
 self.addEventListener("install", (e: ExtendableEvent) => {
-  e.waitUntil(
-    caches
-      .open(CACHE_NAME)
-      .then((c) => c.addAll(ASSETS))
-      .then(() => self.skipWaiting()),
-  );
+  e.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener("activate", (e: ExtendableEvent) => {
   e.waitUntil(
-    Promise.all([
-      caches
-        .keys()
-        .then((keys) =>
-          Promise.all(
-            keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)),
+    self.clients.claim().then(() =>
+      Promise.all([
+        caches
+          .open(CACHE_NAME)
+          .then((c) => c.addAll(ASSETS)),
+        caches
+          .keys()
+          .then((keys) =>
+            Promise.all(
+              keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)),
+            ),
           ),
-        ),
-      readRedirectSettings(),
-    ]).then(() => self.clients.claim()),
+        readRedirectSettings(),
+      ]),
+    ),
   );
 });
 
