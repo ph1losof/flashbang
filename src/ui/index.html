@@ -118,6 +118,28 @@
           </div>
         </section>
 
+        <!-- Feeling Lucky -->
+        <section class="card mb-5">
+          <h3 class="section-title">Feeling Lucky</h3>
+          <p class="label-text mb-2">
+            Use <code>\query</code>, <code>query !</code>, or
+            <code>! query</code> to jump to the first search result
+          </p>
+          <select id="lucky-provider" class="input-field text-sm">
+            <option value="default">Default (match bang)</option>
+            <option value="google">Google</option>
+            <option value="ddg">DuckDuckGo</option>
+            <option value="custom">Custom</option>
+            <option value="none">Disabled</option>
+          </select>
+          <input
+            type="text"
+            id="lucky-url"
+            placeholder="URL with {} for query"
+            class="input-field font-mono text-sm mt-2 hidden"
+          />
+        </section>
+
         <!-- Suggestion Provider -->
         <section class="card mb-5">
           <h3 class="section-title">Search Suggestions</h3>

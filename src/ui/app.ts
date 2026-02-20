@@ -115,12 +115,20 @@ async function initSettings() {
   const defaultInput = $<HTMLInputElement>("#default-bang");
   const suggestSelect = $<HTMLSelectElement>("#suggest-provider");
   const suggestUrlInput = $<HTMLInputElement>("#suggest-url");
+  const luckySelect = $<HTMLSelectElement>("#lucky-provider");
+  const luckyUrlInput = $<HTMLInputElement>("#lucky-url");
 
-  const [defaultBang, savedProvider, savedUrl] = await Promise.all([
+  const [defaultBang, savedProvider, savedUrl, savedLucky, savedLuckyUrl] = await Promise.all([
     db.getSetting("default-bang").then((v) => v || "g"),
     db.getSetting("suggest-provider").then((v) => v || "default"),
     db.getSetting("suggest-url").then((v) => v || ""),
+    db.getSetting("lucky-provider").then((v) => v || "default"),
+    db.getSetting("lucky-url").then((v) => v || ""),
   ]);
+
+  luckySelect.value = savedLucky;
+  if (savedLucky === "custom") luckyUrlInput.classList.remove("hidden");
+  if (savedLuckyUrl) luckyUrlInput.value = savedLuckyUrl;
 
   defaultInput.value = defaultBang;
   suggestSelect.value = savedProvider;
@@ -167,6 +175,21 @@ async function initSettings() {
     await db.setSetting("suggest-url", url);
     notifySW("invalidate");
     setSuggestCookie(suggestSelect.value, defaultInput.value, url);
+  });
+
+  luckySelect.addEventListener("change", async () => {
+    await db.setSetting("lucky-provider", luckySelect.value);
+    notifySW("invalidate");
+    if (luckySelect.value === "custom") {
+      luckyUrlInput.classList.remove("hidden");
+    } else {
+      luckyUrlInput.classList.add("hidden");
+    }
+  });
+
+  luckyUrlInput.addEventListener("change", async () => {
+    await db.setSetting("lucky-url", luckyUrlInput.value.trim());
+    notifySW("invalidate");
   });
 
   let timer: ReturnType<typeof setTimeout>;

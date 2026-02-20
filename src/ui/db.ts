@@ -65,6 +65,8 @@ export class DB {
         defaultBang: await this.getSetting("default-bang"),
         suggestProvider: await this.getSetting("suggest-provider"),
         suggestUrl: await this.getSetting("suggest-url"),
+        luckyProvider: await this.getSetting("lucky-provider"),
+        luckyUrl: await this.getSetting("lucky-url"),
       },
       customBangs: await this.getAllCustomBangs(),
       exported: new Date().toISOString(),
@@ -78,6 +80,10 @@ export class DB {
       await this.setSetting("suggest-provider", data.settings.suggestProvider);
     if (data.settings?.suggestUrl)
       await this.setSetting("suggest-url", data.settings.suggestUrl);
+    if (data.settings?.luckyProvider)
+      await this.setSetting("lucky-provider", data.settings.luckyProvider);
+    if (data.settings?.luckyUrl)
+      await this.setSetting("lucky-url", data.settings.luckyUrl);
     if (Array.isArray(data.customBangs))
       for (const b of data.customBangs) await this.addCustomBang(b);
   }

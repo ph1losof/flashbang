@@ -3,6 +3,12 @@ import type { RedirectSettings } from "./redirect";
 
 const DEFAULT_URL = "https://www.google.com/search?q={}";
 
+const LUCKY_URLS: Record<string, string> = {
+  g: "https://www.google.com/search?q={}&btnI=1",
+  ddg: "https://duckduckgo.com/?q=\\{}",
+};
+const DEFAULT_LUCKY_URL = "https://duckduckgo.com/?q=\\{}";
+
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 function getDB(): Promise<IDBDatabase> {
@@ -48,17 +54,42 @@ export async function readRedirectSettings(): Promise<RedirectSettings> {
   try {
     const db = await getDB();
     const stx = db.transaction("settings", "readonly");
-    const result = await idbGet(stx.objectStore("settings"), "default-bang");
-    const defaultUrl = BANGS[result?.value || "g"] || DEFAULT_URL;
+    const store = stx.objectStore("settings");
+    const [result, luckyProviderResult, luckyUrlResult] = await Promise.all([
+      idbGet(store, "default-bang"),
+      idbGet(store, "lucky-provider"),
+      idbGet(store, "lucky-url"),
+    ]);
+    const defaultBang = result?.value || "g";
+    const defaultUrl = BANGS[defaultBang] || DEFAULT_URL;
+    const luckyProvider = luckyProviderResult?.value ?? "default";
+    let luckyUrl: string | null;
+    switch (luckyProvider) {
+      case "none":
+        luckyUrl = null;
+        break;
+      case "google":
+        luckyUrl = LUCKY_URLS.g;
+        break;
+      case "ddg":
+        luckyUrl = LUCKY_URLS.ddg;
+        break;
+      case "custom":
+        luckyUrl = luckyUrlResult?.value || null;
+        break;
+      default:
+        luckyUrl = LUCKY_URLS[defaultBang] || DEFAULT_LUCKY_URL;
+        break;
+    }
 
     const ctx = db.transaction("custom-bangs", "readonly");
     const all = await idbGetAll(ctx.objectStore("custom-bangs"));
     const custom: Record<string, string> = {};
     for (const e of all) custom[e.trigger] = e.url;
 
-    cachedRedirect = { defaultUrl, custom };
+    cachedRedirect = { defaultUrl, custom, luckyUrl };
   } catch {
-    cachedRedirect = { defaultUrl: DEFAULT_URL, custom: {} };
+    cachedRedirect = { defaultUrl: DEFAULT_URL, custom: {}, luckyUrl: DEFAULT_LUCKY_URL };
   }
   return cachedRedirect!;
 }
