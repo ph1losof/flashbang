@@ -1,6 +1,6 @@
 declare const self: ServiceWorkerGlobalScope;
 
-import { redirect } from "./redirect";
+import { redirect, type RedirectSettings } from "./redirect";
 import {
   readRedirectSettings,
   getCachedSettings,
@@ -44,6 +44,18 @@ self.addEventListener("activate", (e: ExtendableEvent) => {
 self.addEventListener("message", (e: ExtendableMessageEvent) => {
   if (e.data?.type === "invalidate") invalidateCache();
   if (e.data?.type === "claim") e.waitUntil(self.clients.claim());
+  if (e.data?.type === "redirect" && e.data.query) {
+    const q = e.data.query as string;
+    const resolve = (s: RedirectSettings) => {
+      const resp = redirect(q, s);
+      (e.source as Client)?.postMessage({
+        url: resp.headers.get("Location"),
+      });
+    };
+    const cached = getCachedSettings();
+    if (cached) resolve(cached);
+    else readRedirectSettings().then(resolve);
+  }
 });
 
 self.addEventListener("fetch", (e: FetchEvent) => {

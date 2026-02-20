@@ -3,24 +3,39 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="theme-color" content="#0a0a0f" />
-    <style>html{background:#0a0a0f}</style>
+    <style>
+      html {
+        background: #0a0a0f;
+      }
+    </style>
   </head>
   <body>
     <script>
       (function () {
         var hasQuery =
-          location.search.startsWith("?q=") ||
-          location.search.includes("&q=");
+          location.search.startsWith("?q=") || location.search.includes("&q=");
+
+        var query = hasQuery && new URLSearchParams(location.search).get("q");
 
         if (
           "serviceWorker" in navigator &&
-          hasQuery &&
+          query &&
           !navigator.serviceWorker.controller
         ) {
           navigator.serviceWorker.addEventListener(
+            "message",
+            function (e) {
+              if (e.data && e.data.url) location.replace(e.data.url);
+            },
+            { once: true },
+          );
+          navigator.serviceWorker.addEventListener(
             "controllerchange",
             function () {
-              location.replace(location.href);
+              navigator.serviceWorker.controller.postMessage({
+                type: "redirect",
+                query: query,
+              });
             },
             { once: true },
           );
