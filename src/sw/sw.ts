@@ -1,7 +1,7 @@
 declare const self: ServiceWorkerGlobalScope;
 
 import { redirect } from "./redirect";
-import { readRedirectSettings, invalidateCache } from "./idb";
+import { readRedirectSettings, getCachedSettings, invalidateCache } from "./idb";
 
 const CACHE_NAME = "flashbang-v1";
 const ASSETS = ["/", "/index.html", "/app.js", "/icon.svg", "/manifest.json"];
@@ -17,14 +17,16 @@ self.addEventListener("install", (e: ExtendableEvent) => {
 
 self.addEventListener("activate", (e: ExtendableEvent) => {
   e.waitUntil(
-    caches
-      .keys()
-      .then((keys) =>
-        Promise.all(
-          keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)),
+    Promise.all([
+      caches
+        .keys()
+        .then((keys) =>
+          Promise.all(
+            keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)),
+          ),
         ),
-      )
-      .then(() => self.clients.claim()),
+      readRedirectSettings(),
+    ]).then(() => self.clients.claim()),
   );
 });
 
@@ -47,7 +49,13 @@ self.addEventListener("fetch", (e: FetchEvent) => {
       ),
     );
     if (q) {
-      e.respondWith(readRedirectSettings().then((s) => redirect(q, s)));
+      // Synchronous when settings are cached (every redirect after the first)
+      const cached = getCachedSettings();
+      if (cached) {
+        e.respondWith(redirect(q, cached));
+      } else {
+        e.respondWith(readRedirectSettings().then((s) => redirect(q, s)));
+      }
       return;
     }
   }

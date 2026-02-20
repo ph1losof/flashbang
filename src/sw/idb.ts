@@ -21,6 +21,10 @@ function getDB(): Promise<IDBDatabase> {
 
 let cachedRedirect: RedirectSettings | null = null;
 
+export function getCachedSettings(): RedirectSettings | null {
+  return cachedRedirect;
+}
+
 export async function readRedirectSettings(): Promise<RedirectSettings> {
   if (cachedRedirect) return cachedRedirect;
   try {
