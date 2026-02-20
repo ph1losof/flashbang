@@ -42,7 +42,13 @@ Bun.serve({
     }
 
     if (url.pathname === "/bench")
-      return new Response(Bun.file("dist/bench.html"));
+      return new Response(Bun.file("dist/bench.html"), {
+        headers: {
+          "Content-Type": "text/html",
+          "Cross-Origin-Opener-Policy": "same-origin",
+          "Cross-Origin-Embedder-Policy": "credentialless",
+        },
+      });
     let path = url.pathname === "/" ? "/index.html" : url.pathname;
     const file = Bun.file(`dist${path}`);
     if (await file.exists()) return new Response(file);

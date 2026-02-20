@@ -71,11 +71,28 @@ self.addEventListener("fetch", (e: FetchEvent) => {
     }
   }
 
-  const req = raw.endsWith("/settings")
-    ? new Request("/")
-    : raw.endsWith("/bench")
-      ? new Request("/bench.html")
-      : e.request;
+  if (raw.endsWith("/bench")) {
+    e.respondWith(
+      caches
+        .match(new Request("/bench.html"))
+        .then(
+          (r) =>
+            r ||
+            fetch("/bench.html").catch(
+              () => new Response("Offline", { status: 503 }),
+            ),
+        )
+        .then((r) => {
+          const h = new Headers(r.headers);
+          h.set("Cross-Origin-Opener-Policy", "same-origin");
+          h.set("Cross-Origin-Embedder-Policy", "credentialless");
+          return new Response(r.body, { status: r.status, headers: h });
+        }),
+    );
+    return;
+  }
+
+  const req = raw.endsWith("/settings") ? new Request("/") : e.request;
 
   e.respondWith(
     caches
