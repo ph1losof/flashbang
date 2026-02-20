@@ -15,9 +15,11 @@ async function ensureSW(): Promise<void> {
 
   if (reg.active) {
     if (!navigator.serviceWorker.controller) {
-      await new Promise<void>((r) => {
+      const claimed = new Promise<void>((r) => {
         navigator.serviceWorker.addEventListener("controllerchange", () => r(), { once: true });
       });
+      reg.active.postMessage({ type: "claim" });
+      await claimed;
     }
     return;
   }

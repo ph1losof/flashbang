@@ -44,6 +44,7 @@ self.addEventListener("activate", (e: ExtendableEvent) => {
 
 self.addEventListener("message", (e: ExtendableMessageEvent) => {
   if (e.data?.type === "invalidate") invalidateCache();
+  if (e.data?.type === "claim") e.waitUntil(self.clients.claim());
 });
 
 self.addEventListener("fetch", (e: FetchEvent) => {
