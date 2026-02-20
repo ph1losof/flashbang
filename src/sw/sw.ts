@@ -8,14 +8,7 @@ import {
 } from "./idb";
 
 const CACHE_NAME = "flashbang";
-const ASSETS = [
-  "/home",
-  "/app.js",
-  "/icon.svg",
-  "/manifest.json",
-  "/bench",
-  "/bench.js",
-];
+const ASSETS = ["/home", "/app.js", "/icon.svg", "/manifest.json"];
 
 self.addEventListener("install", (e: ExtendableEvent) => {
   e.waitUntil(
@@ -27,17 +20,16 @@ self.addEventListener("install", (e: ExtendableEvent) => {
 });
 
 self.addEventListener("activate", (e: ExtendableEvent) => {
+  readRedirectSettings();
   e.waitUntil(
-    Promise.all([
-      caches
-        .keys()
-        .then((keys) =>
-          Promise.all(
-            keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)),
-          ),
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(
+          keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)),
         ),
-      readRedirectSettings(),
-    ]).then(() => self.clients.claim()),
+      )
+      .then(() => self.clients.claim()),
   );
 });
 
