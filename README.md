@@ -17,6 +17,7 @@ Every other bang tool loads a full page before redirecting. Flashbang is the onl
 - **14,000+ bangs** — Merged from DuckDuckGo, Kagi, and custom sources. Updated daily via CI
 - **Custom bangs** — Add your own bangs through the settings UI. They take priority over built-ins
 - **Search suggestions** — The only bang tool with bang-aware autocomplete in your browser's native address bar. Type `!y` and the browser itself suggests `!yt` (YouTube), `!ya` (Yandex), `!yf` (Yahoo Finance) — ranked by popularity so the most-used bangs surface first. Regular queries return web search suggestions from Google, DuckDuckGo, Bing, Brave, or a custom provider. Both are unified through a single `/suggest` endpoint that plugs into your browser's built-in suggestion UI
+- **Feeling Lucky** — Prefix a query with `\`, or add a bare `!` before or after it, to skip the results page and jump straight to the first result. Works with Google's "I'm Feeling Lucky" when that's your default engine, falls back to DuckDuckGo's `\` redirect for others. Configurable per-engine or with a custom URL, or disable it entirely
 - **OpenSearch** — Browsers auto-discover Flashbang as a search engine via `/opensearch.xml`, including the suggestions endpoint
 
 ## Bang syntax
@@ -31,6 +32,23 @@ Flashbang supports 4 formats. All bangs are case-insensitive.
 | Suffix, bang first  | `g! kittens` | Google search for "kittens" |
 
 If the query is just a bang with no search term (e.g. `!g`), Flashbang redirects to the service's homepage.
+
+### Feeling Lucky
+
+Skip the search results page and go directly to the first result. Three syntax options:
+
+| Format         | Example       | Result                                  |
+| -------------- | ------------- | --------------------------------------- |
+| Backslash      | `\kittens`    | First result for "kittens"              |
+| Trailing `!`   | `kittens !`   | First result for "kittens"              |
+| Leading `!`    | `! kittens`   | First result for "kittens"              |
+
+The redirect destination depends on your lucky provider (configurable in settings):
+
+- **Default (match bang)** — Uses your default search engine's native lucky feature if available (Google `btnI`, DuckDuckGo `\`), otherwise falls back to DuckDuckGo's `\` redirect
+- **Google** / **DuckDuckGo** — Always use that engine's lucky redirect
+- **Custom** — Provide your own URL template with `{}` as the query placeholder
+- **Disabled** — Lucky syntax is treated as a normal search query
 
 ## Setup as search engine
 
@@ -82,6 +100,7 @@ The settings page has a copy button that gives you the exact search URL template
 Open the settings modal from the gear icon on the home page.
 
 - **Default bang** — The bang used when no `!` is in the query. Defaults to `g` (Google). Change it to `ddg`, `b`, or any valid bang trigger
+- **Feeling Lucky** — Choose how lucky redirects resolve: Default (match your default bang), Google, DuckDuckGo, Custom (your own URL template with `{}` as query placeholder), or Disabled
 - **Search suggestions** — Choose the source for address bar autocomplete: Default (matches your default bang), Google, DuckDuckGo, Bing, Brave, Custom (provide your own URL template with `{}` as query placeholder), or None
 - **Custom bangs** — Add bangs with a trigger, name, and URL template (use `{}` as the query placeholder). Custom bangs override built-in ones
 - **Search bangs** — Real-time search across all 14,000+ bangs by trigger, name, or domain
@@ -104,6 +123,7 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for build pipeline and project structure de
 | **Sources**               | DDG + Kagi + custom                       | DDG                                   | Kagi                                  | DDG + Kagi                                            |
 | **Analytics**             | None                                      | Plausible                             | Cloudflare beacon.min.js              | Plausible                                             |
 | **Server required**       | No (redirects), yes (suggestions)         | No                                    | No                                    | Yes (Cloudflare Worker)                               |
+| **Feeling Lucky**         | Yes (configurable per-engine)             | No                                    | No                                    | No                                                    |
 | **Search suggestions**    | Yes (bang autocomplete + configurable)    | No                                    | No                                    | No                                                    |
 | **Custom bangs**          | Yes (IndexedDB faster)                    | No                                    | Yes (localStorage)                    | Yes (localStorage)                                    |
 | **Build tool**            | Rust codegen + Bun                        | Vite                                  | Vite                                  | Vite                                                  |
