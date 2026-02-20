@@ -4,7 +4,7 @@
 
 Turn your browser's address bar into a shortcut launcher. Type `!g kittens` to search Google, `!w dogs` for Wikipedia, `!gh react` for GitHub — over 14,000 shortcuts (called "bangs") that take you straight to the right site, instantly. No extra tabs, no round-trips, no waiting for a page to load.
 
-Every other bang tool loads a full page before redirecting. Flashbang is the only one that skips the page entirely — a [Service Worker](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API) handles the redirect before your browser even starts rendering. The fastest, most feature-rich, and the only one with zero tracking.
+Every other bang tool loads a full page before redirecting — adding hundreds of milliseconds — or routes through an edge server adding network latency. Flashbang skips the page entirely — a [Service Worker](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API) handles the redirect before your browser even starts rendering.
 
 > **Fully local where it matters.** Core redirects never leave your machine — the Service Worker handles them offline with no server involved. Search suggestions (bang autocomplete, web results in your address bar) are completely optional and do go through our server when enabled and used through our hosted version. That's fine by us — Cloudflare Workers make it practically free — but you should know that "fully local" applies to redirects only. There is no tracking or analytics on our end — we don't know what you search and what bangs you use. Cloudflare collects basic request counts on all hosted sites by default (this can't be turned off), but no query content or personally identifiable information is exposed to us through it.
 
@@ -12,7 +12,7 @@ Every other bang tool loads a full page before redirecting. Flashbang is the onl
 
 ## Features
 
-- **Built for speed** — The fastest bang redirect tool available. I have benchmarked at ~1ms median redirect latency — the Service Worker intercepts requests before they hit the network, parses the bang, and responds with a redirect before the browser even starts rendering. No page load, no framework, no round-trip to a server. Other tools either load a full page first adding hundreds of milliseconds, or route through an edge server adding network latency. Flashbang's redirect is fully local and runs extremely fast
+- **Built for speed** — [Benchmarked](https://flashbang-dyr.pages.dev/bench) at ~1ms median redirect latency. The Service Worker intercepts requests before they hit the network, parses the bang, and responds with a 302 — no page load, no framework, no round-trip to a server
 - **Private** — No analytics, no tracking. All data stays on your device for the core feature - redirects
 - **14,000+ bangs** — Merged from DuckDuckGo, Kagi, and custom sources. Updated daily via CI
 - **Custom bangs** — Add your own bangs through the settings UI. They take priority over built-ins
@@ -110,7 +110,7 @@ All settings are stored in IndexedDB locally on your device.
 
 ## How it works
 
-When you type `!gh react` in the address bar, the Service Worker intercepts the request before it reaches the network. It parses the bang trigger, looks it up in the bang map (checking custom bangs first, then built-ins), and responds with a 301 redirect. If no bang is found, your default search engine is used.
+When you type `!gh react` in the address bar, the Service Worker intercepts the request before it reaches the network. It parses the bang trigger, looks it up in the bang map (checking custom bangs first, then built-ins), and responds with a 302 redirect. If no bang is found, your default search engine is used.
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for build pipeline and project structure details.
 

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/">
   <ShortName>flashbang</ShortName>
-  <Description>Blazingly fast, local-first bang redirects</Description>
+  <Description>1ms local first duck-duck-go style bang redirects</Description>
   <InputEncoding>UTF-8</InputEncoding>
   <Url type="text/html" template="{searchTerms}"/>
   <Url type="application/x-suggestions+json" template="/suggest?q={searchTerms}"/>

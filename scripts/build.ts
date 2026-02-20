@@ -26,18 +26,32 @@ await Bun.build({
   format: 'esm',
 });
 
+console.log('=== Bundle bench page ===');
+await Bun.build({
+  entrypoints: ['src/ui/bench.ts'],
+  outdir: 'dist',
+  naming: 'bench.js',
+  minify: true,
+  target: 'browser',
+  format: 'esm',
+});
+
 console.log('=== Generate CSS ===');
-await $`bunx unocss "src/ui/index.html" "src/ui/app.ts" "src/ui/liquid-metal.ts" -o dist/styles.css --minify`;
+await $`bunx unocss "src/ui/index.html" "src/ui/bench.html" "src/ui/app.ts" "src/ui/bench.ts" "src/ui/liquid-metal.ts" -o dist/styles.css --minify`;
 
 console.log('=== Inline CSS + minify HTML ===');
-let html = await Bun.file('src/ui/index.html').text();
 const css = await Bun.file('dist/styles.css').text();
-html = html.replace(
+const inlineCSS = (src: string) => src.replace(
   '<link rel="stylesheet" href="/styles.css" />',
   `<style>${css}</style>`,
 );
-const minified = minify(Buffer.from(html), { minify_css: true, minify_js: true });
-await Bun.write('dist/index.html', minified);
+
+let html = await Bun.file('src/ui/index.html').text();
+await Bun.write('dist/index.html', minify(Buffer.from(inlineCSS(html)), { minify_css: true, minify_js: true }));
+
+let benchHtml = await Bun.file('src/ui/bench.html').text();
+await Bun.write('dist/bench.html', minify(Buffer.from(inlineCSS(benchHtml)), { minify_css: true, minify_js: true }));
+
 await $`rm dist/styles.css`;
 await $`cp src/ui/manifest.json dist/`;
 await $`cp src/ui/icon.svg dist/`;

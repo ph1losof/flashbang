@@ -4,7 +4,7 @@ import { redirect } from "./redirect";
 import { readRedirectSettings, getCachedSettings, invalidateCache } from "./idb";
 
 const CACHE_NAME = "flashbang-v1";
-const ASSETS = ["/", "/index.html", "/app.js", "/icon.svg", "/manifest.json"];
+const ASSETS = ["/", "/index.html", "/app.js", "/icon.svg", "/manifest.json", "/bench.html", "/bench.js"];
 
 self.addEventListener("install", (e: ExtendableEvent) => {
   e.waitUntil(
@@ -61,7 +61,9 @@ self.addEventListener("fetch", (e: FetchEvent) => {
   }
 
   // /settings is the same SPA page as /
-  const req = raw.endsWith("/settings") ? new Request("/") : e.request;
+  const req = raw.endsWith("/settings") ? new Request("/")
+            : raw.endsWith("/bench") ? new Request("/bench.html")
+            : e.request;
 
   e.respondWith(
     caches.match(req).then((r) =>
