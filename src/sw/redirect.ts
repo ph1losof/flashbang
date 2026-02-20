@@ -18,18 +18,13 @@ function parse(q: string): { bang: string | null; term: string; lucky: boolean }
     return { bang: null, term: s.substring(1), lucky: true };
   }
 
-  // "query !" — feeling lucky (trailing bare bang)
-  if (s.length >= 2 && s.charCodeAt(s.length - 1) === 33 && s.charCodeAt(s.length - 2) === 32) {
-    return { bang: null, term: s.substring(0, s.length - 2), lucky: true };
-  }
-
-  // "! query" — feeling lucky (leading bare bang)
-  if (s.charCodeAt(0) === 33 && s.charCodeAt(1) === 32) {
-    return { bang: null, term: s.substring(2), lucky: true };
-  }
-
-  // "!g cats" or "!g"
+  // All "!" prefix patterns — single charCodeAt gate
   if (s.charCodeAt(0) === 33) {
+    // "! query" — feeling lucky (leading bare bang)
+    if (s.charCodeAt(1) === 32) {
+      return { bang: null, term: s.substring(2), lucky: true };
+    }
+    // "!g cats" or "!g"
     const sp = s.indexOf(" ");
     if (sp === -1) return { bang: s.substring(1).toLowerCase(), term: "", lucky: false };
     return {
@@ -37,6 +32,11 @@ function parse(q: string): { bang: string | null; term: string; lucky: boolean }
       term: s.substring(sp + 1),
       lucky: false,
     };
+  }
+
+  // "query !" — feeling lucky (trailing bare bang)
+  if (s.charCodeAt(s.length - 1) === 33 && s.charCodeAt(s.length - 2) === 32) {
+    return { bang: null, term: s.substring(0, s.length - 2), lucky: true };
   }
 
   // "g! cats" — prefix suffix-bang

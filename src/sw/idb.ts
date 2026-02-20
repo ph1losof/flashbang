@@ -55,10 +55,12 @@ export async function readRedirectSettings(): Promise<RedirectSettings> {
     const db = await getDB();
     const stx = db.transaction("settings", "readonly");
     const store = stx.objectStore("settings");
-    const [result, luckyProviderResult, luckyUrlResult] = await Promise.all([
+    const ctx = db.transaction("custom-bangs", "readonly");
+    const [result, luckyProviderResult, luckyUrlResult, all] = await Promise.all([
       idbGet(store, "default-bang"),
       idbGet(store, "lucky-provider"),
       idbGet(store, "lucky-url"),
+      idbGetAll(ctx.objectStore("custom-bangs")),
     ]);
     const defaultBang = result?.value || "g";
     const defaultUrl = BANGS[defaultBang] || DEFAULT_URL;
@@ -81,9 +83,6 @@ export async function readRedirectSettings(): Promise<RedirectSettings> {
         luckyUrl = LUCKY_URLS[defaultBang] || DEFAULT_LUCKY_URL;
         break;
     }
-
-    const ctx = db.transaction("custom-bangs", "readonly");
-    const all = await idbGetAll(ctx.objectStore("custom-bangs"));
     const custom: Record<string, string> = {};
     for (const e of all) custom[e.trigger] = e.url;
 
