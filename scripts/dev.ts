@@ -20,13 +20,16 @@ function broadcast() {
 }
 
 const LIVE_RELOAD_SCRIPT = `<script>
-new EventSource("/__dev/events").onmessage = async () => {
+const __es = new EventSource("/__dev/events");
+__es.onmessage = async () => {
+  __es.close();
   const regs = await navigator.serviceWorker.getRegistrations();
   await Promise.all(regs.map(r => r.unregister()));
   const keys = await caches.keys();
   await Promise.all(keys.map(k => caches.delete(k)));
   location.reload();
 };
+addEventListener("beforeunload", () => __es.close());
 </script>`;
 
 async function build() {
@@ -142,6 +145,7 @@ console.log(`Dev server: http://localhost:${port}`);
 
 Bun.serve({
   port,
+  idleTimeout: 255,
   async fetch(req) {
     const url = new URL(req.url);
 

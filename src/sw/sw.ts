@@ -60,6 +60,11 @@ self.addEventListener("message", (e: ExtendableMessageEvent) => {
 self.addEventListener("fetch", (e: FetchEvent) => {
   const raw = e.request.url;
 
+  // Skip dev server requests (live reload SSE, etc.)
+  if (raw.includes("/__dev/")) {
+    return;
+  }
+
   const qIdx = raw.indexOf("?q=");
   if (qIdx !== -1) {
     const vStart = qIdx + 3;
