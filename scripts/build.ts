@@ -44,7 +44,7 @@ console.log("=== Inline CSS + minify HTML ===");
 const css = await Bun.file("dist/styles.css").text();
 const inlineCSS = (src: string) =>
   src.replace(
-    '<link rel="stylesheet" href="/styles.css" />',
+    /<link rel="stylesheet" href="\/styles\.css"\s*\/?>/,
     `<style>${css}</style>`
   );
 
