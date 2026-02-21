@@ -66,6 +66,8 @@ Bun.serve({
     let path = url.pathname === "/" ? "/index.html" : url.pathname;
     const file = Bun.file(`dist${path}`);
     if (await file.exists()) return new Response(file);
+    const htmlFile = Bun.file(`dist${path}.html`);
+    if (await htmlFile.exists()) return new Response(htmlFile);
     return new Response(Bun.file("dist/index.html"));
   },
 });
