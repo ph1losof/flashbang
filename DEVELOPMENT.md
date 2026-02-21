@@ -95,3 +95,15 @@ The bang data is split into two tiers so the Service Worker loads only what it n
 ## Production server
 
 `bun run start` serves the pre-built `dist/` directory with no build step, file watching, or live reload injection. Useful for testing the production build locally. Requires `bun run build` to have been run first.
+
+## Releasing
+
+1. Update `version` in `package.json`
+2. Add a new section to `CHANGELOG.md` under `## [X.Y.Z] - YYYY-MM-DD`
+3. Commit: `chore: release vX.Y.Z`
+4. Tag: `git tag -a vX.Y.Z -m "vX.Y.Z"`
+5. Push: `git push && git push --tags`
+
+The release workflow (`.github/workflows/release.yaml`) handles the rest:
+runs tests, builds the project, extracts the changelog entry, and creates a
+GitHub Release.
