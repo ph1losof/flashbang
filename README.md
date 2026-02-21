@@ -121,7 +121,7 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for build pipeline and project structure de
 | **Redirect method**         | Service Worker intercept                      | `window.location.replace`        | `window.location.replace`        | Cloudflare Worker (edge) + client fallback             |
 | **When redirect happens**   | Before page renders (Service Worker)          | After page loads (HTML, CSS, JS) | After page loads (HTML, CSS, JS) | At the edge or after page loads (HTML, CSS, JS, React) |
 | **Sources**                 | DDG + Kagi + custom                           | DDG                              | Kagi                             | DDG + Kagi                                             |
-| **Analytics**               | None†                                         | Plausible                        | Cloudflare Web Analytics‡        | Plausible+Vercel Analytics+Vercel Speed Insights       |
+| **Analytics**               | None†                                         | Plausible                        | None†                            | Plausible+Vercel Analytics+Vercel Speed Insights       |
 | **Server required**         | No (redirects), yes (suggestions, OpenSearch) | No                               | No                               | Yes (Cloudflare Worker)                                |
 | **Feeling Lucky**           | Yes (configurable per-engine)                 | No                               | No                               | No                                                     |
 | **Search suggestions**      | Yes (bang autocomplete + configurable)        | No                               | No                               | No                                                     |
@@ -131,10 +131,8 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for build pipeline and project structure de
 | **Parsed on**               | SW thread (once, persists in memory)          | Main thread (every page load)    | Main thread (every page load)    | Main thread (every page load) or edge worker           |
 | **License**                 | AGPL-3.0                                      | MIT                              | MIT                              | MIT                                                    |
 
-† Flashbang includes no analytics scripts or tracking. Cloudflare Pages exposes basic request counts in its dashboard for all hosted sites — this is a platform-level
+† Flashbang and unduckified include no analytics scripts or tracking. Cloudflare Pages exposes basic request counts in its dashboard for all hosted sites — this is a platform-level
 metric we did not opt into and cannot disable. It is not Cloudflare Web Analytics.
-
-‡ Cloudflare Web Analytics is an opt-in product that requires enabling it in the Cloudflare dashboard. unduckified's hosted instance has it enabled. Page views include the full URL, which contains the query parameter.
 
 Flashbang uses a different approach to the redirect step: a Service Worker intercepts the navigation request before the browser begins rendering, looks up the bang in a minimal in-memory map, and responds with a redirect. The bang data (867 KB, trigger→URL pairs only) is parsed once when the Service Worker installs and stays in memory across navigations. Other tools in this space parse their bang data on the main thread on each page load — the tradeoff they accept for a simpler architecture. Flashbang's settings UI is a separate bundle that only loads when you visit the page directly.
 
@@ -156,4 +154,4 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for prerequisites, build commands, and proj
 
 [AGPL-3.0](LICENSE) — see [NOTICE](NOTICE).
 
-Flashbang is designed to be self-hosted and most of projects in this space bundles analytics. AGPL ensures that anyone who deploys a modified version must share their changes — protecting end users from forks that quietly add tracking or degrade privacy. The project introduces a genuinely novel approach (Service Worker intercept, two-tier bang data, bang-aware suggestions), and AGPL ensures derivatives contribute back rather than just extract.
+Flashbang is designed to be self-hosted and most of projects in this space bundle analytics. AGPL ensures that anyone who deploys a modified version must share their changes — protecting end users from forks that quietly add tracking or degrade privacy. The project introduces a genuinely novel approach (Service Worker intercept, two-tier bang data, bang-aware suggestions), and AGPL ensures derivatives contribute back rather than just extract.
