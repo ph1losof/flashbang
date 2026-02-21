@@ -12,6 +12,7 @@ bun run codegen    # fetch DDG/Kagi sources + generate bang maps
 bun run build      # bundle + minify (requires codegen first)
 bun run dev        # bundle + dev server with file watching & live reload
 bun run start      # serve pre-built dist/ (run `bun run build` first)
+bun test           # run tests
 bun run clean      # remove dist/
 ```
 
@@ -49,6 +50,17 @@ flashbang/
 ├── uno.config.ts           # UnoCSS theme
 └── LICENSE
 ```
+
+## Tests
+
+```sh
+bun test           # run all tests
+```
+
+Tests live alongside the source files they cover:
+
+- `src/sw/redirect.test.ts` — Bang parsing, routing logic, and URL encoding
+- `src/suggest.test.ts` — Cookie parsing, bang suggestions, and provider proxying
 
 ## Bang codegen
 
