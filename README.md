@@ -12,7 +12,7 @@ Every other bang tool loads a full page before redirecting — adding hundreds o
 
 ## Features
 
-- **Built for speed** — [Benchmarked](https://flashbang-dyr.pages.dev/bench) at ~1ms median redirect latency. The Service Worker intercepts requests before they hit the network, parses the bang, and responds with a 302 — no page load, no framework, no round-trip to a server
+- **Built for speed** — Sub-1ms median redirect latency in our testing, advertised as ~1ms to be conservative. The Service Worker intercepts requests before they hit the network, parses the bang, and responds with a 302 — no page load, no framework, no round-trip to a server. [Run the benchmark yourself](https://flashbang-dyr.pages.dev/bench) — results vary by machine
 - **Private** — No analytics, no tracking. All data stays on your device for the core feature - redirects
 - **14,000+ bangs** — Merged from DuckDuckGo, Kagi, and custom sources. Updated daily via CI
 - **Custom bangs** — Add your own bangs through the settings UI. They take priority over built-ins
@@ -130,15 +130,9 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for build pipeline and project structure de
 | **Bang data strategy**    | Two-tier (min for SW, full for UI)        | Single bundle                         | Single bundle                         | Top bangs in worker, full set client-side             |
 | **License**               | AGPL-3.0                                  | MIT                                   | MIT                                   | MIT                                                   |
 
-The other tools have a fundamental architectural problem: they treat bang redirects as a page. When you type `!g kittens`, unduck, unduckified, and rebang all load a full HTML page — CSS, JavaScript, UI framework, analytics — parse your query client-side, and then redirect. That's the wrong abstraction. A bang redirect is not a page, it's a routing decision. It should never touch the rendering pipeline.
+Flashbang's key architectural difference: when you type `!g kittens`, unduck, unduckified, and rebang all load a full HTML page — CSS, JavaScript, UI framework, analytics — parse your query client-side, and then redirect. Flashbang's philosophy is that a bang redirect is not a page, it's a routing decision. It should never touch the rendering pipeline. A Service Worker intercepts the request before the browser begins rendering, and the settings UI is a separate bundle that only loads when you actually visit the page.
 
-Flashbang solves this by separating the two concerns entirely. A thin Service Worker handles redirects — it intercepts the navigation request before the browser even begins rendering. The settings UI is a completely separate bundle that only loads when you actually visit the page.
-
-Rebang deserves a special mention: it has a hybrid mode where a Cloudflare Worker handles the top 1,297 bangs at the edge, falling back to client-side for the rest. But if your bang isn't in that top set, you get worse performance than unduck or unduckified (full React page load + redirect). And even when it hits the edge, you're still limited by Cloudflare's network latency on every single search. For something you use dozens of times a day, having it run locally is incomparably better — you don't rely on a hosting provider, and routing every search through a third-party edge server is arguably not great for privacy either. Rebang does have autocomplete, but it's built into its webpage — you search the bang database on the rebang.online page itself. It doesn't expose a `/suggest` endpoint, so your browser's address bar never sees it. Flashbang's `/suggest` endpoint plugs into the browser's native suggestion UI, meaning bang completions and web search results appear directly in your address bar without ever visiting the page. It's worth noting that rebang's privacy page states "zero logging", "no analytics", "no backend server", and that "all redirects happen entirely in your browser". However, their own architecture shows that every request goes through a Cloudflare Worker for a lookup — it redirects the top 1,297 bangs at the edge and falls through to the client for the rest. Plausible analytics is also present on the page, and the client fallback loads a full React app with Tailwind and heavy logic just for redirects. These observations are based on their public source code and documentation.
-
-Flashbang has zero tracking (even hosted version). Some of the other tools include third-party analytics (Plausible, Cloudflare Web Analytics) on each search - it's unclear whether these can be disabled without self-hosting.
-
-> **Note:** Analytics information is accurate at time of writing. These projects may have since changed their tracking behavior.
+> **Note:** Comparison data is accurate at time of writing. These projects are actively developed and may have changed since.
 
 ## Acknowledgments
 
