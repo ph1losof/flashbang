@@ -116,19 +116,19 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for build pipeline and project structure de
 
 ## Comparison with other bang tools
 
-|                           | **flashbang**                             | **unduck**                            | **unduckified**                       | **rebang**                                            |
-| ------------------------- | ----------------------------------------- | ------------------------------------- | ------------------------------------- | ----------------------------------------------------- |
-| **Redirect method**       | Service Worker intercept                  | `window.location.replace`             | `window.location.replace`             | Cloudflare Worker (edge) + client fallback            |
-| **When redirect happens** | Service Worker only - nothing unnecessary | After full page loads (HTML, CSS, JS) | After full page loads (HTML, CSS, JS) | At the edge or after full page loads (React included) |
-| **Sources**               | DDG + Kagi + custom                       | DDG                                   | Kagi                                  | DDG + Kagi                                            |
-| **Analytics**             | None†                                     | Plausible                             | Cloudflare Web Analytics‡             | Plausible                                             |
+|                           | **flashbang**                                 | **unduck**                            | **unduckified**                       | **rebang**                                            |
+| ------------------------- | --------------------------------------------- | ------------------------------------- | ------------------------------------- | ----------------------------------------------------- |
+| **Redirect method**       | Service Worker intercept                      | `window.location.replace`             | `window.location.replace`             | Cloudflare Worker (edge) + client fallback            |
+| **When redirect happens** | Service Worker only - nothing unnecessary     | After full page loads (HTML, CSS, JS) | After full page loads (HTML, CSS, JS) | At the edge or after full page loads (React included) |
+| **Sources**               | DDG + Kagi + custom                           | DDG                                   | Kagi                                  | DDG + Kagi                                            |
+| **Analytics**             | None†                                         | Plausible                             | Cloudflare Web Analytics‡             | Plausible+Vercel Analytics+Vercel Speed Insights      |
 | **Server required**       | No (redirects), yes (suggestions, OpenSearch) | No                                    | No                                    | Yes (Cloudflare Worker)                               |
-| **Feeling Lucky**         | Yes (configurable per-engine)             | No                                    | No                                    | No                                                    |
-| **Search suggestions**    | Yes (bang autocomplete + configurable)    | No                                    | No                                    | No                                                    |
-| **Custom bangs**          | Yes (IndexedDB faster)                    | No                                    | Yes (localStorage)                    | Yes (localStorage)                                    |
-| **Build tool**            | Bun                                       | Vite                                  | Vite                                  | Vite                                                  |
-| **Bang data strategy**    | Two-tier (min for SW, full for UI)        | Single bundle                         | Single bundle                         | Top bangs in worker, full set client-side             |
-| **License**               | AGPL-3.0                                  | MIT                                   | MIT                                   | MIT                                                   |
+| **Feeling Lucky**         | Yes (configurable per-engine)                 | No                                    | No                                    | No                                                    |
+| **Search suggestions**    | Yes (bang autocomplete + configurable)        | No                                    | No                                    | No                                                    |
+| **Custom bangs**          | Yes (IndexedDB faster)                        | No                                    | Yes (localStorage)                    | Yes (localStorage)                                    |
+| **Build tool**            | Bun                                           | Vite                                  | Vite                                  | Vite                                                  |
+| **Bang data strategy**    | Two-tier (min for SW, full for UI)            | Single bundle                         | Single bundle                         | Top bangs in worker, full set client-side             |
+| **License**               | AGPL-3.0                                      | MIT                                   | MIT                                   | MIT                                                   |
 
 † Flashbang includes no analytics scripts or tracking. Cloudflare Pages exposes basic request counts in its dashboard for all hosted sites — this is a platform-level metric we did not opt into and cannot disable. It is not Cloudflare Web Analytics.
 ‡ Cloudflare Web Analytics is an opt-in product that requires adding a `beacon.min.js` script tag. unduckified chose to include it.
