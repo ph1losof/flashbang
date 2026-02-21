@@ -132,6 +132,7 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for build pipeline and project structure de
 
 † Flashbang includes no analytics scripts or tracking. Cloudflare Pages exposes basic request counts in its dashboard for all hosted sites — this is a platform-level
 metric we did not opt into and cannot disable. It is not Cloudflare Web Analytics.
+
 ‡ Cloudflare Web Analytics is an opt-in product enabled via the Cloudflare dashboard. unduckified has it enabled, and because each search triggers a full page load with
 the query in the URL, the beacon captures search terms as page view pathnames.
 
