@@ -97,6 +97,8 @@ async function build() {
     })
   );
 
+  await Bun.write("dist/robots.txt", "User-agent: *\nAllow: /\n");
+
   console.log(`Build done in ${(performance.now() - t).toFixed(0)}ms`);
 }
 

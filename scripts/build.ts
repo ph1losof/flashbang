@@ -76,6 +76,7 @@ await $`rm dist/styles.css`;
 await $`cp src/ui/manifest.json dist/`;
 await $`cp src/ui/icon.svg dist/`;
 await $`cp src/ui/_headers dist/`;
+await Bun.write("dist/robots.txt", "User-agent: *\nAllow: /\n");
 
 console.log("=== Done ===");
 await $`ls -lh dist/`;
