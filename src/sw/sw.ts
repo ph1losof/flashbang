@@ -1,11 +1,11 @@
 declare const self: ServiceWorkerGlobalScope;
 
-import { redirect, type RedirectSettings } from "./redirect";
 import {
-  readRedirectSettings,
   getCachedSettings,
   invalidateCache,
+  readRedirectSettings,
 } from "./idb";
+import { type RedirectSettings, redirect } from "./redirect";
 
 const CACHE_NAME = "flashbang";
 const ASSETS = ["/home", "/app.js", "/icon.svg", "/manifest.json"];
@@ -15,7 +15,7 @@ self.addEventListener("install", (e: ExtendableEvent) => {
     Promise.all([
       caches.open(CACHE_NAME).then((c) => c.addAll(ASSETS)),
       self.skipWaiting(),
-    ]),
+    ])
   );
 });
 
@@ -26,16 +26,20 @@ self.addEventListener("activate", (e: ExtendableEvent) => {
       .keys()
       .then((keys) =>
         Promise.all(
-          keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)),
-        ),
+          keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
+        )
       )
-      .then(() => self.clients.claim()),
+      .then(() => self.clients.claim())
   );
 });
 
 self.addEventListener("message", (e: ExtendableMessageEvent) => {
-  if (e.data?.type === "invalidate") invalidateCache();
-  if (e.data?.type === "claim") e.waitUntil(self.clients.claim());
+  if (e.data?.type === "invalidate") {
+    invalidateCache();
+  }
+  if (e.data?.type === "claim") {
+    e.waitUntil(self.clients.claim());
+  }
   if (e.data?.type === "redirect" && e.data.query) {
     const q = e.data.query as string;
     const resolve = (s: RedirectSettings) => {
@@ -45,8 +49,11 @@ self.addEventListener("message", (e: ExtendableMessageEvent) => {
       });
     };
     const cached = getCachedSettings();
-    if (cached) resolve(cached);
-    else readRedirectSettings().then(resolve);
+    if (cached) {
+      resolve(cached);
+    } else {
+      readRedirectSettings().then(resolve);
+    }
   }
 });
 
@@ -61,7 +68,7 @@ self.addEventListener("fetch", (e: FetchEvent) => {
       (vEnd === -1
         ? raw.substring(vStart)
         : raw.substring(vStart, vEnd)
-      ).replace(/\+/g, " "),
+      ).replace(/\+/g, " ")
     );
     if (q) {
       const cached = getCachedSettings();
@@ -82,15 +89,15 @@ self.addEventListener("fetch", (e: FetchEvent) => {
           (r) =>
             r ||
             fetch("/bench").catch(
-              () => new Response("Offline", { status: 503 }),
-            ),
+              () => new Response("Offline", { status: 503 })
+            )
         )
         .then((r) => {
           const h = new Headers(r.headers);
           h.set("Cross-Origin-Opener-Policy", "same-origin");
           h.set("Cross-Origin-Embedder-Policy", "credentialless");
           return new Response(r.body, { status: r.status, headers: h });
-        }),
+        })
     );
     return;
   }
@@ -106,10 +113,8 @@ self.addEventListener("fetch", (e: FetchEvent) => {
         .then(
           (r) =>
             r ||
-            fetch("/home").catch(
-              () => new Response("Offline", { status: 503 }),
-            ),
-        ),
+            fetch("/home").catch(() => new Response("Offline", { status: 503 }))
+        )
     );
     return;
   }
@@ -120,9 +125,7 @@ self.addEventListener("fetch", (e: FetchEvent) => {
       .then(
         (r) =>
           r ||
-          fetch(e.request).catch(
-            () => new Response("Offline", { status: 503 }),
-          ),
-      ),
+          fetch(e.request).catch(() => new Response("Offline", { status: 503 }))
+      )
   );
 });

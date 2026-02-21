@@ -6,10 +6,12 @@ export function openDB(): Promise<IDBDatabase> {
     const r = indexedDB.open(DB_NAME, DB_VERSION);
     r.onupgradeneeded = () => {
       const db = r.result;
-      if (!db.objectStoreNames.contains("settings"))
+      if (!db.objectStoreNames.contains("settings")) {
         db.createObjectStore("settings", { keyPath: "key" });
-      if (!db.objectStoreNames.contains("custom-bangs"))
+      }
+      if (!db.objectStoreNames.contains("custom-bangs")) {
         db.createObjectStore("custom-bangs", { keyPath: "trigger" });
+      }
     };
     r.onsuccess = () => ok(r.result);
     r.onerror = () => err(r.error);

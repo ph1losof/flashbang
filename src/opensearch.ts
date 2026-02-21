@@ -11,6 +11,6 @@ export function opensearch(origin: string): Response {
 </OpenSearchDescription>`,
     {
       headers: { "Content-Type": "application/opensearchdescription+xml" },
-    },
+    }
   );
 }

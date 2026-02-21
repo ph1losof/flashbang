@@ -2,28 +2,28 @@ import { $ } from "bun";
 import { parse as parseTOML } from "smol-toml";
 
 interface Bang {
-  trigger: string;
-  name: string;
   domain: string;
-  url: string;
+  name: string;
   relevance: number;
+  trigger: string;
+  url: string;
 }
 
 interface RawDdgEntry {
-  t: string;
-  u: string;
-  s: string;
   d: string;
-  ts?: string[];
   r?: number;
+  s: string;
+  t: string;
+  ts?: string[];
+  u: string;
 }
 
 interface RawKagiEntry {
-  t: string;
-  u: string;
-  s: string;
   d: string;
+  s: string;
+  t: string;
   ts?: string[];
+  u: string;
 }
 
 function normalizeUrl(u: string): string {
@@ -123,14 +123,14 @@ function merge(sources: [string, Bang[]][]): Bang[] {
     }
   }
 
-  return [...map.values()].sort((a, b) =>
-    a.trigger < b.trigger ? -1 : a.trigger > b.trigger ? 1 : 0,
-  );
+  return [...map.values()].sort((a, b) => a.trigger.localeCompare(b.trigger));
 }
 
 function validate(bangs: Bang[]): Bang[] {
   return bangs.filter((b) => {
-    if (!b.trigger) return false;
+    if (!b.trigger) {
+      return false;
+    }
     if (!b.url.includes("{}")) {
       console.error(`Warning: bang !${b.trigger} has no {} placeholder in URL`);
     }
@@ -164,7 +164,9 @@ function jsEscape(s: string): string {
 function generateMin(bangs: Bang[]): string {
   let js = "export const BANGS={__proto__:null,";
   for (let i = 0; i < bangs.length; i++) {
-    if (i > 0) js += ",";
+    if (i > 0) {
+      js += ",";
+    }
     js += `'${jsEscape(bangs[i].trigger)}':'${jsEscape(bangs[i].url)}'`;
   }
   js += "};";
@@ -174,7 +176,9 @@ function generateMin(bangs: Bang[]): string {
 function generateFull(bangs: Bang[]): string {
   let js = "export const BANGS={__proto__:null,";
   for (let i = 0; i < bangs.length; i++) {
-    if (i > 0) js += ",";
+    if (i > 0) {
+      js += ",";
+    }
     const b = bangs[i];
     js += `'${jsEscape(b.trigger)}':{s:'${jsEscape(b.name)}',d:'${jsEscape(b.domain)}',u:'${jsEscape(b.url)}',r:${b.relevance}}`;
   }
@@ -185,7 +189,9 @@ function generateFull(bangs: Bang[]): string {
 function generateKeys(bangs: Bang[]): string {
   let js = "export const BANG_KEYS=[";
   for (let i = 0; i < bangs.length; i++) {
-    if (i > 0) js += ",";
+    if (i > 0) {
+      js += ",";
+    }
     js += `'${jsEscape(bangs[i].trigger)}'`;
   }
   js += "];";

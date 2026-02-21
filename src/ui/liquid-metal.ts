@@ -16,7 +16,7 @@ function createTextMaskTexture(
   text: string,
   font: string,
   width: number,
-  height: number,
+  height: number
 ): WebGLTexture {
   const c = document.createElement("canvas");
   c.width = width;
@@ -60,7 +60,7 @@ function createTextMaskTexture(
     0,
     gl.RGBA,
     gl.UNSIGNED_BYTE,
-    packed,
+    packed
   );
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
@@ -73,7 +73,7 @@ function createTextMaskTexture(
 function compileShader(
   gl: WebGL2RenderingContext,
   type: number,
-  src: string,
+  src: string
 ): WebGLShader {
   const s = gl.createShader(type)!;
   gl.shaderSource(s, src);
@@ -89,7 +89,7 @@ function compileShader(
 function createProgram(
   gl: WebGL2RenderingContext,
   vert: string,
-  frag: string,
+  frag: string
 ): WebGLProgram {
   const p = gl.createProgram()!;
   gl.attachShader(p, compileShader(gl, gl.VERTEX_SHADER, vert));
@@ -105,7 +105,7 @@ function createProgram(
 
 function getWordmarkFont(canvas: HTMLCanvasElement): string {
   const wordmarkText = canvas.parentElement?.querySelector(
-    ".wordmark-text",
+    ".wordmark-text"
   ) as HTMLElement | null;
   if (wordmarkText) {
     const style = getComputedStyle(wordmarkText);
@@ -116,13 +116,15 @@ function getWordmarkFont(canvas: HTMLCanvasElement): string {
 
 export function initLiquidMetal(
   canvas: HTMLCanvasElement,
-  text: string,
+  text: string
 ): LiquidMetalControls {
   const maybeGl = canvas.getContext("webgl2", {
     alpha: true,
     premultipliedAlpha: false,
   });
-  if (!maybeGl) return fallback(canvas);
+  if (!maybeGl) {
+    return fallback(canvas);
+  }
   const gl: WebGL2RenderingContext = maybeGl;
 
   const program = createProgram(gl, VERT, FRAG);
@@ -133,7 +135,7 @@ export function initLiquidMetal(
   gl.bufferData(
     gl.ARRAY_BUFFER,
     new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]),
-    gl.STATIC_DRAW,
+    gl.STATIC_DRAW
   );
   const aPos = gl.getAttribLocation(program, "a_pos");
   gl.enableVertexAttribArray(aPos);
@@ -146,7 +148,7 @@ export function initLiquidMetal(
 
   let brightness = 1.0;
   let rafId = 0;
-  let startTime = performance.now();
+  const startTime = performance.now();
 
   function resize() {
     const rect = canvas.parentElement!.getBoundingClientRect();
@@ -156,8 +158,8 @@ export function initLiquidMetal(
     if (canvas.width !== w || canvas.height !== h) {
       canvas.width = w;
       canvas.height = h;
-      canvas.style.width = rect.width + "px";
-      canvas.style.height = rect.height + "px";
+      canvas.style.width = `${rect.width}px`;
+      canvas.style.height = `${rect.height}px`;
       gl.viewport(0, 0, w, h);
 
       const tex = createTextMaskTexture(
@@ -165,7 +167,7 @@ export function initLiquidMetal(
         text,
         getWordmarkFont(canvas),
         w,
-        h,
+        h
       );
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -182,7 +184,7 @@ export function initLiquidMetal(
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
   const reducedMotion = window.matchMedia(
-    "(prefers-reduced-motion: reduce)",
+    "(prefers-reduced-motion: reduce)"
   ).matches;
 
   function render() {
@@ -211,14 +213,18 @@ export function initLiquidMetal(
       gl.deleteBuffer(buf);
     },
     flash() {
-      if (reducedMotion) return;
+      if (reducedMotion) {
+        return;
+      }
       brightness = 3.0;
       const flashStart = performance.now();
       function animFlash() {
         const elapsed = performance.now() - flashStart;
         const progress = Math.min(elapsed / 600, 1);
         brightness = 1.0 + 2.0 * (1 - progress) * (1 - progress);
-        if (progress < 1) requestAnimationFrame(animFlash);
+        if (progress < 1) {
+          requestAnimationFrame(animFlash);
+        }
       }
       requestAnimationFrame(animFlash);
     },
@@ -228,7 +234,9 @@ export function initLiquidMetal(
 function fallback(canvas: HTMLCanvasElement): LiquidMetalControls {
   canvas.style.display = "none";
   return {
-    destroy() {},
+    destroy() {
+      // no-op when WebGL is unavailable
+    },
     flash() {
       const wm = canvas.closest(".wordmark");
       if (wm) {

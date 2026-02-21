@@ -11,61 +11,61 @@ import {
 mock.module("./generated/bangs-full.js", () => {
   const BANGS: Record<string, { s: string; d: string; u: string; r: number }> =
     Object.create(null);
-  BANGS["b"] = {
+  BANGS.b = {
     s: "Bing",
     d: "www.bing.com",
     u: "https://www.bing.com/search?q={}",
     r: 300,
   };
-  BANGS["brave"] = {
+  BANGS.brave = {
     s: "Brave",
     d: "search.brave.com",
     u: "https://search.brave.com/search?q={}",
     r: 200,
   };
-  BANGS["ddg"] = {
+  BANGS.ddg = {
     s: "DuckDuckGo",
     d: "duckduckgo.com",
     u: "https://duckduckgo.com/?q={}",
     r: 800,
   };
-  BANGS["g"] = {
+  BANGS.g = {
     s: "Google",
     d: "www.google.com",
     u: "https://www.google.com/search?q={}",
     r: 1000,
   };
-  BANGS["gh"] = {
+  BANGS.gh = {
     s: "GitHub",
     d: "github.com",
     u: "https://github.com/search?q={}",
     r: 500,
   };
-  BANGS["ghi"] = {
+  BANGS.ghi = {
     s: "GitHub Issues",
     d: "github.com",
     u: "https://github.com/search?q={}&type=issues",
     r: 100,
   };
-  BANGS["ghp"] = {
+  BANGS.ghp = {
     s: "GitHub PRs",
     d: "github.com",
     u: "https://github.com/search?q={}&type=pullrequests",
     r: 50,
   };
-  BANGS["mdn"] = {
+  BANGS.mdn = {
     s: "MDN",
     d: "developer.mozilla.org",
     u: "https://developer.mozilla.org/en-US/search?q={}",
     r: 400,
   };
-  BANGS["w"] = {
+  BANGS.w = {
     s: "Wikipedia",
     d: "en.wikipedia.org",
     u: "https://en.wikipedia.org/wiki/Special:Search?search={}",
     r: 900,
   };
-  BANGS["yt"] = {
+  BANGS.yt = {
     s: "YouTube",
     d: "www.youtube.com",
     u: "https://www.youtube.com/results?search_query={}",
@@ -92,7 +92,9 @@ afterAll(() => {
 
 function req(cookie?: string): Request {
   const headers = new Headers();
-  if (cookie) headers.set("Cookie", cookie);
+  if (cookie) {
+    headers.set("Cookie", cookie);
+  }
   return new Request("http://localhost", { headers });
 }
 
@@ -119,8 +121,8 @@ describe("parseCookie", () => {
   test("URL-encoded customUrl decoded correctly", () => {
     const s = parseCookie(
       req(
-        "suggest=custom,g,https%3A%2F%2Fapi.example.com%2Fsuggest%3Fq%3D%7B%7D",
-      ),
+        "suggest=custom,g,https%3A%2F%2Fapi.example.com%2Fsuggest%3Fq%3D%7B%7D"
+      )
     );
     expect(s.customUrl).toBe("https://api.example.com/suggest?q={}");
   });
@@ -143,7 +145,7 @@ describe("bang suggestions — via suggest()", () => {
       trigger: "g",
       customUrl: null,
     });
-    const [query, completions, descriptions] = await r.json();
+    const [query, completions, _descriptions] = await r.json();
     expect(query).toBe("!gh");
     expect(completions).toEqual(["!gh", "!ghi", "!ghp"]);
   });
@@ -215,41 +217,39 @@ describe("bang suggestions — via suggest()", () => {
 
 describe("provider proxying — via suggest()", () => {
   test("provider=google → fetches google suggest URL", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      new Response(JSON.stringify(["cats", ["cats and dogs"]])),
-    );
+    fetchSpy.mockResolvedValueOnce(Response.json(["cats", ["cats and dogs"]]));
     const r = await suggest("cats", {
       provider: "google",
       trigger: "g",
       customUrl: null,
     });
     expect(fetchSpy).toHaveBeenCalledWith(
-      "https://suggestqueries.google.com/complete/search?client=firefox&q=cats",
+      "https://suggestqueries.google.com/complete/search?client=firefox&q=cats"
     );
     expect(r.headers.get("Content-Type")).toBe("application/json");
   });
 
   test("provider=ddg → fetches duckduckgo suggest URL", async () => {
-    fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify(["cats", []])));
+    fetchSpy.mockResolvedValueOnce(Response.json(["cats", []]));
     await suggest("cats", { provider: "ddg", trigger: "g", customUrl: null });
     expect(fetchSpy).toHaveBeenCalledWith(
-      "https://duckduckgo.com/ac/?q=cats&type=list",
+      "https://duckduckgo.com/ac/?q=cats&type=list"
     );
   });
 
   test("provider=bing → fetches bing suggest URL", async () => {
-    fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify(["cats", []])));
+    fetchSpy.mockResolvedValueOnce(Response.json(["cats", []]));
     await suggest("cats", { provider: "bing", trigger: "g", customUrl: null });
     expect(fetchSpy).toHaveBeenCalledWith(
-      "https://www.bing.com/osjson.aspx?query=cats",
+      "https://www.bing.com/osjson.aspx?query=cats"
     );
   });
 
   test("provider=brave → fetches brave suggest URL", async () => {
-    fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify(["cats", []])));
+    fetchSpy.mockResolvedValueOnce(Response.json(["cats", []]));
     await suggest("cats", { provider: "brave", trigger: "g", customUrl: null });
     expect(fetchSpy).toHaveBeenCalledWith(
-      "https://search.brave.com/api/suggest?q=cats&rich=false",
+      "https://search.brave.com/api/suggest?q=cats&rich=false"
     );
   });
 
@@ -266,38 +266,38 @@ describe("provider proxying — via suggest()", () => {
   });
 
   test("provider=default + trigger=g → resolves to google", async () => {
-    fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify(["cats", []])));
+    fetchSpy.mockResolvedValueOnce(Response.json(["cats", []]));
     await suggest("cats", {
       provider: "default",
       trigger: "g",
       customUrl: null,
     });
     expect(fetchSpy).toHaveBeenCalledWith(
-      "https://suggestqueries.google.com/complete/search?client=firefox&q=cats",
+      "https://suggestqueries.google.com/complete/search?client=firefox&q=cats"
     );
   });
 
   test("provider=default + trigger=ddg → resolves to duckduckgo", async () => {
-    fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify(["cats", []])));
+    fetchSpy.mockResolvedValueOnce(Response.json(["cats", []]));
     await suggest("cats", {
       provider: "default",
       trigger: "ddg",
       customUrl: null,
     });
     expect(fetchSpy).toHaveBeenCalledWith(
-      "https://duckduckgo.com/ac/?q=cats&type=list",
+      "https://duckduckgo.com/ac/?q=cats&type=list"
     );
   });
 
   test("provider=default + trigger=brave → resolves to brave", async () => {
-    fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify(["cats", []])));
+    fetchSpy.mockResolvedValueOnce(Response.json(["cats", []]));
     await suggest("cats", {
       provider: "default",
       trigger: "brave",
       customUrl: null,
     });
     expect(fetchSpy).toHaveBeenCalledWith(
-      "https://search.brave.com/api/suggest?q=cats&rich=false",
+      "https://search.brave.com/api/suggest?q=cats&rich=false"
     );
   });
 
@@ -313,9 +313,7 @@ describe("provider proxying — via suggest()", () => {
   });
 
   test("provider=custom + customUrl → fetches customUrl", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      new Response(JSON.stringify(["cats", ["result"]])),
-    );
+    fetchSpy.mockResolvedValueOnce(Response.json(["cats", ["result"]]));
     await suggest("cats", {
       provider: "custom",
       trigger: "g",

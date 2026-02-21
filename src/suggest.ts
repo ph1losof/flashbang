@@ -2,9 +2,9 @@ import { BANGS } from "./generated/bangs-full.js";
 import { BANG_KEYS } from "./generated/bangs-keys.js";
 
 export interface SuggestSettings {
+  customUrl: string | null;
   provider: string;
   trigger: string;
-  customUrl: string | null;
 }
 
 const SUGGEST_URLS: Record<string, string> = {
@@ -28,7 +28,7 @@ function empty(query: string): Response {
 // "!g cats"   → null (bang already has a query, user is done typing it)
 // "g!"        → null (suffix bang, already complete)
 function parsePartialBang(
-  q: string,
+  q: string
 ): { prefix: string; partial: string } | null {
   const s = q.trim();
   // "!gh" — prefix bang, still typing if no space
@@ -39,7 +39,9 @@ function parsePartialBang(
   }
   // "cats !gh" — trailing partial bang
   const trailing = s.lastIndexOf(" !");
-  if (trailing === -1) return null;
+  if (trailing === -1) {
+    return null;
+  }
   const rest = s.substring(trailing + 2);
   return rest.indexOf(" ") === -1
     ? { prefix: s.substring(0, trailing + 1), partial: rest.toLowerCase() }
@@ -49,22 +51,27 @@ function parsePartialBang(
 function bangSuggestions(
   query: string,
   prefix: string,
-  partial: string,
+  partial: string
 ): Response {
   // Binary search to first key >= partial
   let lo = 0,
     hi = BANG_KEYS.length;
   while (lo < hi) {
     const mid = (lo + hi) >>> 1;
-    if (BANG_KEYS[mid] < partial) lo = mid + 1;
-    else hi = mid;
+    if (BANG_KEYS[mid] < partial) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
   }
 
   // Collect all prefix matches (contiguous since keys are sorted)
   const matches: [string, number][] = [];
   for (let i = lo; i < BANG_KEYS.length; i++) {
     const k = BANG_KEYS[i];
-    if (!k.startsWith(partial)) break;
+    if (!k.startsWith(partial)) {
+      break;
+    }
     matches.push([k, BANGS[k].r || 0]);
   }
 
@@ -86,20 +93,34 @@ function bangSuggestions(
 
 function resolveEndpoint(provider: string, trigger: string): string | null {
   const url = SUGGEST_URLS[provider];
-  if (url) return url;
-  if (provider === "none") return null;
+  if (url) {
+    return url;
+  }
+  if (provider === "none") {
+    return null;
+  }
   // "default" — infer from the default bang trigger
-  if (trigger === "g" || trigger === "google") return SUGGEST_URLS.google;
-  if (trigger === "ddg" || trigger === "duckduckgo") return SUGGEST_URLS.ddg;
-  if (trigger === "b" || trigger === "bing") return SUGGEST_URLS.bing;
-  if (trigger === "brave") return SUGGEST_URLS.brave;
+  if (trigger === "g" || trigger === "google") {
+    return SUGGEST_URLS.google;
+  }
+  if (trigger === "ddg" || trigger === "duckduckgo") {
+    return SUGGEST_URLS.ddg;
+  }
+  if (trigger === "b" || trigger === "bing") {
+    return SUGGEST_URLS.bing;
+  }
+  if (trigger === "brave") {
+    return SUGGEST_URLS.brave;
+  }
   return null;
 }
 
 export function parseCookie(request: Request): SuggestSettings {
   const header = request.headers.get("Cookie") || "";
   const match = header.match(COOKIE_RE);
-  if (!match) return { provider: "default", trigger: "g", customUrl: null };
+  if (!match) {
+    return { provider: "default", trigger: "g", customUrl: null };
+  }
   const [provider, trigger, customUrl] = match[1].split(",");
   return {
     provider: provider || "default",
@@ -110,16 +131,20 @@ export function parseCookie(request: Request): SuggestSettings {
 
 export async function suggest(
   query: string,
-  settings: SuggestSettings,
+  settings: SuggestSettings
 ): Promise<Response> {
   const bang = parsePartialBang(query);
-  if (bang) return bangSuggestions(query, bang.prefix, bang.partial);
+  if (bang) {
+    return bangSuggestions(query, bang.prefix, bang.partial);
+  }
 
   const { provider, trigger, customUrl } = settings;
   const endpoint =
     provider === "custom" ? customUrl : resolveEndpoint(provider, trigger);
 
-  if (!endpoint) return empty(query);
+  if (!endpoint) {
+    return empty(query);
+  }
 
   try {
     const res = await fetch(endpoint.replace("{}", encodeURIComponent(query)));

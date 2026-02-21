@@ -20,11 +20,15 @@ function $<T extends HTMLElement>(sel: string): T {
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   cls: string,
-  text?: string,
+  text?: string
 ): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text !== undefined) e.textContent = text;
+  if (cls) {
+    e.className = cls;
+  }
+  if (text !== undefined) {
+    e.textContent = text;
+  }
   return e;
 }
 
@@ -35,7 +39,7 @@ function notifySW(type: string) {
 function setSuggestCookie(
   provider: string,
   trigger: string,
-  customUrl: string,
+  customUrl: string
 ) {
   const value = `${provider},${trigger},${encodeURIComponent(customUrl)}`;
   document.cookie = `suggest=${value};path=/;max-age=31536000;SameSite=Lax`;
@@ -93,7 +97,9 @@ function setupModal(onFirstOpen: () => void) {
   closeBtn.addEventListener("click", closeModal);
 
   modal.addEventListener("click", (e) => {
-    if (e.target === modal) closeModal();
+    if (e.target === modal) {
+      closeModal();
+    }
   });
 
   document.addEventListener("keydown", (e) => {
@@ -103,23 +109,25 @@ function setupModal(onFirstOpen: () => void) {
   });
 
   modal.addEventListener("keydown", (e) => {
-    if (e.key !== "Tab") return;
+    if (e.key !== "Tab") {
+      return;
+    }
     const focusable = card.querySelectorAll<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
     );
-    if (focusable.length === 0) return;
+    if (focusable.length === 0) {
+      return;
+    }
     const first = focusable[0];
-    const last = focusable[focusable.length - 1];
+    const last = focusable.at(-1);
     if (e.shiftKey) {
       if (document.activeElement === first) {
         e.preventDefault();
         last.focus();
       }
-    } else {
-      if (document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
+    } else if (document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
     }
   });
 
@@ -143,13 +151,21 @@ async function initSettings() {
     ]);
 
   luckySelect.value = savedLucky;
-  if (savedLucky === "custom") luckyUrlInput.classList.remove("hidden");
-  if (savedLuckyUrl) luckyUrlInput.value = savedLuckyUrl;
+  if (savedLucky === "custom") {
+    luckyUrlInput.classList.remove("hidden");
+  }
+  if (savedLuckyUrl) {
+    luckyUrlInput.value = savedLuckyUrl;
+  }
 
   defaultInput.value = defaultBang;
   suggestSelect.value = savedProvider;
-  if (savedProvider === "custom") suggestUrlInput.classList.remove("hidden");
-  if (savedUrl) suggestUrlInput.value = savedUrl;
+  if (savedProvider === "custom") {
+    suggestUrlInput.classList.remove("hidden");
+  }
+  if (savedUrl) {
+    suggestUrlInput.value = savedUrl;
+  }
 
   setSuggestCookie(savedProvider, defaultBang, savedUrl);
 
@@ -181,7 +197,7 @@ async function initSettings() {
     setSuggestCookie(
       suggestSelect.value,
       defaultInput.value,
-      suggestUrlInput.value.trim(),
+      suggestUrlInput.value.trim()
     );
     if (suggestSelect.value === "custom") {
       suggestUrlInput.classList.remove("hidden");
@@ -225,7 +241,7 @@ async function initSettings() {
       const hits = Object.entries(f)
         .filter(
           ([t, b]) =>
-            t.includes(q) || b.s.toLowerCase().includes(q) || b.d.includes(q),
+            t.includes(q) || b.s.toLowerCase().includes(q) || b.d.includes(q)
         )
         .sort((a, b) => {
           const as_ = a[0].startsWith(q) ? 0 : 1;
@@ -236,19 +252,34 @@ async function initSettings() {
       const container = $("#bang-results");
       if (hits.length === 0) {
         container.replaceChildren(
-          el("div", "py-3 text-center text-sm text-text-secondary", "No matches"),
+          el(
+            "div",
+            "py-3 text-center text-sm text-text-secondary",
+            "No matches"
+          )
         );
       } else {
         container.replaceChildren(
           ...hits.map(([t, b]) => {
-            const row = el("div", "flex items-center gap-3 px-2.5 py-2 rounded-lg bg-bg-secondary mb-1");
+            const row = el(
+              "div",
+              "flex items-center gap-3 px-2.5 py-2 rounded-lg bg-bg-secondary mb-1"
+            );
             row.append(
-              el("code", "px-1.5 py-0.5 rounded bg-bg-active text-xs min-w-15 text-center font-mono", "!" + t),
+              el(
+                "code",
+                "px-1.5 py-0.5 rounded bg-bg-active text-xs min-w-15 text-center font-mono",
+                `!${t}`
+              ),
               el("span", "flex-1 text-[13px] font-medium", b.s),
-              el("span", "text-[11px] text-text-secondary max-w-30 overflow-hidden text-ellipsis whitespace-nowrap", b.d),
+              el(
+                "span",
+                "text-[11px] text-text-secondary max-w-30 overflow-hidden text-ellipsis whitespace-nowrap",
+                b.d
+              )
             );
             return row;
-          }),
+          })
         );
       }
     }, 200);
@@ -265,7 +296,9 @@ async function initSettings() {
       .trim();
     const name = (fd.get("name") as string).trim();
     const url = (fd.get("url") as string).trim();
-    if (!trigger || !name || !url) return;
+    if (!(trigger && name && url)) {
+      return;
+    }
     await db.addCustomBang({ trigger, name, url });
     notifySW("invalidate");
     form.reset();
@@ -286,7 +319,9 @@ async function initSettings() {
 
   $<HTMLInputElement>("#import-file").addEventListener("change", async (e) => {
     const file = (e.target as HTMLInputElement).files?.[0];
-    if (!file) return;
+    if (!file) {
+      return;
+    }
     try {
       const data = JSON.parse(await file.text());
       await db.importAll(data);
@@ -306,13 +341,16 @@ async function renderCustom() {
   const list = $("#custom-list");
   if (custom.length === 0) {
     list.replaceChildren(
-      el("div", "text-sm text-text-secondary", "No custom bangs yet"),
+      el("div", "text-sm text-text-secondary", "No custom bangs yet")
     );
     return;
   }
   list.replaceChildren(
     ...custom.map((b) => {
-      const row = el("div", "flex items-center gap-2.5 p-2.5 mb-1.5 rounded-lg bg-bg-secondary");
+      const row = el(
+        "div",
+        "flex items-center gap-2.5 p-2.5 mb-1.5 rounded-lg bg-bg-secondary"
+      );
       const rmBtn = el("button", "btn-danger", "remove");
       rmBtn.addEventListener("click", async () => {
         await db.removeCustomBang(b.trigger);
@@ -320,12 +358,16 @@ async function renderCustom() {
         await renderCustom();
       });
       row.append(
-        el("code", "px-1.5 py-0.5 rounded bg-bg-active text-xs min-w-15 text-center font-mono", "!" + b.trigger),
+        el(
+          "code",
+          "px-1.5 py-0.5 rounded bg-bg-active text-xs min-w-15 text-center font-mono",
+          `!${b.trigger}`
+        ),
         el("span", "flex-1 text-[13px] font-medium", b.name),
-        rmBtn,
+        rmBtn
       );
       return row;
-    }),
+    })
   );
 }
 
@@ -334,13 +376,13 @@ function init() {
 
   const metal = initLiquidMetal(
     $<HTMLCanvasElement>("#metal-canvas"),
-    "flashbang",
+    "flashbang"
   );
   $(".wordmark").classList.add("has-shader");
 
   $("#copy-btn").addEventListener("click", async () => {
     await navigator.clipboard.writeText(
-      $<HTMLInputElement>("#setup-url").value,
+      $<HTMLInputElement>("#setup-url").value
     );
     flashAnim($<HTMLInputElement>("#setup-url"));
     metal.flash();

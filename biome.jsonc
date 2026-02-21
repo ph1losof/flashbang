@@ -1,0 +1,172 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "files": {
+    "ignoreUnknown": true,
+    "includes": ["**", "!!**/dist", "!!**/generated"]
+  },
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true,
+    "defaultBranch": "master"
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineEnding": "lf",
+    "lineWidth": 80,
+    "bracketSpacing": true
+  },
+  "javascript": {
+    "globals": ["Bun"],
+    "formatter": {
+      "arrowParentheses": "always",
+      "quoteProperties": "asNeeded",
+      "semicolons": "always",
+      "trailingCommas": "es5"
+    }
+  },
+  "json": {
+    "formatter": {
+      "trailingCommas": "none"
+    }
+  },
+  "html": {
+    "formatter": {
+      "enabled": true
+    }
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+
+      "a11y": {
+        "noAutofocus": "off",
+        // Decorative SVGs don't need titles
+        "noSvgWithoutTitle": "off",
+        "useButtonType": "error"
+      },
+
+      "complexity": {
+        "noExcessiveCognitiveComplexity": {
+          "level": "error",
+          "options": { "maxAllowedComplexity": 25 }
+        },
+        "noForEach": "error",
+        "noUselessStringConcat": "error",
+        "noUselessUndefinedInitialization": "error",
+        // Fire-and-forget promise patterns use void
+        "noVoid": "off",
+        "useArrowFunction": "error",
+        "useDateNow": "error",
+        "useFlatMap": "error",
+        "useLiteralKeys": "error",
+        "useOptionalChain": "error",
+        "useSimplifiedLogicExpression": "error"
+      },
+
+      "correctness": {
+        "noUndeclaredVariables": "error",
+        "noUnusedFunctionParameters": "error",
+        "noUnusedImports": { "fix": "safe", "level": "error" },
+        "noUnusedVariables": "error"
+      },
+
+      "performance": {
+        "noAccumulatingSpread": "error",
+        "noBarrelFile": "error",
+        "noDelete": "error"
+      },
+
+      "security": {
+        "noGlobalEval": "error"
+      },
+
+      "style": {
+        "noEnum": "error",
+        "noNegationElse": "error",
+        "noNestedTernary": "error",
+        // Non-null assertions are used intentionally throughout the codebase
+        "noNonNullAssertion": "off",
+        "noUnusedTemplateLiteral": "error",
+        "noUselessElse": "error",
+        "useBlockStatements": { "fix": "safe", "level": "error" },
+        "useCollapsedElseIf": "error",
+        "useConst": "error",
+        "useConsistentTypeDefinitions": {
+          "level": "error",
+          "options": { "style": "interface" }
+        },
+        "useExportType": "error",
+        "useFilenamingConvention": {
+          "level": "error",
+          "options": { "requireAscii": true, "filenameCases": ["kebab-case"] }
+        },
+        "useForOf": "error",
+        "useImportType": "error",
+        "useNodejsImportProtocol": "error",
+        "useSelfClosingElements": "error",
+        "useShorthandAssign": "error",
+        "useTemplate": "error"
+      },
+
+      "suspicious": {
+        // Intentional bitwise ops in suggestion scoring
+        "noBitwiseOperators": "off",
+        "noConsole": "off",
+        // Intentional cookie access for provider settings
+        "noDocumentCookie": "off",
+        "noEmptyBlockStatements": "error",
+        // IndexedDB wrappers and event handlers use `any` intentionally
+        "noExplicitAny": "off",
+        "noDoubleEquals": "error",
+        "useAwait": "error",
+        "useStaticResponseMethods": "error"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["**/*.{test,spec}.{ts,tsx,js,jsx}"],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noExcessiveCognitiveComplexity": "off"
+          },
+          "suspicious": {
+            "noExplicitAny": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/*.d.ts"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUnusedVariables": "off",
+            "noUndeclaredVariables": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["**/*.jsonc", "**/tsconfig.json", "**/tsconfig.*.json"],
+      "json": {
+        "parser": {
+          "allowComments": true,
+          "allowTrailingCommas": true
+        }
+      }
+    }
+  ]
+}

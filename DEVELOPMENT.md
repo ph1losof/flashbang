@@ -8,6 +8,8 @@
 
 ```sh
 bun install        # install dependencies
+bun run check      # format + lint check (fails on issues)
+bun run fix        # auto-fix format + lint issues
 bun run codegen    # fetch DDG/Kagi sources + generate bang maps
 bun run build      # bundle + minify (requires codegen first)
 bun run dev        # bundle + dev server with file watching & live reload

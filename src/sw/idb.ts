@@ -1,5 +1,5 @@
 import { BANGS } from "../generated/bangs-min.js";
-import { openDB, idbWrap } from "../shared/idb";
+import { idbWrap, openDB } from "../shared/idb";
 import type { RedirectSettings } from "./redirect";
 
 const DEFAULT_URL = "https://www.google.com/search?q={}";
@@ -13,7 +13,9 @@ const DEFAULT_LUCKY_URL = "https://duckduckgo.com/?q=\\{}";
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 function getDB(): Promise<IDBDatabase> {
-  if (!dbPromise) dbPromise = openDB();
+  if (!dbPromise) {
+    dbPromise = openDB();
+  }
   return dbPromise;
 }
 
@@ -24,7 +26,9 @@ export function getCachedSettings(): RedirectSettings | null {
 }
 
 export async function readRedirectSettings(): Promise<RedirectSettings> {
-  if (cachedRedirect) return cachedRedirect;
+  if (cachedRedirect) {
+    return cachedRedirect;
+  }
   try {
     const db = await getDB();
     const tx = db.transaction(["settings", "custom-bangs"], "readonly");
@@ -58,7 +62,9 @@ export async function readRedirectSettings(): Promise<RedirectSettings> {
         break;
     }
     const custom: Record<string, string> = {};
-    for (const e of all) custom[e.trigger] = e.url;
+    for (const e of all) {
+      custom[e.trigger] = e.url;
+    }
 
     cachedRedirect = { defaultUrl, custom, luckyUrl };
   } catch {

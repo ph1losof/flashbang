@@ -1,7 +1,7 @@
-import { openDB, idbWrap } from "../shared/idb";
+import { idbWrap, openDB } from "../shared/idb";
 
 export class DB {
-  private dbp: Promise<IDBDatabase> = openDB();
+  private readonly dbp: Promise<IDBDatabase> = openDB();
 
   private async store(name: string, mode: IDBTransactionMode = "readonly") {
     const db = await this.dbp;
@@ -51,17 +51,25 @@ export class DB {
   }
 
   async importAll(data: any) {
-    if (data.settings?.defaultBang)
+    if (data.settings?.defaultBang) {
       await this.setSetting("default-bang", data.settings.defaultBang);
-    if (data.settings?.suggestProvider)
+    }
+    if (data.settings?.suggestProvider) {
       await this.setSetting("suggest-provider", data.settings.suggestProvider);
-    if (data.settings?.suggestUrl)
+    }
+    if (data.settings?.suggestUrl) {
       await this.setSetting("suggest-url", data.settings.suggestUrl);
-    if (data.settings?.luckyProvider)
+    }
+    if (data.settings?.luckyProvider) {
       await this.setSetting("lucky-provider", data.settings.luckyProvider);
-    if (data.settings?.luckyUrl)
+    }
+    if (data.settings?.luckyUrl) {
       await this.setSetting("lucky-url", data.settings.luckyUrl);
-    if (Array.isArray(data.customBangs))
-      for (const b of data.customBangs) await this.addCustomBang(b);
+    }
+    if (Array.isArray(data.customBangs)) {
+      for (const b of data.customBangs) {
+        await this.addCustomBang(b);
+      }
+    }
   }
 }

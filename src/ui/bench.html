@@ -1,60 +1,60 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>flashbang — query type benchmark</title>
-    <link rel="stylesheet" href="/styles.css" />
-    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="icon" type="image/svg+xml" href="/icon.svg">
     <style>
-      .warning {
-        background: #2a2a1a;
-        border: 1px solid #facc1555;
-        color: #facc15;
-      }
-      .warning a {
-        color: #facc15;
-        text-decoration: underline;
-      }
-      .progress-fill {
-        height: 100%;
-        background: linear-gradient(90deg, #9e9ebe, #e0e0f0);
-        width: 0%;
-        transition: width 0.1s;
-      }
-      .stats-table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      .stats-table th {
-        text-align: left;
-        font-weight: 600;
-        color: #8888a0;
-        padding: 0.5rem 0.6rem;
-        border-bottom: 1px solid #2e2e44;
-        font-size: 0.7rem;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-      }
-      .stats-table td {
-        padding: 0.45rem 0.6rem;
-        border-bottom: 1px solid #1e1e2e;
-        font-family:
-          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.78rem;
-      }
-      .stats-table tr td:first-child {
-        font-family: inherit;
-        font-weight: 600;
-      }
-      .stats-table .fastest {
-        color: #4ade80;
-      }
-      .summary-value {
-        color: #4ade80;
-        font-family:
-          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      }
+    .warning {
+      color: #facc15;
+      background: #2a2a1a;
+      border: 1px solid #facc1555;
+    }
+    .warning a {
+      color: #facc15;
+      text-decoration: underline;
+    }
+    .progress-fill {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #9e9ebe, #e0e0f0);
+      transition: width 0.1s;
+    }
+    .stats-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .stats-table th {
+      padding: 0.5rem 0.6rem;
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: #8888a0;
+      text-align: left;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid #2e2e44;
+    }
+    .stats-table td {
+      padding: 0.45rem 0.6rem;
+      font-family:
+        ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.78rem;
+      border-bottom: 1px solid #1e1e2e;
+    }
+    .stats-table tr td:first-child {
+      font-family: inherit;
+      font-weight: 600;
+    }
+    .stats-table .fastest {
+      color: #4ade80;
+    }
+    .summary-value {
+      font-family:
+        ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      color: #4ade80;
+    }
     </style>
   </head>
   <body>
@@ -88,8 +88,12 @@
               value="500"
               inputmode="numeric"
               class="input-field !w-48"
-            />
-            <button class="btn-primary whitespace-nowrap" id="run-btn">
+            >
+            <button
+              type="button"
+              class="btn-primary whitespace-nowrap"
+              id="run-btn"
+            >
               Run Benchmark
             </button>
           </div>
@@ -150,16 +154,16 @@
           </p>
           <ul class="my-2 ml-5">
             <li class="mb-1">
-              <strong class="text-text">50 warmup iterations</strong> per query
-              type (discarded) to stabilize caches
+              <strong class="text-text">50 warmup iterations</strong>
+              per query type (discarded) to stabilize caches
             </li>
             <li class="mb-1">
-              <strong class="text-text">500 measured iterations</strong> by
-              default (configurable 100&ndash;5,000)
+              <strong class="text-text">500 measured iterations</strong>
+              by default (configurable 100&ndash;5,000)
             </li>
             <li class="mb-1">
-              <strong class="text-text">performance.now()</strong> for
-              high-resolution timing per iteration
+              <strong class="text-text">performance.now()</strong>
+              for high-resolution timing per iteration
             </li>
             <li class="mb-1">
               Stats computed: <strong class="text-text">median</strong>, mean,

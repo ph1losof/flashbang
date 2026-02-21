@@ -1,77 +1,88 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="theme-color" content="#0a0a0f" />
+    <meta charset="UTF-8">
+    <meta name="theme-color" content="#0a0a0f">
     <link
       rel="search"
       type="application/opensearchdescription+xml"
       title="flashbang"
       href="/opensearch.xml"
-    />
+    >
     <style>
-      html {
-        background: #0a0a0f;
-      }
+    html {
+      background: #0a0a0f;
+    }
     </style>
   </head>
   <body>
     <script>
-      (function () {
-        var hasQuery =
-          location.search.startsWith("?q=") || location.search.includes("&q=");
+    "use strict";
+    (() => {
+      const hasQuery =
+        location.search.startsWith("?q=") || location.search.includes("&q=");
 
-        var query = hasQuery && new URLSearchParams(location.search).get("q");
+      const query = hasQuery && new URLSearchParams(location.search).get("q");
 
-        if (
-          "serviceWorker" in navigator &&
-          query &&
-          !navigator.serviceWorker.controller
-        ) {
-          navigator.serviceWorker.addEventListener(
-            "message",
-            function (e) {
-              if (e.data && e.data.url) location.replace(e.data.url);
-            },
-            { once: true },
-          );
-          navigator.serviceWorker.addEventListener(
-            "controllerchange",
-            function () {
-              navigator.serviceWorker.controller.postMessage({
-                type: "redirect",
-                query: query,
-              });
-            },
-            { once: true },
-          );
-          navigator.serviceWorker.register("/sw.js");
-        } else if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("/sw.js").then(function (reg) {
-            reg.addEventListener("updatefound", function () {
-              var sw = reg.installing;
-              if (!sw) return;
-              sw.addEventListener("statechange", function () {
-                if (sw.state === "activated") location.reload();
-              });
+      if (
+        "serviceWorker" in navigator &&
+        query &&
+        !navigator.serviceWorker.controller
+      ) {
+        navigator.serviceWorker.addEventListener(
+          "message",
+          (e) => {
+            if (e.data?.url) {
+              location.replace(e.data.url);
+            }
+          },
+          { once: true }
+        );
+        navigator.serviceWorker.addEventListener(
+          "controllerchange",
+          () => {
+            navigator.serviceWorker.controller.postMessage({
+              type: "redirect",
+              query,
+            });
+          },
+          { once: true }
+        );
+        navigator.serviceWorker.register("/sw.js");
+      } else if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("/sw.js").then((reg) => {
+          reg.addEventListener("updatefound", () => {
+            const sw = reg.installing;
+            if (!sw) {
+              return;
+            }
+            sw.addEventListener("statechange", () => {
+              if (sw.state === "activated") {
+                location.reload();
+              }
             });
           });
-          Promise.all([
-            fetch("/opensearch.xml").catch(function () {}),
-            new Promise(function (resolve) {
-              if (navigator.serviceWorker.controller) resolve();
-              else
-                navigator.serviceWorker.addEventListener(
-                  "controllerchange",
-                  resolve,
-                  { once: true },
-                );
-            }),
-          ]).then(function () {
-            location.replace(location.href);
-          });
-        }
-      })();
+        });
+        Promise.all([
+          fetch("/opensearch.xml").catch(() => {
+            // pre-warm — ignore errors
+          }),
+          new Promise((resolve) => {
+            if (navigator.serviceWorker.controller) {
+              resolve();
+            } else {
+              navigator.serviceWorker.addEventListener(
+                "controllerchange",
+                resolve,
+                { once: true }
+              );
+            }
+          }),
+        ]).then(() => {
+          location.replace(location.href);
+        });
+      }
+    })();
     </script>
   </body>
 </html>

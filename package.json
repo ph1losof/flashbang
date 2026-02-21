@@ -11,10 +11,13 @@
     "build:css": "bunx unocss 'src/ui/home.html' 'src/ui/bench.html' 'src/ui/app.ts' 'src/ui/bench.ts' 'src/ui/liquid-metal.ts' -o dist/styles.css --minify",
     "dev": "bun --hot scripts/dev.ts",
     "start": "bun scripts/start.ts",
+    "check": "biome check",
+    "fix": "biome check --write",
     "clean": "rm -rf dist",
     "test": "bun test"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.4",
     "@minify-html/node": "^0.18.1",
     "@types/bun": "latest",
     "@unocss/cli": "^66.6.0",

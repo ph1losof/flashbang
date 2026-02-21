@@ -1,8 +1,8 @@
 import { BANGS } from "../generated/bangs-min.js";
 
 export interface RedirectSettings {
-  defaultUrl: string;
   custom: Record<string, string>;
+  defaultUrl: string;
   luckyUrl: string | null;
 }
 
@@ -30,8 +30,9 @@ function parse(q: string): {
     }
     // "!g cats" or "!g"
     const sp = s.indexOf(" ");
-    if (sp === -1)
+    if (sp === -1) {
       return { bang: s.substring(1).toLowerCase(), term: "", lucky: false };
+    }
     return {
       bang: s.substring(1, sp).toLowerCase(),
       term: s.substring(sp + 1),
@@ -46,7 +47,9 @@ function parse(q: string): {
 
   // All remaining patterns require "!" — find it once, bail if absent
   const excl = s.indexOf("!");
-  if (excl === -1) return { bang: null, term: s, lucky: false };
+  if (excl === -1) {
+    return { bang: null, term: s, lucky: false };
+  }
 
   // "g! cats" — prefix suffix-bang
   if (excl < s.length - 1 && s.charCodeAt(excl + 1) === 32) {
@@ -70,8 +73,9 @@ function parse(q: string): {
   const bi = s.lastIndexOf(" !");
   if (bi !== -1 && bi < s.length - 2) {
     const b = s.substring(bi + 2);
-    if (b.indexOf(" ") === -1)
+    if (b.indexOf(" ") === -1) {
       return { bang: b.toLowerCase(), term: s.substring(0, bi), lucky: false };
+    }
   }
 
   // "cats g!" — trailing suffix-bang
@@ -79,12 +83,13 @@ function parse(q: string): {
     const lastSpace = s.lastIndexOf(" ");
     if (lastSpace !== -1) {
       const b = s.substring(lastSpace + 1, s.length - 1);
-      if (b.length > 0)
+      if (b.length > 0) {
         return {
           bang: b.toLowerCase(),
           term: s.substring(0, lastSpace),
           lucky: false,
         };
+      }
     }
   }
 
@@ -93,7 +98,7 @@ function parse(q: string): {
 
 export function redirect(
   query: string,
-  { defaultUrl, custom, luckyUrl }: RedirectSettings,
+  { defaultUrl, custom, luckyUrl }: RedirectSettings
 ): Response {
   if (query === "!") {
     return Response.redirect("/", 302);

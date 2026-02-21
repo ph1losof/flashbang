@@ -1,8 +1,10 @@
-import { $ } from "bun";
 import { minify } from "@minify-html/node";
+import { $ } from "bun";
 
 await $`mkdir -p dist`;
-for (const f of new Bun.Glob("*.js").scanSync("dist")) await $`rm dist/${f}`;
+for (const f of new Bun.Glob("*.js").scanSync("dist")) {
+  await $`rm dist/${f}`;
+}
 
 console.log("=== Bundle service worker ===");
 await Bun.build({
@@ -43,31 +45,31 @@ const css = await Bun.file("dist/styles.css").text();
 const inlineCSS = (src: string) =>
   src.replace(
     '<link rel="stylesheet" href="/styles.css" />',
-    `<style>${css}</style>`,
+    `<style>${css}</style>`
   );
 
-let indexHtml = await Bun.file("src/ui/index.html").text();
+const indexHtml = await Bun.file("src/ui/index.html").text();
 await Bun.write(
   "dist/index.html",
-  minify(Buffer.from(indexHtml), { minify_css: true, minify_js: true }),
+  minify(Buffer.from(indexHtml), { minify_css: true, minify_js: true })
 );
 
-let homeHtml = await Bun.file("src/ui/home.html").text();
+const homeHtml = await Bun.file("src/ui/home.html").text();
 await Bun.write(
   "dist/home.html",
   minify(Buffer.from(inlineCSS(homeHtml)), {
     minify_css: true,
     minify_js: true,
-  }),
+  })
 );
 
-let benchHtml = await Bun.file("src/ui/bench.html").text();
+const benchHtml = await Bun.file("src/ui/bench.html").text();
 await Bun.write(
   "dist/bench.html",
   minify(Buffer.from(inlineCSS(benchHtml)), {
     minify_css: true,
     minify_js: true,
-  }),
+  })
 );
 
 await $`rm dist/styles.css`;

@@ -1,9 +1,12 @@
-import { $ } from "bun";
-import { watch } from "fs";
+import { watch } from "node:fs";
 import { minify } from "@minify-html/node";
+import { $ } from "bun";
 import { parseCookie } from "../src/suggest";
 
-type SSEClient = { enqueue: (data: string) => void; close: () => void };
+interface SSEClient {
+  close: () => void;
+  enqueue: (data: string) => void;
+}
 const clients = new Set<SSEClient>();
 
 function broadcast() {
@@ -64,13 +67,13 @@ async function build() {
   const inlineCSS = (src: string) =>
     src.replace(
       '<link rel="stylesheet" href="/styles.css" />',
-      `<style>${css}</style>`,
+      `<style>${css}</style>`
     );
 
   const indexHtml = await Bun.file("src/ui/index.html").text();
   await Bun.write(
     "dist/index.html",
-    minify(Buffer.from(indexHtml), { minify_css: true, minify_js: true }),
+    minify(Buffer.from(indexHtml), { minify_css: true, minify_js: true })
   );
 
   const homeHtml = await Bun.file("src/ui/home.html").text();
@@ -79,7 +82,7 @@ async function build() {
     minify(Buffer.from(inlineCSS(homeHtml)), {
       minify_css: true,
       minify_js: true,
-    }),
+    })
   );
 
   const benchHtml = await Bun.file("src/ui/bench.html").text();
@@ -88,7 +91,7 @@ async function build() {
     minify(Buffer.from(inlineCSS(benchHtml)), {
       minify_css: true,
       minify_js: true,
-    }),
+    })
   );
 
   console.log(`Build done in ${(performance.now() - t).toFixed(0)}ms`);
@@ -101,8 +104,9 @@ watch("src", { recursive: true }, (_event, filename) => {
   if (
     filename &&
     (filename.endsWith(".test.ts") || filename.endsWith(".test.js"))
-  )
+  ) {
     return;
+  }
   clearTimeout(timeout);
   timeout = setTimeout(async () => {
     console.log("File change detected, rebuilding...");
@@ -117,14 +121,15 @@ watch("src", { recursive: true }, (_event, filename) => {
 
 function injectLiveReload(html: string): string {
   const idx = html.lastIndexOf("</body>");
-  if (idx !== -1)
+  if (idx !== -1) {
     return html.slice(0, idx) + LIVE_RELOAD_SCRIPT + html.slice(idx);
+  }
   return html + LIVE_RELOAD_SCRIPT;
 }
 
 function htmlResponse(
   file: string,
-  headers?: Record<string, string>,
+  headers?: Record<string, string>
 ): Response {
   const content = injectLiveReload(file);
   return new Response(content, {
@@ -182,7 +187,7 @@ Bun.serve({
       });
     }
 
-    let path = url.pathname === "/" ? "/index.html" : url.pathname;
+    const path = url.pathname === "/" ? "/index.html" : url.pathname;
     const file = Bun.file(`dist${path}`);
     if (await file.exists()) {
       if (path.endsWith(".html")) {

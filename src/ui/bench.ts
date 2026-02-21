@@ -9,14 +9,20 @@ const QUERY_TYPES = [
 ];
 
 async function ensureSW(): Promise<void> {
-  if (navigator.serviceWorker.controller) return;
+  if (navigator.serviceWorker.controller) {
+    return;
+  }
 
   const reg = await navigator.serviceWorker.register("/sw.js");
 
   if (reg.active) {
     if (!navigator.serviceWorker.controller) {
       const claimed = new Promise<void>((r) => {
-        navigator.serviceWorker.addEventListener("controllerchange", () => r(), { once: true });
+        navigator.serviceWorker.addEventListener(
+          "controllerchange",
+          () => r(),
+          { once: true }
+        );
       });
       reg.active.postMessage({ type: "claim" });
       await claimed;
@@ -29,16 +35,22 @@ async function ensureSW(): Promise<void> {
   status.classList.remove("hidden");
 
   const sw = reg.installing ?? reg.waiting;
-  if (!sw) throw new Error("SW registration failed");
+  if (!sw) {
+    throw new Error("SW registration failed");
+  }
 
   await new Promise<void>((resolve) => {
     sw.addEventListener("statechange", () => {
-      if (sw.state === "activated") resolve();
+      if (sw.state === "activated") {
+        resolve();
+      }
     });
   });
   if (!navigator.serviceWorker.controller) {
     await new Promise<void>((r) => {
-      navigator.serviceWorker.addEventListener("controllerchange", () => r(), { once: true });
+      navigator.serviceWorker.addEventListener("controllerchange", () => r(), {
+        once: true,
+      });
     });
   }
 
@@ -47,12 +59,12 @@ async function ensureSW(): Promise<void> {
 }
 
 interface Stats {
-  median: number;
+  max: number;
   mean: number;
+  median: number;
+  min: number;
   p95: number;
   p99: number;
-  min: number;
-  max: number;
 }
 
 type BenchResult =
@@ -73,25 +85,35 @@ function computeStats(times: number[]): Stats {
 }
 
 function fmt(ms: number): string {
-  if (ms < 0.1) return "<0.1ms";
-  if (ms < 1) return ms.toFixed(2) + "ms";
-  if (ms < 10) return ms.toFixed(1) + "ms";
-  if (ms < 1000) return Math.round(ms) + "ms";
-  return (ms / 1000).toFixed(2) + "s";
+  if (ms < 0.1) {
+    return "<0.1ms";
+  }
+  if (ms < 1) {
+    return `${ms.toFixed(2)}ms`;
+  }
+  if (ms < 10) {
+    return `${ms.toFixed(1)}ms`;
+  }
+  if (ms < 1000) {
+    return `${Math.round(ms)}ms`;
+  }
+  return `${(ms / 1000).toFixed(2)}s`;
 }
 
 async function benchQuery(
   query: string,
   iterations: number,
-  onProgress: (done: number) => void,
+  onProgress: (done: number) => void
 ): Promise<BenchResult> {
-  const url = "/?q=" + encodeURIComponent(query);
+  const url = `/?q=${encodeURIComponent(query)}`;
   const opts: RequestInit = { redirect: "manual" };
 
   for (let i = 0; i < 50; i++) {
     try {
       await fetch(url, opts);
-    } catch {}
+    } catch {
+      // warm-up — ignore errors
+    }
   }
 
   const times: number[] = [];
@@ -135,9 +157,19 @@ function renderResults(results: BenchResult[]) {
       tr.append(label, msg);
     } else {
       const cls = r.median === minMedian ? "fastest" : "";
-      for (const text of [qt.label, fmt(r.median), fmt(r.mean), fmt(r.p95), fmt(r.p99), fmt(r.min), fmt(r.max)]) {
+      for (const text of [
+        qt.label,
+        fmt(r.median),
+        fmt(r.mean),
+        fmt(r.p95),
+        fmt(r.p99),
+        fmt(r.min),
+        fmt(r.max),
+      ]) {
         const td = document.createElement("td");
-        if (cls) td.className = cls;
+        if (cls) {
+          td.className = cls;
+        }
         td.textContent = text;
         tr.appendChild(td);
       }
@@ -154,8 +186,11 @@ function renderResults(results: BenchResult[]) {
     summary.textContent = "";
     summary.append(
       "Overall median: ",
-      Object.assign(document.createElement("span"), { className: "summary-value", textContent: fmt(overallMedian) }),
-      " across all query types",
+      Object.assign(document.createElement("span"), {
+        className: "summary-value",
+        textContent: fmt(overallMedian),
+      }),
+      " across all query types"
     );
   }
 }
@@ -170,8 +205,8 @@ runBtn.addEventListener("click", async () => {
     100,
     Math.min(
       5000,
-      +(document.getElementById("iterations") as HTMLInputElement).value || 500,
-    ),
+      +(document.getElementById("iterations") as HTMLInputElement).value || 500
+    )
   );
 
   runBtn.disabled = true;

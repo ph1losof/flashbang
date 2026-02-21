@@ -2,18 +2,18 @@ import { describe, expect, mock, test } from "bun:test";
 
 mock.module("../generated/bangs-min.js", () => {
   const BANGS: Record<string, string> = Object.create(null);
-  BANGS["g"] = "https://www.google.com/search?q={}";
-  BANGS["ddg"] = "https://duckduckgo.com/?q={}";
-  BANGS["gh"] = "https://github.com/search?q={}&type=repositories";
-  BANGS["w"] = "https://en.wikipedia.org/wiki/Special:Search?search={}";
-  BANGS["yt"] = "https://www.youtube.com/results?search_query={}";
-  BANGS["b"] = "https://www.bing.com/search?q={}";
-  BANGS["mdn"] =
+  BANGS.g = "https://www.google.com/search?q={}";
+  BANGS.ddg = "https://duckduckgo.com/?q={}";
+  BANGS.gh = "https://github.com/search?q={}&type=repositories";
+  BANGS.w = "https://en.wikipedia.org/wiki/Special:Search?search={}";
+  BANGS.yt = "https://www.youtube.com/results?search_query={}";
+  BANGS.b = "https://www.bing.com/search?q={}";
+  BANGS.mdn =
     "https://developer.mozilla.org/en-US/search?q={}&topic=api&topic=js";
   return { BANGS };
 });
 
-import { redirect, type RedirectSettings } from "./redirect";
+import { type RedirectSettings, redirect } from "./redirect";
 
 const DEFAULT_URL = "https://www.google.com/search?q={}";
 const LUCKY_URL = "https://www.google.com/search?btnI&q={}";
@@ -121,7 +121,7 @@ describe("redirect — routing logic", () => {
   test("custom bang overrides built-in", () => {
     const r = redirect(
       "!g cats",
-      settings({ custom: { g: "https://custom.search/?q={}" } }),
+      settings({ custom: { g: "https://custom.search/?q={}" } })
     );
     expect(r.status).toBe(302);
     expect(loc(r)).toBe("https://custom.search/?q=cats");
