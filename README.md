@@ -156,4 +156,4 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for prerequisites, build commands, and proj
 
 [AGPL-3.0](LICENSE) — see [NOTICE](NOTICE).
 
-Flashbang is designed to be self-hosted and every competitor in this space bundles analytics. AGPL ensures that anyone who deploys a modified version must share their changes — protecting end users from forks that quietly add tracking or degrade privacy. The project introduces a genuinely novel approach (Service Worker intercept, two-tier bang data, bang-aware suggestions), and AGPL ensures derivatives contribute back rather than just extract.
+Flashbang is designed to be self-hosted and most of projects in this space bundles analytics. AGPL ensures that anyone who deploys a modified version must share their changes — protecting end users from forks that quietly add tracking or degrade privacy. The project introduces a genuinely novel approach (Service Worker intercept, two-tier bang data, bang-aware suggestions), and AGPL ensures derivatives contribute back rather than just extract.
