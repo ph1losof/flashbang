@@ -8,7 +8,7 @@ import {
 } from "./idb";
 
 const CACHE_NAME = "flashbang";
-const ASSETS = ["/home.html", "/app.js", "/icon.svg", "/manifest.json"];
+const ASSETS = ["/home", "/app.js", "/icon.svg", "/manifest.json"];
 
 self.addEventListener("install", (e: ExtendableEvent) => {
   e.waitUntil(
@@ -102,11 +102,11 @@ self.addEventListener("fetch", (e: FetchEvent) => {
   ) {
     e.respondWith(
       caches
-        .match(new Request("/home.html"))
+        .match(new Request("/home"))
         .then(
           (r) =>
             r ||
-            fetch("/home.html").catch(
+            fetch("/home").catch(
               () => new Response("Offline", { status: 503 }),
             ),
         ),
