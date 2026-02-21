@@ -71,7 +71,7 @@ Service Workers need an HTTP origin (not `file://`), but a local server works fi
 bun run codegen && bun run dev
 ```
 
-`bun run codegen` fetches the latest bang definitions from DuckDuckGo and Kagi and generates the JavaScript bang maps via Rust. `bun run dev` bundles everything and starts the dev server. Visit the local URL once — the Service Worker installs and redirects work offline after that. Set it as your browser's custom search engine:
+`bun run codegen` fetches the latest bang definitions from DuckDuckGo and Kagi and generates the JavaScript bang maps. `bun run dev` bundles everything and starts the dev server. Visit the local URL once — the Service Worker installs and redirects work offline after that. Set it as your browser's custom search engine:
 
 - **Search URL:** `http://localhost:3000?q=%s`
 - **Suggestion URL:** `http://localhost:3000/suggest?q=%s` (Optional)
@@ -126,7 +126,7 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for build pipeline and project structure de
 | **Feeling Lucky**         | Yes (configurable per-engine)             | No                                    | No                                    | No                                                    |
 | **Search suggestions**    | Yes (bang autocomplete + configurable)    | No                                    | No                                    | No                                                    |
 | **Custom bangs**          | Yes (IndexedDB faster)                    | No                                    | Yes (localStorage)                    | Yes (localStorage)                                    |
-| **Build tool**            | Rust codegen + Bun                        | Vite                                  | Vite                                  | Vite                                                  |
+| **Build tool**            | Bun                                       | Vite                                  | Vite                                  | Vite                                                  |
 | **Bang data strategy**    | Two-tier (min for SW, full for UI)        | Single bundle                         | Single bundle                         | Top bangs in worker, full set client-side             |
 | **License**               | AGPL-3.0                                  | MIT                                   | MIT                                   | MIT                                                   |
 
