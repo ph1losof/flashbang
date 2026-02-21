@@ -10,7 +10,8 @@
 bun install        # install dependencies
 bun run codegen    # fetch DDG/Kagi sources + generate bang maps
 bun run build      # bundle + minify (requires codegen first)
-bun run dev        # bundle + dev server on port 3000
+bun run dev        # bundle + dev server with file watching & live reload
+bun run start      # serve pre-built dist/ (run `bun run build` first)
 bun run clean      # remove dist/
 ```
 
@@ -25,7 +26,8 @@ flashbang/
 ├── scripts/
 │   ├── codegen.ts          # Fetch sources, parse, merge, generate bang maps
 │   ├── build.ts            # Bundle + minify pipeline
-│   └── dev.ts              # Bundle + dev server
+│   ├── dev.ts              # Dev server with file watching, rebuild & live reload
+│   └── start.ts            # Production server (serves pre-built dist/)
 ├── src/
 │   ├── generated/          # Output of Rust codegen (gitignored)
 │   │   ├── bangs-min.js    # trigger→URL map for Service Worker
@@ -68,3 +70,16 @@ The bang data is split into two tiers so the Service Worker loads only what it n
 2. **Bundle UI** — Bun bundles `src/ui/app.ts` with `bangs-full.js` into `dist/app.js`
 3. **Generate CSS** — UnoCSS scans source files and emits atomic utility classes
 4. **Inline & minify HTML** — CSS is inlined into `<style>`, HTML is minified with `@minify-html/node`
+
+## Dev server
+
+`bun run dev` runs the dev server with `bun --hot` for soft module reloading:
+
+- **Inline builds** — Uses `Bun.build()` API directly instead of shelling out to build scripts
+- **File watching** — Watches `src/` recursively via `fs.watch` with 200ms debounce. Any source change triggers a full rebuild
+- **Live reload** — SSE endpoint at `/__dev/events` pushes reload events to the browser. A small script is injected into HTML responses that unregisters the Service Worker, clears all caches, and reloads the page on each rebuild
+- **Hot reload** — `bun --hot` enables Bun's native hot module reloading for `Bun.serve()`, so the server's fetch handler updates without process restart
+
+## Production server
+
+`bun run start` serves the pre-built `dist/` directory with no build step, file watching, or live reload injection. Useful for testing the production build locally. Requires `bun run build` to have been run first.

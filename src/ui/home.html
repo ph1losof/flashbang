@@ -239,7 +239,15 @@
     <script type="module" src="/app.js"></script>
     <script>
       if ("serviceWorker" in navigator)
-        navigator.serviceWorker.register("/sw.js");
+        navigator.serviceWorker.register("/sw.js").then(function (reg) {
+          reg.addEventListener("updatefound", function () {
+            var sw = reg.installing;
+            if (!sw) return;
+            sw.addEventListener("statechange", function () {
+              if (sw.state === "activated") location.reload();
+            });
+          });
+        });
     </script>
   </body>
 </html>

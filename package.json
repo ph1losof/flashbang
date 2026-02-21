@@ -9,7 +9,8 @@
     "build:sw": "bun build src/sw/sw.ts --outdir dist --entry-naming sw.js --minify --target browser",
     "build:ui": "bun build src/ui/app.ts --outdir dist --entry-naming app.js --minify --target browser",
     "build:css": "bunx unocss 'src/ui/home.html' 'src/ui/bench.html' 'src/ui/app.ts' 'src/ui/bench.ts' 'src/ui/liquid-metal.ts' -o dist/styles.css --minify",
-    "dev": "bun --watch scripts/dev.ts",
+    "dev": "bun --hot scripts/dev.ts",
+    "start": "bun scripts/start.ts",
     "clean": "rm -rf dist",
     "test": "bun test"
   },

@@ -68,10 +68,10 @@ Nothing to build or deploy.
 Service Workers need an HTTP origin (not `file://`), but a local server works fine:
 
 ```sh
-bun run codegen && bun run dev
+bun run codegen && bun run build && bun run start
 ```
 
-`bun run codegen` fetches the latest bang definitions from DuckDuckGo and Kagi and generates the JavaScript bang maps. `bun run dev` bundles everything and starts the dev server. Visit the local URL once — the Service Worker installs and redirects work offline after that. Set it as your browser's custom search engine:
+`bun run codegen` fetches the latest bang definitions from DuckDuckGo and Kagi and generates the JavaScript bang maps. `bun run build` bundles and minifies everything into `dist/`. `bun run start` serves the production build locally. Visit the local URL once — the Service Worker installs and redirects work offline after that. Set it as your browser's custom search engine:
 
 - **Search URL:** `http://localhost:3000?q=%s`
 - **Suggestion URL:** `http://localhost:3000/suggest?q=%s` (Optional)

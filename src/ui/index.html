@@ -47,7 +47,15 @@
           );
           navigator.serviceWorker.register("/sw.js");
         } else if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("/sw.js");
+          navigator.serviceWorker.register("/sw.js").then(function (reg) {
+            reg.addEventListener("updatefound", function () {
+              var sw = reg.installing;
+              if (!sw) return;
+              sw.addEventListener("statechange", function () {
+                if (sw.state === "activated") location.reload();
+              });
+            });
+          });
           Promise.all([
             fetch("/opensearch.xml").catch(function () {}),
             new Promise(function (resolve) {
