@@ -130,8 +130,10 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for build pipeline and project structure de
 | **Bang data strategy**    | Two-tier (min for SW, full for UI)            | Single bundle                         | Single bundle                         | Top bangs in worker, full set client-side             |
 | **License**               | AGPL-3.0                                      | MIT                                   | MIT                                   | MIT                                                   |
 
-† Flashbang includes no analytics scripts or tracking. Cloudflare Pages exposes basic request counts in its dashboard for all hosted sites — this is a platform-level metric we did not opt into and cannot disable. It is not Cloudflare Web Analytics.
-‡ Cloudflare Web Analytics is an opt-in product that requires adding a `beacon.min.js` script tag. unduckified chose to include it.
+† Flashbang includes no analytics scripts or tracking. Cloudflare Pages exposes basic request counts in its dashboard for all hosted sites — this is a platform-level
+metric we did not opt into and cannot disable. It is not Cloudflare Web Analytics.
+‡ Cloudflare Web Analytics is an opt-in product enabled via the Cloudflare dashboard. unduckified has it enabled, and because each search triggers a full page load with
+the query in the URL, the beacon captures search terms as page view pathnames.
 
 Flashbang's key architectural difference: when you type `!g kittens`, unduck, unduckified, and rebang all load a full HTML page — CSS, JavaScript, UI framework, analytics — parse your query client-side, and then redirect. Flashbang's philosophy is that a bang redirect is not a page, it's a routing decision. It should never touch the rendering pipeline. A Service Worker intercepts the request before the browser begins rendering, and the settings UI is a separate bundle that only loads when you actually visit the page.
 

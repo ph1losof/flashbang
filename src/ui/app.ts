@@ -17,6 +17,17 @@ function $<T extends HTMLElement>(sel: string): T {
   return document.querySelector(sel) as T;
 }
 
+function el<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  cls: string,
+  text?: string,
+): HTMLElementTagNameMap[K] {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
 function notifySW(type: string) {
   navigator.serviceWorker.controller?.postMessage({ type });
 }
@@ -206,7 +217,7 @@ async function initSettings() {
     clearTimeout(timer);
     const q = (e.target as HTMLInputElement).value.trim().toLowerCase();
     if (!q) {
-      $("#bang-results").innerHTML = "";
+      $("#bang-results").replaceChildren();
       return;
     }
     timer = setTimeout(async () => {
@@ -222,19 +233,24 @@ async function initSettings() {
           return as_ - bs_ || a[0].length - b[0].length;
         })
         .slice(0, 20);
-      $("#bang-results").innerHTML =
-        hits.length === 0
-          ? '<div class="py-3 text-center text-sm text-text-secondary">No matches</div>'
-          : hits
-              .map(
-                ([t, b]) =>
-                  `<div class="flex items-center gap-3 px-2.5 py-2 rounded-lg bg-bg-secondary mb-1">
-              <code class="px-1.5 py-0.5 rounded bg-bg-active text-xs min-w-15 text-center font-mono">!${t}</code>
-              <span class="flex-1 text-[13px] font-medium">${b.s}</span>
-              <span class="text-[11px] text-text-secondary max-w-30 overflow-hidden text-ellipsis whitespace-nowrap">${b.d}</span>
-            </div>`,
-              )
-              .join("");
+      const container = $("#bang-results");
+      if (hits.length === 0) {
+        container.replaceChildren(
+          el("div", "py-3 text-center text-sm text-text-secondary", "No matches"),
+        );
+      } else {
+        container.replaceChildren(
+          ...hits.map(([t, b]) => {
+            const row = el("div", "flex items-center gap-3 px-2.5 py-2 rounded-lg bg-bg-secondary mb-1");
+            row.append(
+              el("code", "px-1.5 py-0.5 rounded bg-bg-active text-xs min-w-15 text-center font-mono", "!" + t),
+              el("span", "flex-1 text-[13px] font-medium", b.s),
+              el("span", "text-[11px] text-text-secondary max-w-30 overflow-hidden text-ellipsis whitespace-nowrap", b.d),
+            );
+            return row;
+          }),
+        );
+      }
     }, 200);
   });
 
@@ -287,30 +303,30 @@ async function initSettings() {
 
 async function renderCustom() {
   const custom = await db.getAllCustomBangs();
+  const list = $("#custom-list");
   if (custom.length === 0) {
-    $("#custom-list").innerHTML =
-      '<div class="text-sm text-text-secondary">No custom bangs yet</div>';
+    list.replaceChildren(
+      el("div", "text-sm text-text-secondary", "No custom bangs yet"),
+    );
     return;
   }
-  $("#custom-list").innerHTML = custom
-    .map(
-      (b) =>
-        `<div class="flex items-center gap-2.5 p-2.5 mb-1.5 rounded-lg bg-bg-secondary">
-      <code class="px-1.5 py-0.5 rounded bg-bg-active text-xs min-w-15 text-center font-mono">!${b.trigger}</code>
-      <span class="flex-1 text-[13px] font-medium">${b.name}</span>
-      <button class="btn-danger" data-rm="${b.trigger}">remove</button>
-    </div>`,
-    )
-    .join("");
-  $("#custom-list")
-    .querySelectorAll("[data-rm]")
-    .forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        await db.removeCustomBang((btn as HTMLElement).dataset.rm!);
+  list.replaceChildren(
+    ...custom.map((b) => {
+      const row = el("div", "flex items-center gap-2.5 p-2.5 mb-1.5 rounded-lg bg-bg-secondary");
+      const rmBtn = el("button", "btn-danger", "remove");
+      rmBtn.addEventListener("click", async () => {
+        await db.removeCustomBang(b.trigger);
         notifySW("invalidate");
         await renderCustom();
       });
-    });
+      row.append(
+        el("code", "px-1.5 py-0.5 rounded bg-bg-active text-xs min-w-15 text-center font-mono", "!" + b.trigger),
+        el("span", "flex-1 text-[13px] font-medium", b.name),
+        rmBtn,
+      );
+      return row;
+    }),
+  );
 }
 
 function init() {

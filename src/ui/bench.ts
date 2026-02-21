@@ -118,26 +118,29 @@ function renderResults(results: BenchResult[]) {
   const minMedian = validMedians.length > 0 ? Math.min(...validMedians) : 0;
 
   const tbody = document.getElementById("stats-body")!;
-  tbody.innerHTML = "";
+  tbody.replaceChildren();
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
     const qt = QUERY_TYPES[i];
     const tr = document.createElement("tr");
 
     if (r.error) {
-      tr.innerHTML =
-        `<td>${qt.label}</td>` +
-        `<td colspan="6" style="color:#8888a0;font-style:italic">${r.message}</td>`;
+      const label = document.createElement("td");
+      label.textContent = qt.label;
+      const msg = document.createElement("td");
+      msg.colSpan = 6;
+      msg.style.color = "#8888a0";
+      msg.style.fontStyle = "italic";
+      msg.textContent = r.message;
+      tr.append(label, msg);
     } else {
-      const cls = r.median === minMedian ? ' class="fastest"' : "";
-      tr.innerHTML =
-        `<td${cls}>${qt.label}</td>` +
-        `<td${cls}>${fmt(r.median)}</td>` +
-        `<td${cls}>${fmt(r.mean)}</td>` +
-        `<td${cls}>${fmt(r.p95)}</td>` +
-        `<td${cls}>${fmt(r.p99)}</td>` +
-        `<td${cls}>${fmt(r.min)}</td>` +
-        `<td${cls}>${fmt(r.max)}</td>`;
+      const cls = r.median === minMedian ? "fastest" : "";
+      for (const text of [qt.label, fmt(r.median), fmt(r.mean), fmt(r.p95), fmt(r.p99), fmt(r.min), fmt(r.max)]) {
+        const td = document.createElement("td");
+        if (cls) td.className = cls;
+        td.textContent = text;
+        tr.appendChild(td);
+      }
     }
     tbody.appendChild(tr);
   }
@@ -147,8 +150,13 @@ function renderResults(results: BenchResult[]) {
     const overallMedian = sorted[Math.floor(sorted.length * 0.5)];
     const card = document.getElementById("summary-card")!;
     card.classList.remove("hidden");
-    document.getElementById("summary")!.innerHTML =
-      `Overall median: <span class="summary-value">${fmt(overallMedian)}</span> across all query types`;
+    const summary = document.getElementById("summary")!;
+    summary.textContent = "";
+    summary.append(
+      "Overall median: ",
+      Object.assign(document.createElement("span"), { className: "summary-value", textContent: fmt(overallMedian) }),
+      " across all query types",
+    );
   }
 }
 
