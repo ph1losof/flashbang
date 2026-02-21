@@ -30,7 +30,7 @@ flashbang/
 │   ├── dev.ts              # Dev server with file watching, rebuild & live reload
 │   └── start.ts            # Production server (serves pre-built dist/)
 ├── src/
-│   ├── generated/          # Output of Rust codegen (gitignored)
+│   ├── generated/          # Output of codegen (gitignored)
 │   │   ├── bangs-min.js    # trigger→URL map for Service Worker
 │   │   ├── bangs-full.js   # trigger→{name, domain, url, relevance} for UI & suggestions
 │   │   └── bangs-meta.json # bang count & timestamp
