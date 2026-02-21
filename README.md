@@ -119,7 +119,7 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for build pipeline and project structure de
 |                           | **flashbang**                                 | **unduck**                            | **unduckified**                       | **rebang**                                            |
 | ------------------------- | --------------------------------------------- | ------------------------------------- | ------------------------------------- | ----------------------------------------------------- |
 | **Redirect method**       | Service Worker intercept                      | `window.location.replace`             | `window.location.replace`             | Cloudflare Worker (edge) + client fallback            |
-| **When redirect happens** | Service Worker only - nothing unnecessary     | After full page loads (HTML, CSS, JS) | After full page loads (HTML, CSS, JS) | At the edge or after full page loads (React included) |
+| **When redirect happens** | Before page renders (Service Worker)            | After page loads (HTML, CSS, JS)      | After page loads (HTML, CSS, JS)      | At the edge or after page loads (HTML, CSS, JS, React) |
 | **Sources**               | DDG + Kagi + custom                           | DDG                                   | Kagi                                  | DDG + Kagi                                            |
 | **Analytics**             | None†                                         | Plausible                             | Cloudflare Web Analytics‡             | Plausible+Vercel Analytics+Vercel Speed Insights      |
 | **Server required**       | No (redirects), yes (suggestions, OpenSearch) | No                                    | No                                    | Yes (Cloudflare Worker)                               |
@@ -127,16 +127,16 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for build pipeline and project structure de
 | **Search suggestions**    | Yes (bang autocomplete + configurable)        | No                                    | No                                    | No                                                    |
 | **Custom bangs**          | Yes (IndexedDB faster)                        | No                                    | Yes (localStorage)                    | Yes (localStorage)                                    |
 | **Build tool**            | Bun                                           | Vite                                  | Vite                                  | Vite                                                  |
-| **Bang data strategy**    | Two-tier (min for SW, full for UI)            | Single bundle                         | Single bundle                         | Top bangs in worker, full set client-side             |
+| **Bang data for redirects** | 847 KB (trigger→URL only)                   | 2.7 MB (full metadata)                | 1.5 MB (full metadata)                | ~200 KB inline + 1.5 MB lazy-loaded                   |
+| **Parsed on**             | SW thread (once, persists in memory)            | Main thread (every page load)         | Main thread (every page load)         | Main thread (every page load) or edge worker          |
 | **License**               | AGPL-3.0                                      | MIT                                   | MIT                                   | MIT                                                   |
 
 † Flashbang includes no analytics scripts or tracking. Cloudflare Pages exposes basic request counts in its dashboard for all hosted sites — this is a platform-level
 metric we did not opt into and cannot disable. It is not Cloudflare Web Analytics.
 
-‡ Cloudflare Web Analytics is an opt-in product enabled via the Cloudflare dashboard. unduckified has it enabled, and because each search triggers a full page load with
-the query in the URL, the beacon captures search terms as page view pathnames.
+‡ Cloudflare Web Analytics is an opt-in product that requires enabling it in the Cloudflare dashboard. unduckified's hosted instance has it enabled. Page views include the full URL, which contains the query parameter.
 
-Flashbang's key architectural difference: when you type `!g kittens`, unduck, unduckified, and rebang all load a full HTML page — CSS, JavaScript, UI framework, analytics — parse your query client-side, and then redirect. Flashbang's philosophy is that a bang redirect is not a page, it's a routing decision. It should never touch the rendering pipeline. A Service Worker intercepts the request before the browser begins rendering, and the settings UI is a separate bundle that only loads when you actually visit the page.
+Flashbang uses a different approach to the redirect step: a Service Worker intercepts the navigation request before the browser begins rendering, looks up the bang in a minimal in-memory map, and responds with a redirect. The bang data (847 KB, trigger→URL pairs only) is parsed once when the Service Worker installs and stays in memory across navigations. Other tools in this space parse their bang data on the main thread on each page load — the tradeoff they accept for a simpler architecture. Flashbang's settings UI is a separate bundle that only loads when you visit the page directly.
 
 > **Note:** Comparison data is accurate at time of writing. These projects are actively developed and may have changed since.
 
