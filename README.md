@@ -82,6 +82,14 @@ Nothing to build or deploy.
    - **Search URL:** `https://your-domain?q=%s`
    - **Suggestion URL:** `https://your-domain/suggest?q=%s`
 
+**Railway** — detects the Dockerfile and deploys automatically:
+
+1. Connect your repo on [Railway](https://railway.app)
+2. Railway builds the Docker image and sets the `PORT` environment variable automatically
+3. Add a custom search engine:
+   - **Search URL:** `https://your-app.up.railway.app?q=%s`
+   - **Suggestion URL:** `https://your-app.up.railway.app/suggest?q=%s`
+
 **Other static hosts** (Netlify, Vercel, etc.) — redirects work, but suggestions and dynamic OpenSearch require adding serverless functions for `/suggest` and `/opensearch.xml`. See `functions/` for the implementations — they reuse shared modules from `src/` and can be adapted to any serverless platform.
 
 ### Self-host with Docker (recommended)
