@@ -101,7 +101,7 @@ docker build -t flashbang .
 docker run -p 3000:3000 flashbang
 ```
 
-The image uses a multi-stage build — fetches bang sources, builds assets, and produces a minimal runtime image. The port is configurable via the `PORT` environment variable (`-e PORT=8080`). Set it as your browser's custom search engine:
+The image uses a multi-stage build — fetches bang sources, builds assets, and produces a minimal runtime image. Static assets are pre-compressed with Brotli at build time and served automatically, falling back to uncompressed for clients that don't support it. The port is configurable via the `PORT` environment variable (`-e PORT=8080`). Set it as your browser's custom search engine:
 
 - **Search URL:** `http://your-host:3000?q=%s`
 - **Suggestion URL:** `http://your-host:3000/suggest?q=%s`
