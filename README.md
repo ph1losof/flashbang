@@ -1,6 +1,6 @@
 # flashbang
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/s62zSN?referralCode=cxTxcH&utm_medium=integration&utm_source=template&utm_campaign=generic)
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/flashbang?referralCode=cxTxcH&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
 ![Flashbang](docs/landing.png)
 
