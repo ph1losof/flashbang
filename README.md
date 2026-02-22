@@ -18,7 +18,7 @@ Every other bang tool loads a full page before redirecting — adding hundreds o
 - **Custom bangs** — Add your own bangs through the settings UI. They take priority over built-ins
 - **Search suggestions** — The only bang tool with bang-aware autocomplete in your browser's native address bar. Type `!y` and the browser itself suggests `!yt` (YouTube), `!ya` (Yandex), `!yf` (Yahoo Finance) — ranked by popularity so the most-used bangs surface first. Regular queries return web search suggestions from Google, DuckDuckGo, Bing, Brave, or a custom provider. Both are unified through a single `/suggest` endpoint that plugs into your browser's built-in suggestion UI
 - **Feeling Lucky** — Prefix a query with `\`, or add a bare `!` before or after it, to skip the results page and jump straight to the first result. Works with Google's "I'm Feeling Lucky" when that's your default engine, falls back to DuckDuckGo's `\` redirect for others. Configurable per-engine or with a custom URL, or disable it entirely
-- **OpenSearch** — Browsers auto-discover Flashbang as a search engine via `/opensearch.xml` (dynamically generated with the correct origin), including the suggestions endpoint
+- **OpenSearch** — Browsers auto-discover Flashbang as a search engine via `/opensearch.xml`, including the suggestions endpoint. The XML is dynamically generated at request time using the current origin, so it works out of the box on any self-hosted domain or `localhost` — no hardcoded URLs to change
 
 ## Bang syntax
 
@@ -125,6 +125,7 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for build pipeline and project structure de
 | **Server required**         | No (redirects), yes (suggestions, OpenSearch) | No                               | No                               | Yes (Cloudflare Worker)                                |
 | **Feeling Lucky**           | Yes (configurable per-engine)                 | No                               | No                               | No                                                     |
 | **Search suggestions**      | Yes (bang autocomplete + configurable)        | No                               | No                               | No                                                     |
+| **OpenSearch**              | Yes (dynamic, self-host friendly)             | No                               | Yes                              | Yes                                                    |
 | **Custom bangs**            | Yes (IndexedDB faster)                        | No                               | Yes (localStorage)               | Yes (localStorage)                                     |
 | **Build tool**              | Bun                                           | Vite                             | Vite                             | Vite                                                   |
 | **Bang data for redirects** | ~867 KB (trigger→URL only)                    | 2.7 MB (full metadata)           | 1.5 MB (full metadata)           | ~200 KB inline + 1.5 MB lazy-loaded                    |
