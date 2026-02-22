@@ -11,7 +11,7 @@ bun install        # install dependencies
 bun run check      # format + lint check (fails on issues)
 bun run fix        # auto-fix format + lint issues
 bun run codegen    # fetch DDG/Kagi sources + generate bang maps
-bun run build      # bundle + minify (requires codegen first)
+bun run build      # bundle, minify + pre-compress with Brotli (requires codegen first)
 bun run dev        # bundle + dev server with file watching & live reload
 bun run start      # serve pre-built dist/ (run `bun run build` first)
 bun test           # run tests
@@ -84,6 +84,7 @@ The bang data is split into two tiers so the Service Worker loads only what it n
 2. **Bundle UI** — Bun bundles `src/ui/app.ts` with `bangs-full.js` into `dist/app.js`
 3. **Generate CSS** — UnoCSS scans source files and emits atomic utility classes
 4. **Inline & minify HTML** — CSS is inlined into `<style>`, HTML is minified with `@minify-html/node`
+5. **Pre-compress** — All static assets are compressed with Brotli (max quality) and written as `.br` files alongside the originals. The production server serves these automatically when the client supports it, falling back to uncompressed
 
 ## Dev server
 
