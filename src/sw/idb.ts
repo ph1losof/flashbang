@@ -7,6 +7,7 @@ const DEFAULT_URL = "https://www.google.com/search?q={}";
 const LUCKY_URLS: Record<string, string> = {
   g: "https://www.google.com/search?q={}&btnI=1",
   ddg: "https://duckduckgo.com/?q=\\{}",
+  kagi: "https://kagi.com/search?q=\\{}",
 };
 const DEFAULT_LUCKY_URL = "https://duckduckgo.com/?q=\\{}";
 
@@ -53,6 +54,9 @@ export async function readRedirectSettings(): Promise<RedirectSettings> {
         break;
       case "ddg":
         luckyUrl = LUCKY_URLS.ddg;
+        break;
+      case "kagi":
+        luckyUrl = LUCKY_URLS.kagi;
         break;
       case "custom":
         luckyUrl = luckyUrlResult?.value || null;

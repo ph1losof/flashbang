@@ -13,6 +13,11 @@ const SUGGEST_URLS: Record<string, string> = {
   ddg: "https://duckduckgo.com/ac/?q={}&type=list",
   bing: "https://www.bing.com/osjson.aspx?query={}",
   brave: "https://search.brave.com/api/suggest?q={}&rich=false",
+  yahoo: "https://ff.search.yahoo.com/gossip?output=fxjson&command={}",
+  ecosia: "https://ac.ecosia.org/autocomplete?q={}&type=list",
+  kagi: "https://kagi.com/api/autosuggest?q={}",
+  yandex: "https://suggest.yandex.com/suggest-ff.cgi?part={}",
+  baidu: "https://suggestion.baidu.com/su?wd={}&action=opensearch",
 };
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
@@ -115,6 +120,21 @@ function resolveEndpoint(provider: string, trigger: string): string | null {
   }
   if (trigger === "brave") {
     return SUGGEST_URLS.brave;
+  }
+  if (trigger === "y" || trigger === "yahoo") {
+    return SUGGEST_URLS.yahoo;
+  }
+  if (trigger === "ec" || trigger === "ecosia") {
+    return SUGGEST_URLS.ecosia;
+  }
+  if (trigger === "kagi") {
+    return SUGGEST_URLS.kagi;
+  }
+  if (trigger === "ya" || trigger === "yandex") {
+    return SUGGEST_URLS.yandex;
+  }
+  if (trigger === "bd" || trigger === "baidu") {
+    return SUGGEST_URLS.baidu;
   }
   return null;
 }

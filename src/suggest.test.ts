@@ -262,6 +262,50 @@ describe("provider proxying — via suggest()", () => {
     );
   });
 
+  test("provider=yahoo → fetches yahoo suggest URL", async () => {
+    fetchSpy.mockResolvedValueOnce(Response.json(["cats", []]));
+    await suggest("cats", { provider: "yahoo", trigger: "g", customUrl: null });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://ff.search.yahoo.com/gossip?output=fxjson&command=cats"
+    );
+  });
+
+  test("provider=ecosia → fetches ecosia suggest URL", async () => {
+    fetchSpy.mockResolvedValueOnce(Response.json(["cats", []]));
+    await suggest("cats", { provider: "ecosia", trigger: "g", customUrl: null });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://ac.ecosia.org/autocomplete?q=cats&type=list"
+    );
+  });
+
+  test("provider=kagi → fetches kagi suggest URL", async () => {
+    fetchSpy.mockResolvedValueOnce(Response.json(["cats", []]));
+    await suggest("cats", { provider: "kagi", trigger: "g", customUrl: null });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://kagi.com/api/autosuggest?q=cats"
+    );
+  });
+
+  test("provider=yandex → fetches yandex suggest URL", async () => {
+    fetchSpy.mockResolvedValueOnce(Response.json(["cats", []]));
+    await suggest("cats", {
+      provider: "yandex",
+      trigger: "g",
+      customUrl: null,
+    });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://suggest.yandex.com/suggest-ff.cgi?part=cats"
+    );
+  });
+
+  test("provider=baidu → fetches baidu suggest URL", async () => {
+    fetchSpy.mockResolvedValueOnce(Response.json(["cats", []]));
+    await suggest("cats", { provider: "baidu", trigger: "g", customUrl: null });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://suggestion.baidu.com/su?wd=cats&action=opensearch"
+    );
+  });
+
   test("provider=none → empty response, no fetch", async () => {
     const r = await suggest("cats", {
       provider: "none",
@@ -307,6 +351,78 @@ describe("provider proxying — via suggest()", () => {
     });
     expect(fetchSpy).toHaveBeenCalledWith(
       "https://search.brave.com/api/suggest?q=cats&rich=false"
+    );
+  });
+
+  test("provider=default + trigger=yahoo → resolves to yahoo", async () => {
+    fetchSpy.mockResolvedValueOnce(Response.json(["cats", []]));
+    await suggest("cats", {
+      provider: "default",
+      trigger: "yahoo",
+      customUrl: null,
+    });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://ff.search.yahoo.com/gossip?output=fxjson&command=cats"
+    );
+  });
+
+  test("provider=default + trigger=y → resolves to yahoo", async () => {
+    fetchSpy.mockResolvedValueOnce(Response.json(["cats", []]));
+    await suggest("cats", {
+      provider: "default",
+      trigger: "y",
+      customUrl: null,
+    });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://ff.search.yahoo.com/gossip?output=fxjson&command=cats"
+    );
+  });
+
+  test("provider=default + trigger=ecosia → resolves to ecosia", async () => {
+    fetchSpy.mockResolvedValueOnce(Response.json(["cats", []]));
+    await suggest("cats", {
+      provider: "default",
+      trigger: "ecosia",
+      customUrl: null,
+    });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://ac.ecosia.org/autocomplete?q=cats&type=list"
+    );
+  });
+
+  test("provider=default + trigger=kagi → resolves to kagi", async () => {
+    fetchSpy.mockResolvedValueOnce(Response.json(["cats", []]));
+    await suggest("cats", {
+      provider: "default",
+      trigger: "kagi",
+      customUrl: null,
+    });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://kagi.com/api/autosuggest?q=cats"
+    );
+  });
+
+  test("provider=default + trigger=yandex → resolves to yandex", async () => {
+    fetchSpy.mockResolvedValueOnce(Response.json(["cats", []]));
+    await suggest("cats", {
+      provider: "default",
+      trigger: "yandex",
+      customUrl: null,
+    });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://suggest.yandex.com/suggest-ff.cgi?part=cats"
+    );
+  });
+
+  test("provider=default + trigger=baidu → resolves to baidu", async () => {
+    fetchSpy.mockResolvedValueOnce(Response.json(["cats", []]));
+    await suggest("cats", {
+      provider: "default",
+      trigger: "baidu",
+      customUrl: null,
+    });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://suggestion.baidu.com/su?wd=cats&action=opensearch"
     );
   });
 
