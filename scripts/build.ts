@@ -1,4 +1,5 @@
 import { minify } from "@minify-html/node";
+import { brotliCompressSync, constants } from "node:zlib";
 import { $ } from "bun";
 
 await $`mkdir -p dist`;
@@ -77,6 +78,16 @@ await $`cp src/ui/manifest.json dist/`;
 await $`cp src/ui/icon.svg dist/`;
 await $`cp src/ui/_headers dist/`;
 await Bun.write("dist/robots.txt", "User-agent: *\nAllow: /\n");
+
+console.log("=== Pre-compress static assets ===");
+for (const file of new Bun.Glob("*.{html,js,svg,json,txt}").scanSync("dist")) {
+  const content = await Bun.file(`dist/${file}`).bytes();
+
+  const br = brotliCompressSync(content, {
+    params: { [constants.BROTLI_PARAM_QUALITY]: constants.BROTLI_MAX_QUALITY },
+  });
+  await Bun.write(`dist/${file}.br`, br);
+}
 
 console.log("=== Done ===");
 await $`ls -lh dist/`;

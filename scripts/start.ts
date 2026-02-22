@@ -6,6 +6,25 @@ if (!(await distIndex.exists())) {
   process.exit(1);
 }
 
+async function serveCompressed(req: Request, filePath: string, extraHeaders?: Record<string, string>) {
+  const file = Bun.file(filePath);
+  if (!(await file.exists())) return null;
+
+  const accept = req.headers.get("accept-encoding") ?? "";
+  const contentType = file.type;
+
+  if (accept.includes("br")) {
+    const br = Bun.file(`${filePath}.br`);
+    if (await br.exists()) {
+      return new Response(br, {
+        headers: { "Content-Encoding": "br", "Content-Type": contentType, ...extraHeaders },
+      });
+    }
+  }
+
+  return new Response(file, extraHeaders ? { headers: extraHeaders } : undefined);
+}
+
 const port = Number(process.env.PORT) || 3000;
 console.log(`Production server: http://localhost:${port}`);
 
@@ -25,24 +44,19 @@ Bun.serve({
     }
 
     if (url.pathname === "/bench") {
-      return new Response(Bun.file("dist/bench.html"), {
-        headers: {
-          "Content-Type": "text/html",
-          "Cross-Origin-Opener-Policy": "same-origin",
-          "Cross-Origin-Embedder-Policy": "credentialless",
-        },
-      });
+      return (await serveCompressed(req, "dist/bench.html", {
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Cross-Origin-Embedder-Policy": "credentialless",
+      }))!;
     }
 
     const path = url.pathname === "/" ? "/index.html" : url.pathname;
-    const file = Bun.file(`dist${path}`);
-    if (await file.exists()) {
-      return new Response(file);
-    }
-    const htmlFile = Bun.file(`dist${path}.html`);
-    if (await htmlFile.exists()) {
-      return new Response(htmlFile);
-    }
-    return new Response(Bun.file("dist/index.html"));
+    const fromDist = await serveCompressed(req, `dist${path}`);
+    if (fromDist) return fromDist;
+
+    const fromHtml = await serveCompressed(req, `dist${path}.html`);
+    if (fromHtml) return fromHtml;
+
+    return (await serveCompressed(req, "dist/index.html"))!;
   },
 });
