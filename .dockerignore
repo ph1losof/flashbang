@@ -1,0 +1,8 @@
+.git
+node_modules
+dist
+data
+*.md
+LICENSE
+NOTICE
+.github

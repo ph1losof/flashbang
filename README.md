@@ -14,7 +14,9 @@ All three support bangs natively — but every query still round-trips through t
 
 ### Privacy
 
-> Core redirects never leave your machine — the Service Worker handles them offline with no server involved. Search suggestions are completely optional and go through our server when enabled on the hosted version. There is no tracking or analytics — we don't know what you search or what bangs you use. Cloudflare Pages exposes basic request counts in its dashboard as a platform feature we did not opt into and cannot disable. It contains no query content or personally identifiable information.
+> Core redirects never leave your machine — the Service Worker handles them offline with no server involved. Search suggestions are completely optional and go through our server when enabled on the hosted version. A same-site cookie stores your configured suggestion provider so the server knows which upstream to proxy — no accounts, no sessions, no personal data. There is no tracking or analytics — we don't know what you search or what bangs you use. Cloudflare Pages exposes basic request counts in its dashboard as a platform feature we did not opt into and cannot disable. It contains no query content or personally identifiable information.
+>
+> If you'd rather not trust our server at all, Flashbang is fully self-hostable. Deploy to Cloudflare Pages in minutes or `docker run` it on any VPS — a single command gets you a fully private instance. See [Setup](#setup-as-search-engine) for details.
 
 ## Features
 
@@ -96,6 +98,18 @@ Redirects work on any static host since they're handled by the Service Worker.
 4. Or manually add a custom search engine:
    - **Search URL:** `https://your-domain?q=%s`
    - **Suggestion URL:** `https://your-domain/suggest?q=%s`
+
+**Docker** — run anywhere with a single command:
+
+```sh
+docker build -t flashbang .
+docker run -p 3000:3000 flashbang
+```
+
+The image uses a multi-stage build — the first stage fetches bang sources and builds the assets, the second stage copies only what's needed to run the production server. The port is configurable via the `PORT` environment variable (`-e PORT=8080`). Set it as your browser's custom search engine:
+
+- **Search URL:** `http://your-host:3000?q=%s`
+- **Suggestion URL:** `http://your-host:3000/suggest?q=%s`
 
 **Other static hosts** (Netlify, Vercel, etc.) — redirects work, but suggestions and dynamic OpenSearch require adding serverless functions for `/suggest` and `/opensearch.xml`. See `functions/` for the implementations — they reuse shared modules from `src/` and can be adapted to any serverless platform.
 
