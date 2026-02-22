@@ -6,6 +6,10 @@ Turn your browser's address bar into a shortcut launcher. Type `!g kittens` to s
 
 Every other bang tool loads a full page before redirecting — adding hundreds of milliseconds — or routes through an edge server adding network latency. Flashbang skips the page entirely — a [Service Worker](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API) handles the redirect before your browser even starts rendering.
 
+### Already using DuckDuckGo, Brave, or Kagi?
+
+All three support bangs natively - but every query still round-trips through their servers before redirecting, adding significant network latency you can actually feel. Flashbang's Service Worker resolves the bang locally in ~1ms and redirects before any network request leaves your machine. You also get bang-aware search suggestions in your address bar, custom bangs, feeling lucky, and it works in any browser - not just the one your engine ships with.
+
 > **Fully local where it matters.** Core redirects never leave your machine — the Service Worker handles them offline with no server involved. Search suggestions (bang autocomplete, web results in your address bar) are completely optional and do go through our server when enabled and used through our hosted version. That's fine by us — Cloudflare Workers make it practically free — but you should know that "fully local" applies to redirects only. There is no tracking or analytics on our end — we don't know what you search and what bangs you use. Cloudflare Pages exposes basic request counts in its dashboard for all hosted sites as a platform feature — this is not Cloudflare Web Analytics, not something we opted into, and cannot be disabled. It contains no query content or personally identifiable information.
 
 **Try it now:** add **`https://flashbang-dyr.pages.dev?q=%s`** as a custom search engine in your browser. Optionally, set **`https://flashbang-dyr.pages.dev/suggest?q=%s`** as the suggestion URL for address bar autocomplete. That's it.
