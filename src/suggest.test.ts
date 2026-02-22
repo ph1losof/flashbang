@@ -272,7 +272,11 @@ describe("provider proxying — via suggest()", () => {
 
   test("provider=ecosia → fetches ecosia suggest URL", async () => {
     fetchSpy.mockResolvedValueOnce(Response.json(["cats", []]));
-    await suggest("cats", { provider: "ecosia", trigger: "g", customUrl: null });
+    await suggest("cats", {
+      provider: "ecosia",
+      trigger: "g",
+      customUrl: null,
+    });
     expect(fetchSpy).toHaveBeenCalledWith(
       "https://ac.ecosia.org/autocomplete?q=cats&type=list"
     );

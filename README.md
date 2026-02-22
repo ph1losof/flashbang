@@ -71,9 +71,36 @@ A public instance is available at **[flashbang-dyr.pages.dev](https://flashbang-
 
 Nothing to build or deploy.
 
-### Self-host locally
+### Deploy your own
 
-Service Workers need an HTTP origin (not `file://`), but a local server works fine:
+**Cloudflare Pages** (recommended) — supports both redirects and suggestions out of the box:
+
+1. Deploy the repo to Cloudflare Pages with build command `bun run build` and output directory `dist`
+2. The Pages Functions automatically handle `/suggest` (search suggestions) and `/opensearch.xml` (search engine discovery with correct origin) on the edge
+3. Visit the site — your browser will auto-discover it via OpenSearch
+4. Or manually add a custom search engine:
+   - **Search URL:** `https://your-domain?q=%s`
+   - **Suggestion URL:** `https://your-domain/suggest?q=%s`
+
+**Other static hosts** (Netlify, Vercel, etc.) — redirects work, but suggestions and dynamic OpenSearch require adding serverless functions for `/suggest` and `/opensearch.xml`. See `functions/` for the implementations — they reuse shared modules from `src/` and can be adapted to any serverless platform.
+
+### Self-host with Docker (recommended)
+
+Run your own instance on any VPS. No dependencies to install — just Docker:
+
+```sh
+docker build -t flashbang .
+docker run -p 3000:3000 flashbang
+```
+
+The image uses a multi-stage build — fetches bang sources, builds assets, and produces a minimal runtime image. The port is configurable via the `PORT` environment variable (`-e PORT=8080`). Set it as your browser's custom search engine:
+
+- **Search URL:** `http://your-host:3000?q=%s`
+- **Suggestion URL:** `http://your-host:3000/suggest?q=%s`
+
+### Self-host without Docker
+
+Requires [Bun](https://bun.sh). Service Workers need an HTTP origin (not `file://`), but a local server works fine:
 
 ```sh
 bun run codegen && bun run build && bun run start
@@ -85,33 +112,6 @@ bun run codegen && bun run build && bun run start
 - **Suggestion URL:** `http://localhost:3000/suggest?q=%s` (Optional)
 
 To pick up new bangs, pull the latest changes and re-run `bun run codegen`. If you host it, the daily GitHub Actions CI does this automatically.
-
-### Deploy your own
-
-Redirects work on any static host since they're handled by the Service Worker.
-
-**Cloudflare Pages** (recommended) — supports both redirects and suggestions out of the box:
-
-1. Deploy the repo to Cloudflare Pages with build command `bun run build` and output directory `dist`
-2. The Pages Functions automatically handle `/suggest` (search suggestions) and `/opensearch.xml` (search engine discovery with correct origin) on the edge
-3. Visit the site — your browser will auto-discover it via OpenSearch
-4. Or manually add a custom search engine:
-   - **Search URL:** `https://your-domain?q=%s`
-   - **Suggestion URL:** `https://your-domain/suggest?q=%s`
-
-**Docker** — run anywhere with a single command:
-
-```sh
-docker build -t flashbang .
-docker run -p 3000:3000 flashbang
-```
-
-The image uses a multi-stage build — the first stage fetches bang sources and builds the assets, the second stage copies only what's needed to run the production server. The port is configurable via the `PORT` environment variable (`-e PORT=8080`). Set it as your browser's custom search engine:
-
-- **Search URL:** `http://your-host:3000?q=%s`
-- **Suggestion URL:** `http://your-host:3000/suggest?q=%s`
-
-**Other static hosts** (Netlify, Vercel, etc.) — redirects work, but suggestions and dynamic OpenSearch require adding serverless functions for `/suggest` and `/opensearch.xml`. See `functions/` for the implementations — they reuse shared modules from `src/` and can be adapted to any serverless platform.
 
 The settings page has a copy button that gives you the exact search URL template.
 

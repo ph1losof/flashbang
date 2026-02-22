@@ -210,8 +210,16 @@ const noFetch = process.argv.includes("--no-fetch");
 if (!noFetch) {
   console.log("=== Fetch bang sources ===");
   await $`mkdir -p data`;
-  await $`curl -sfo data/kagi.json https://raw.githubusercontent.com/kagisearch/bangs/main/data/bangs.json`;
-  await $`curl -sfo data/ddg.json https://duckduckgo.com/bang.js`;
+  const [kagiRes, ddgRes] = await Promise.all([
+    fetch(
+      "https://raw.githubusercontent.com/kagisearch/bangs/main/data/bangs.json"
+    ),
+    fetch("https://duckduckgo.com/bang.js"),
+  ]);
+  await Promise.all([
+    Bun.write("data/kagi.json", kagiRes),
+    Bun.write("data/ddg.json", ddgRes),
+  ]);
 }
 
 console.log("=== Parse sources ===");
