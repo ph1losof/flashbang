@@ -1,5 +1,5 @@
-import { minify } from "@minify-html/node";
 import { brotliCompressSync, constants } from "node:zlib";
+import { minify } from "@minify-html/node";
 import { $ } from "bun";
 
 await $`mkdir -p dist`;

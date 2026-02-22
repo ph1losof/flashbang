@@ -6,9 +6,15 @@ if (!(await distIndex.exists())) {
   process.exit(1);
 }
 
-async function serveCompressed(req: Request, filePath: string, extraHeaders?: Record<string, string>) {
+async function serveCompressed(
+  req: Request,
+  filePath: string,
+  extraHeaders?: Record<string, string>
+) {
   const file = Bun.file(filePath);
-  if (!(await file.exists())) return null;
+  if (!(await file.exists())) {
+    return null;
+  }
 
   const accept = req.headers.get("accept-encoding") ?? "";
   const contentType = file.type;
@@ -17,12 +23,19 @@ async function serveCompressed(req: Request, filePath: string, extraHeaders?: Re
     const br = Bun.file(`${filePath}.br`);
     if (await br.exists()) {
       return new Response(br, {
-        headers: { "Content-Encoding": "br", "Content-Type": contentType, ...extraHeaders },
+        headers: {
+          "Content-Encoding": "br",
+          "Content-Type": contentType,
+          ...extraHeaders,
+        },
       });
     }
   }
 
-  return new Response(file, extraHeaders ? { headers: extraHeaders } : undefined);
+  return new Response(
+    file,
+    extraHeaders ? { headers: extraHeaders } : undefined
+  );
 }
 
 const port = Number(process.env.PORT) || 3000;
@@ -52,10 +65,14 @@ Bun.serve({
 
     const path = url.pathname === "/" ? "/index.html" : url.pathname;
     const fromDist = await serveCompressed(req, `dist${path}`);
-    if (fromDist) return fromDist;
+    if (fromDist) {
+      return fromDist;
+    }
 
     const fromHtml = await serveCompressed(req, `dist${path}.html`);
-    if (fromHtml) return fromHtml;
+    if (fromHtml) {
+      return fromHtml;
+    }
 
     return (await serveCompressed(req, "dist/index.html"))!;
   },
