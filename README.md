@@ -16,7 +16,7 @@ All three support bangs natively — but every query still round-trips through t
 
 > Core redirects never leave your machine — the Service Worker handles them offline with no server involved. Search suggestions are completely optional and go through our server when enabled on the hosted version. A same-site cookie stores your configured suggestion provider so the server knows which upstream to proxy — no accounts, no sessions, no personal data. There is no tracking or analytics — we don't know what you search or what bangs you use. Cloudflare Pages exposes basic request counts in its dashboard as a platform feature we did not opt into and cannot disable. It contains no query content or personally identifiable information.
 >
-> If you'd rather not trust our server at all, Flashbang is fully self-hostable. Deploy to Cloudflare Pages in minutes or `docker run` it on any VPS — a single command gets you a fully private instance. See [Setup](#setup-as-search-engine) for details.
+> If you'd rather not trust our server at all, Flashbang is fully self-hostable. Deploy to Cloudflare Pages/Railway in minutes or `docker run` it on any VPS — a single command gets you a fully private instance. See [Setup](#setup-as-search-engine) for details.
 
 ## Features
 
