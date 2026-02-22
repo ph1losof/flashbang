@@ -80,15 +80,19 @@ function bangSuggestions(
   const limit = matches.length < 8 ? matches.length : 8;
   const completions: string[] = [];
   const descriptions: string[] = [];
+  const urls: string[] = [];
   for (let i = 0; i < limit; i++) {
     const k = matches[i][0];
+    const bang = BANGS[k];
     completions.push(`${prefix}!${k}`);
-    descriptions.push(BANGS[k].d);
+    descriptions.push(`${bang.s} — ${bang.d}`);
+    urls.push(new URL(bang.u).origin);
   }
 
-  return new Response(JSON.stringify([query, completions, descriptions]), {
-    headers: JSON_HEADERS,
-  });
+  return new Response(
+    JSON.stringify([query, completions, descriptions, urls]),
+    { headers: JSON_HEADERS }
+  );
 }
 
 function resolveEndpoint(provider: string, trigger: string): string | null {

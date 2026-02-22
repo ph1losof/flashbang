@@ -160,14 +160,23 @@ describe("bang suggestions — via suggest()", () => {
     expect(completions).toEqual(["!gh", "!ghi", "!ghp"]);
   });
 
-  test('"!gh" descriptions are domains from BANGS[k].d', async () => {
+  test('"!gh" descriptions are "name — domain" from BANGS', async () => {
     const r = await suggest("!gh", {
       provider: "default",
       trigger: "g",
       customUrl: null,
     });
     const data = await r.json();
-    expect(data[2]).toEqual(["github.com", "github.com", "github.com"]);
+    expect(data[2]).toEqual([
+      "GitHub — github.com",
+      "GitHub Issues — github.com",
+      "GitHub PRs — github.com",
+    ]);
+    expect(data[3]).toEqual([
+      "https://github.com",
+      "https://github.com",
+      "https://github.com",
+    ]);
   });
 
   test('"cats !gh" → trailing partial, prefix "cats " in completions', async () => {
