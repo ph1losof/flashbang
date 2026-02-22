@@ -54,7 +54,7 @@ Skip the search results page and go directly to the first result. Three syntax o
 The redirect destination depends on your lucky provider (configurable in settings):
 
 - **Default (match bang)** — Uses your default search engine's native lucky feature if available (Google `btnI`, DuckDuckGo `\`), otherwise falls back to DuckDuckGo's `\` redirect
-- **Google** / **DuckDuckGo** — Always use that engine's lucky redirect
+- **Google** / **DuckDuckGo** / **Kagi** — Always use that engine's lucky redirect
 - **Custom** — Provide your own URL template with `{}` as the query placeholder
 - **Disabled** — Lucky syntax is treated as a normal search query
 
