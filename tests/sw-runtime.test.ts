@@ -13,6 +13,7 @@ let handlers: HandlerMap = {};
 let skipWaitingCalls = 0;
 let claimCalls = 0;
 let cacheDeleteCalls: string[] = [];
+let fetchCalls: string[] = [];
 let fetchImpl: (input: RequestInfo | URL) => Promise<Response> = () =>
   Promise.resolve(new Response("ok"));
 
@@ -43,16 +44,17 @@ async function seedDb(data: {
   }
 }
 
-function setupSwGlobals() {
+function setupSwGlobals(requiredAppAssets: readonly string[] = []) {
   handlers = {};
   skipWaitingCalls = 0;
   claimCalls = 0;
   cacheDeleteCalls = [];
+  fetchCalls = [];
   fetchImpl = () => Promise.resolve(new Response("ok"));
 
   const globals = globalThis as unknown as Record<string, unknown>;
   globals.__CACHE_VERSION__ = "test-cache";
-  globals.__EXTRA_ASSETS__ = [];
+  globals.__REQUIRED_APP_ASSETS__ = [...requiredAppAssets];
   globals.__IS_DEV__ = false;
 
   (globalThis as unknown as { self: unknown }).self = {
@@ -100,8 +102,12 @@ function setupSwGlobals() {
     },
   };
 
-  (globalThis as unknown as { fetch: typeof fetch }).fetch = (input) =>
-    fetchImpl(input);
+  (globalThis as unknown as { fetch: typeof fetch }).fetch = (input) => {
+    const raw =
+      typeof input === "string" || input instanceof URL ? input : input.url;
+    fetchCalls.push(new URL(raw, "https://flashbang.local").pathname);
+    return fetchImpl(input);
+  };
 
   (globalThis as unknown as { Request: typeof Request }).Request =
     class extends ORIGINAL_REQUEST {
@@ -167,8 +173,8 @@ function createFetchEvent(url: string) {
   };
 }
 
-async function loadSwRuntime() {
-  setupSwGlobals();
+async function loadSwRuntime(requiredAppAssets: readonly string[] = []) {
+  setupSwGlobals(requiredAppAssets);
   await import(`../src/sw/sw.ts?test=${Date.now()}-${Math.random()}`);
 }
 
@@ -199,7 +205,7 @@ afterEach(async () => {
 
 describe("sw runtime with real modules", () => {
   test("lifecycle deletes stale Flashbang caches and preserves unrelated caches", async () => {
-    await loadSwRuntime();
+    await loadSwRuntime(["/chunk-catalog123.js"]);
     expect(typeof handlers.install).toBe("function");
     expect(typeof handlers.activate).toBe("function");
 
@@ -207,6 +213,13 @@ describe("sw runtime with real modules", () => {
     await handlers.install?.(installEvt.event);
     await Promise.all(installEvt.waits);
     expect(skipWaitingCalls).toBe(1);
+    expect(fetchCalls.toSorted()).toEqual([
+      "/app.js",
+      "/chunk-catalog123.js",
+      "/home",
+      "/icon.svg",
+      "/manifest.json",
+    ]);
 
     const activateEvt = createExtendableEvent();
     await handlers.activate?.(activateEvt.event);
@@ -216,6 +229,24 @@ describe("sw runtime with real modules", () => {
     expect(swIdb.getTopFrecencyRecord()).toEqual({ g: 2 });
     expect(cacheDeleteCalls).toEqual(["fb-old-cache", "flashbang-dev"]);
     expect(cacheDeleteCalls).not.toContain("other-cache");
+  });
+
+  test("does not activate when a required app asset cannot be cached", async () => {
+    await loadSwRuntime(["/chunk-catalog123.js"]);
+    fetchImpl = (input) => {
+      const raw =
+        typeof input === "string" || input instanceof URL ? input : input.url;
+      return new URL(raw, "https://flashbang.local").pathname ===
+        "/chunk-catalog123.js"
+        ? Promise.reject(new Error("offline"))
+        : Promise.resolve(new Response("ok"));
+    };
+
+    const installEvt = createExtendableEvent();
+    await handlers.install?.(installEvt.event);
+    await expect(Promise.all(installEvt.waits)).rejects.toThrow("offline");
+    expect(skipWaitingCalls).toBe(0);
+    expect(cacheDeleteCalls).toEqual([]);
   });
 
   test("message redirect and invalidate paths work end-to-end", async () => {

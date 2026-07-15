@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, rm } from "node:fs/promises";
+import { basename } from "node:path";
 import { brotliCompressSync, constants } from "node:zlib";
 import { ensureGeneratedBangData } from "./codegen";
 import {
@@ -10,7 +11,6 @@ import {
   generateCSS,
 } from "./shared";
 
-const SIZE_THRESHOLD = 50 * 1024; // 50 KB
 const PRELIMINARY_SW_PATH = `${DIST_DIR}/sw-cache-input.js`;
 
 export interface CacheVersionInput {
@@ -40,7 +40,7 @@ export function createCacheVersion(
 }
 
 export function precacheFileInputs(
-  extraAssets: readonly string[]
+  requiredAppAssets: readonly string[]
 ): ReadonlyArray<readonly [assetPath: string, filePath: string]> {
   return [
     ["/home", `${DIST_DIR}/home.html`],
@@ -49,17 +49,29 @@ export function precacheFileInputs(
     ["/app.js", `${DIST_DIR}/app.js`],
     ["/icon.svg", `${DIST_DIR}/icon.svg`],
     ["/manifest.json", `${DIST_DIR}/manifest.json`],
-    ...extraAssets.map(
+    ...requiredAppAssets.map(
       (assetPath) =>
         [assetPath, `${DIST_DIR}/${assetPath.substring(1)}`] as const
     ),
   ];
 }
 
+export function requiredAppAssetPaths(
+  outputs: readonly { kind: string; path: string; size?: number }[]
+): string[] {
+  return [
+    ...new Set(
+      outputs
+        .filter((output) => output.kind === "chunk" || output.kind === "asset")
+        .map((output) => `/${basename(output.path)}`)
+    ),
+  ].sort();
+}
+
 async function bundleServiceWorker(
   naming: string,
   cacheVersion: string,
-  extraAssets: readonly string[]
+  requiredAppAssets: readonly string[]
 ): Promise<void> {
   const result = await Bun.build({
     entrypoints: ["src/sw/sw.ts"],
@@ -70,7 +82,7 @@ async function bundleServiceWorker(
     format: "esm",
     define: {
       __CACHE_VERSION__: JSON.stringify(cacheVersion),
-      __EXTRA_ASSETS__: JSON.stringify(extraAssets),
+      __REQUIRED_APP_ASSETS__: JSON.stringify(requiredAppAssets),
       __IS_DEV__: JSON.stringify(false),
     },
   });
@@ -91,23 +103,11 @@ async function main(): Promise<void> {
   await mkdir(DIST_DIR, { recursive: true });
 
   console.log("=== Bundle app + bench (to discover chunks) ===");
-  const allOutputs = await bundleUI(allowUnsafeCustomSuggestUrls);
-  const extraAssets = [
-    ...new Set(
-      allOutputs
-        .filter(
-          (output) =>
-            !(
-              output.path.endsWith("/app.js") ||
-              output.path.endsWith("/bench.js")
-            ) && output.size < SIZE_THRESHOLD
-        )
-        .map((output) => `/${output.path.split("/").pop()!}`)
-    ),
-  ].sort();
+  const { appOutputs } = await bundleUI(allowUnsafeCustomSuggestUrls);
+  const requiredAppAssets = requiredAppAssetPaths(appOutputs);
 
-  if (extraAssets.length) {
-    console.log(`Extra assets: ${extraAssets.join(", ")}`);
+  if (requiredAppAssets.length) {
+    console.log(`Required app assets: ${requiredAppAssets.join(", ")}`);
   }
 
   console.log("=== Generate CSS ===");
@@ -123,13 +123,15 @@ async function main(): Promise<void> {
   await bundleServiceWorker(
     "sw-cache-input.js",
     "fb-cache-version-input",
-    extraAssets
+    requiredAppAssets
   );
   const cacheInputs: CacheVersionInput[] = await Promise.all(
-    precacheFileInputs(extraAssets).map(async ([assetPath, filePath]) => ({
-      path: assetPath,
-      bytes: await Bun.file(filePath).bytes(),
-    }))
+    precacheFileInputs(requiredAppAssets).map(
+      async ([assetPath, filePath]) => ({
+        path: assetPath,
+        bytes: await Bun.file(filePath).bytes(),
+      })
+    )
   );
   cacheInputs.push({
     path: "/sw.js",
@@ -140,7 +142,7 @@ async function main(): Promise<void> {
   console.log(`Cache version: ${cacheVersion}`);
 
   console.log("=== Bundle service worker ===");
-  await bundleServiceWorker("sw.js", cacheVersion, extraAssets);
+  await bundleServiceWorker("sw.js", cacheVersion, requiredAppAssets);
 
   console.log("=== Generate _headers with CSP ===");
   function extractScriptHashes(html: string): string[] {

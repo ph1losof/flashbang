@@ -17,7 +17,7 @@ import {
 import { type RedirectSettings, redirectRaw, redirectUrl } from "./redirect";
 
 declare const __CACHE_VERSION__: string;
-declare const __EXTRA_ASSETS__: string[];
+declare const __REQUIRED_APP_ASSETS__: string[];
 declare const __IS_DEV__: boolean;
 
 const CACHE_PREFIX = "fb-";
@@ -25,17 +25,15 @@ const LEGACY_CACHE_NAMES = new Set(["flashbang-dev"]);
 const CACHE_NAME = __CACHE_VERSION__.startsWith(CACHE_PREFIX)
   ? __CACHE_VERSION__
   : `${CACHE_PREFIX}${__CACHE_VERSION__}`;
-const ASSETS = [
+const REQUIRED_ASSETS = [
   "/home",
-  "/bench",
-  "/bench.js",
   "/app.js",
   "/icon.svg",
   "/manifest.json",
-  ...__EXTRA_ASSETS__,
+  ...__REQUIRED_APP_ASSETS__,
 ];
 
-const OPTIONAL_ASSETS = [...new Set(ASSETS)];
+const OPTIONAL_ASSETS = ["/bench", "/bench.js"];
 const PRECACHE_CONCURRENCY = 4;
 let optionalPrecachePromise: Promise<void> | null = null;
 let benchmarkClientId: string | null = null;
@@ -156,7 +154,9 @@ function queueBangSideEffects(e: FetchEvent, trigger: string): void {
 }
 
 self.addEventListener("install", (e: ExtendableEvent) => {
-  e.waitUntil(self.skipWaiting());
+  e.waitUntil(
+    precacheAssets(CACHE_NAME, REQUIRED_ASSETS).then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener("activate", (e: ExtendableEvent) => {

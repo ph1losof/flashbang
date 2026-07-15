@@ -68,7 +68,7 @@ async function build() {
       format: "esm",
       define: {
         __CACHE_VERSION__: '"flashbang-dev"',
-        __EXTRA_ASSETS__: "[]",
+        __REQUIRED_APP_ASSETS__: "[]",
         __IS_DEV__: JSON.stringify(true),
       },
     }),

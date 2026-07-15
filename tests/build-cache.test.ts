@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { createCacheVersion, precacheFileInputs } from "../scripts/build";
+import {
+  createCacheVersion,
+  precacheFileInputs,
+  requiredAppAssetPaths,
+} from "../scripts/build";
 import {
   configureCustomSuggestOption,
   customSuggestUrlsEnabled,
@@ -51,6 +55,21 @@ describe("build cache version", () => {
       ["/manifest.json", "dist/manifest.json"],
       ["/chunk-abc12345.js", "dist/chunk-abc12345.js"],
     ]);
+  });
+
+  test("requires every app dependency regardless of output size", () => {
+    expect(
+      requiredAppAssetPaths([
+        { kind: "entry-point", path: "/tmp/dist/app.js" },
+        {
+          kind: "chunk",
+          path: "/tmp/dist/chunk-catalog123.js",
+          size: 900_000,
+        },
+        { kind: "asset", path: "/tmp/dist/app-icon.svg" },
+        { kind: "sourcemap", path: "/tmp/dist/app.js.map" },
+      ])
+    ).toEqual(["/app-icon.svg", "/chunk-catalog123.js"]);
   });
 });
 
