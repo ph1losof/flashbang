@@ -8,7 +8,12 @@ import {
 } from "../src/server/handlers";
 import { pageHeaders, SW_HEADERS } from "../src/server/headers";
 import { readPathname } from "../src/shared/raw-url";
-import { assembleUIAssets, bundleUI, generateCSS } from "./shared";
+import {
+  assembleUIAssets,
+  bundleUI,
+  customSuggestUrlsEnabled,
+  generateCSS,
+} from "./shared";
 
 const SECURITY_HEADERS = pageHeaders("'unsafe-inline'");
 
@@ -47,6 +52,10 @@ addEventListener("beforeunload", () => __es.close());
 
 async function build() {
   const t = performance.now();
+  const allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled();
+  console.log(
+    `Custom suggestion URLs: ${allowUnsafeCustomSuggestUrls ? "enabled" : "disabled"}`
+  );
   await mkdir("dist", { recursive: true });
 
   await Promise.all([
@@ -63,11 +72,11 @@ async function build() {
         __IS_DEV__: JSON.stringify(true),
       },
     }),
-    bundleUI(),
+    bundleUI(allowUnsafeCustomSuggestUrls),
   ]);
 
   await generateCSS(true);
-  await assembleUIAssets();
+  await assembleUIAssets(allowUnsafeCustomSuggestUrls);
 
   console.log(`Build done in ${(performance.now() - t).toFixed(0)}ms`);
 }

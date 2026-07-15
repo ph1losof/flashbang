@@ -958,13 +958,28 @@ describe("provider proxying — via suggest()", () => {
     expect(completions).toEqual([]);
   });
 
-  test("provider=custom + customUrl → fetches customUrl", async () => {
-    fetchSpy.mockResolvedValueOnce(Response.json(["cats", ["result"]]));
-    await suggest("cats", {
+  test("provider=custom + customUrl → disabled by default", async () => {
+    const r = await suggest("cats", {
       ...defaultSettings,
       provider: "custom",
       customUrl: "https://my-api.com/suggest?q={}",
     });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(await r.json()).toEqual(["cats", []]);
+  });
+
+  test("provider=custom + customUrl → fetched when explicitly enabled", async () => {
+    fetchSpy.mockResolvedValueOnce(Response.json(["cats", ["result"]]));
+    await suggest(
+      "cats",
+      {
+        ...defaultSettings,
+        provider: "custom",
+        customUrl: "https://my-api.com/suggest?q={}",
+      },
+      undefined,
+      true
+    );
     expect(fetchSpy).toHaveBeenCalledWith("https://my-api.com/suggest?q=cats");
   });
 

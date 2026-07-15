@@ -295,7 +295,8 @@ function readCookieValue(header: string, name: string): string | null {
 export async function suggest(
   query: string,
   settings: SuggestSettings,
-  bangOverride?: PartialBang | null
+  bangOverride?: PartialBang | null,
+  allowUnsafeCustomUrls = false
 ): Promise<Response> {
   const bang = bangOverride ?? parsePartialBang(query);
   if (bang) {
@@ -310,8 +311,12 @@ export async function suggest(
   }
 
   const { provider, trigger, customUrl } = settings;
-  const endpoint =
-    provider === "custom" ? customUrl : resolveEndpoint(provider, trigger);
+  let endpoint: string | null;
+  if (provider === "custom") {
+    endpoint = allowUnsafeCustomUrls ? customUrl : null;
+  } else {
+    endpoint = resolveEndpoint(provider, trigger);
+  }
 
   if (!endpoint) {
     return empty(query);

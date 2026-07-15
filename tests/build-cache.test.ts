@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { createCacheVersion, precacheFileInputs } from "../scripts/build";
+import {
+  configureCustomSuggestOption,
+  customSuggestUrlsEnabled,
+} from "../scripts/shared";
 
 describe("build cache version", () => {
   test("is deterministic regardless of input order", () => {
@@ -47,5 +51,29 @@ describe("build cache version", () => {
       ["/manifest.json", "dist/manifest.json"],
       ["/chunk-abc12345.js", "dist/chunk-abc12345.js"],
     ]);
+  });
+});
+
+describe("custom suggestion build flag", () => {
+  const source =
+    '<select><!-- custom-suggest-provider-option --><option value="none">None</option></select>';
+
+  test("only the exact value true enables custom suggestion URLs", () => {
+    expect(customSuggestUrlsEnabled("true")).toBe(true);
+    expect(customSuggestUrlsEnabled("false")).toBe(false);
+    expect(customSuggestUrlsEnabled("TRUE")).toBe(false);
+    expect(customSuggestUrlsEnabled("1")).toBe(false);
+  });
+
+  test("omits the custom provider from disabled builds", () => {
+    const html = configureCustomSuggestOption(source, false);
+    expect(html).not.toContain('value="custom"');
+    expect(html).not.toContain("custom-suggest-provider-option");
+  });
+
+  test("includes the custom provider in enabled builds", () => {
+    const html = configureCustomSuggestOption(source, true);
+    expect(html).toContain('<option value="custom">Custom</option>');
+    expect(html).not.toContain("custom-suggest-provider-option");
   });
 });

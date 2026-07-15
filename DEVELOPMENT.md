@@ -85,6 +85,7 @@ flashbang/
 │       ├── index.html         # HTML template
 │       ├── app.ts             # Initialization & orchestration
 │       ├── bang-catalog.ts    # Shared normalized bang metadata and bounded search
+│       ├── suggest-provider.ts # Suggestion provider feature availability
 │       ├── bench/
 │       │   ├── index.html     # Benchmark page
 │       │   └── index.ts       # Benchmark script

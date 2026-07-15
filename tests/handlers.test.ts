@@ -53,7 +53,20 @@ describe("handleSuggestRequest", () => {
     expect(payload[1]).toHaveLength(TOP_K);
   });
 
-  test("forwards custom suggest provider request when query has no bang", async () => {
+  test("blocks custom suggest provider request by default", async () => {
+    const custom = "https://example.com/suggest?q={}";
+    const response = await handleSuggestRequest(
+      req(
+        "http://localhost/suggest?q=flash",
+        `suggest=${encodeSuggestCookieValue("custom", "g", custom)}`
+      )
+    );
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(await response.json()).toEqual(["flash", []]);
+  });
+
+  test("forwards custom suggest provider request when explicitly enabled", async () => {
     const upstream = [
       "flashbang",
       ["flashbang", "flashlight"],
@@ -70,7 +83,8 @@ describe("handleSuggestRequest", () => {
       req(
         "http://localhost/suggest?q=flash",
         `suggest=${encodeSuggestCookieValue("custom", "g", custom)}`
-      )
+      ),
+      { ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS: "true" }
     );
 
     expect(response.status).toBe(200);

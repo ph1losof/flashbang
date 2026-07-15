@@ -1,6 +1,7 @@
 import { setSuggestCookie } from "../cookie";
 import type { DB } from "../db";
 import { $ } from "../dom";
+import { resolveSuggestProvider } from "../suggest-provider";
 import { notifySW } from "../sw-bridge";
 import { setupCustomBangs } from "./custom-bangs";
 import { setupDefaultBangSetting } from "./default-bang";
@@ -16,7 +17,10 @@ const SETTINGS_KEYS = [
   "lucky-url",
 ];
 
-export async function initSettings(db: DB): Promise<void> {
+export async function initSettings(
+  db: DB,
+  allowUnsafeCustomSuggestUrls = false
+): Promise<void> {
   const defaultInput = $<HTMLInputElement>("#default-bang");
   const importFile = $<HTMLInputElement>("#import-file");
   const exportButton = $<HTMLButtonElement>("#export-btn");
@@ -28,7 +32,10 @@ export async function initSettings(db: DB): Promise<void> {
   const state = {
     custom: initialCustom,
     defaultBang: rawSettings[0] || "g",
-    suggestProvider: rawSettings[1] || "default",
+    suggestProvider: resolveSuggestProvider(
+      rawSettings[1],
+      allowUnsafeCustomSuggestUrls
+    ),
     suggestUrl: rawSettings[2] || "",
     luckyProvider: rawSettings[3] || "default",
     luckyUrl: rawSettings[4] || "",
@@ -98,7 +105,7 @@ export async function initSettings(db: DB): Promise<void> {
       state.defaultBang = imported[0] || "g";
       state.suggestProvider = providers.isFirefox
         ? "google"
-        : imported[1] || "default";
+        : resolveSuggestProvider(imported[1], allowUnsafeCustomSuggestUrls);
       state.suggestUrl = imported[2] || "";
       state.luckyProvider = imported[3] || "default";
       state.luckyUrl = imported[4] || "";

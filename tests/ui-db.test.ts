@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { resetDB } from "../src/shared/idb";
 import { DB, SETTINGS_SCHEMA_VERSION } from "../src/ui/db";
+import { resolveSuggestProvider } from "../src/ui/suggest-provider";
 import { installFakeIndexedDb } from "./helpers/fake-indexeddb";
 
 let restoreIndexedDb: (() => void) | null = null;
@@ -386,5 +387,20 @@ describe("custom bang import and export", () => {
     ]);
     expect(result.acceptedCustomBangs).toBe(1);
     expect(result.rejectedCustomBangs).toBe(invalidTriggers.length);
+  });
+});
+
+describe("custom suggestion availability", () => {
+  test("falls back to none when custom suggestions are disabled", () => {
+    expect(resolveSuggestProvider("custom", false)).toBe("none");
+  });
+
+  test("preserves custom when custom suggestions are enabled", () => {
+    expect(resolveSuggestProvider("custom", true)).toBe("custom");
+  });
+
+  test("does not alter built-in providers", () => {
+    expect(resolveSuggestProvider("ddg", false)).toBe("ddg");
+    expect(resolveSuggestProvider(null, false)).toBe("default");
   });
 });

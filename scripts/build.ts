@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 import { mkdir, rm } from "node:fs/promises";
 import { brotliCompressSync, constants } from "node:zlib";
 import { ensureGeneratedBangData } from "./codegen";
-import { assembleUIAssets, bundleUI, generateCSS } from "./shared";
+import {
+  assembleUIAssets,
+  bundleUI,
+  customSuggestUrlsEnabled,
+  generateCSS,
+} from "./shared";
 
 const SIZE_THRESHOLD = 50 * 1024; // 50 KB
 const PRELIMINARY_SW_PATH = "dist/sw-cache-input.js";
@@ -74,13 +79,17 @@ async function bundleServiceWorker(
 
 async function main(): Promise<void> {
   await ensureGeneratedBangData(true);
+  const allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled();
+  console.log(
+    `Custom suggestion URLs: ${allowUnsafeCustomSuggestUrls ? "enabled" : "disabled"}`
+  );
 
   // Start from a clean dist to avoid stale artifacts (e.g. orphaned .br chunks).
   await rm("dist", { recursive: true, force: true });
   await mkdir("dist", { recursive: true });
 
   console.log("=== Bundle app + bench (to discover chunks) ===");
-  const allOutputs = await bundleUI();
+  const allOutputs = await bundleUI(allowUnsafeCustomSuggestUrls);
   const extraAssets = [
     ...new Set(
       allOutputs
@@ -103,7 +112,7 @@ async function main(): Promise<void> {
   await generateCSS();
 
   console.log("=== Inline CSS + minify HTML ===");
-  await assembleUIAssets();
+  await assembleUIAssets(allowUnsafeCustomSuggestUrls);
   await rm("dist/styles.css");
 
   console.log("=== Compute service worker cache version ===");

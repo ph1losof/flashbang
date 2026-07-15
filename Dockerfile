@@ -1,5 +1,8 @@
 FROM oven/bun:latest AS builder
 
+ARG ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=false
+ENV ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=$ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS
+
 WORKDIR /app
 COPY package.json bun.lock bunfig.toml ./
 RUN bun install --frozen-lockfile
@@ -8,6 +11,9 @@ COPY . .
 RUN bun run codegen --from-merged && bun run build
 
 FROM oven/bun:latest
+
+ARG ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=false
+ENV ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=$ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS
 
 WORKDIR /app
 COPY --from=builder /app/dist dist

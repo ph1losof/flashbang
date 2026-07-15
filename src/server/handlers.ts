@@ -14,13 +14,28 @@ export interface PublicOriginEnvironment {
   PUBLIC_ORIGIN?: string;
 }
 
-function runtimeEnvironment(): PublicOriginEnvironment {
-  return typeof process === "undefined"
-    ? {}
-    : { PUBLIC_ORIGIN: process.env.PUBLIC_ORIGIN };
+export interface SuggestEnvironment {
+  ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS?: string;
 }
 
-export function handleSuggestRequest(request: Request): Promise<Response> {
+interface ServerEnvironment
+  extends PublicOriginEnvironment,
+    SuggestEnvironment {}
+
+function runtimeEnvironment(): ServerEnvironment {
+  return typeof process === "undefined"
+    ? {}
+    : {
+        ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS:
+          process.env.ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS,
+        PUBLIC_ORIGIN: process.env.PUBLIC_ORIGIN,
+      };
+}
+
+export function handleSuggestRequest(
+  request: Request,
+  environment: SuggestEnvironment = runtimeEnvironment()
+): Promise<Response> {
   const rawUrl = request.url;
   const [q, sp] = readTwoQueryParams(rawUrl, "q", "sp");
   if (!q) {
@@ -34,7 +49,9 @@ export function handleSuggestRequest(request: Request): Promise<Response> {
   const bang = parsePartialBang(q);
   const { settings, rewrittenSuggestCookie } =
     parseSettingsFromRawUrlWithCleanup(rawUrl, request, sp, bang !== null);
-  return suggest(q, settings, bang).then((response) => {
+  const allowUnsafeCustomUrls =
+    environment.ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS === "true";
+  return suggest(q, settings, bang, allowUnsafeCustomUrls).then((response) => {
     if (!rewrittenSuggestCookie) {
       return response;
     }

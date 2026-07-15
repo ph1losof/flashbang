@@ -1,7 +1,31 @@
 import { minify } from "@minify-html/node";
 import { $ } from "bun";
 
-export async function bundleUI() {
+const CUSTOM_SUGGEST_OPTION_MARKER = "<!-- custom-suggest-provider-option -->";
+const CUSTOM_SUGGEST_OPTION = '<option value="custom">Custom</option>';
+
+export function customSuggestUrlsEnabled(
+  value = process.env.ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS
+): boolean {
+  return value === "true";
+}
+
+export function configureCustomSuggestOption(
+  html: string,
+  enabled: boolean
+): string {
+  if (!html.includes(CUSTOM_SUGGEST_OPTION_MARKER)) {
+    throw new Error("Custom suggestion provider marker is missing");
+  }
+  return html.replace(
+    CUSTOM_SUGGEST_OPTION_MARKER,
+    enabled ? CUSTOM_SUGGEST_OPTION : ""
+  );
+}
+
+export async function bundleUI(
+  allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled()
+) {
   const builds = await Promise.all([
     Bun.build({
       entrypoints: ["src/ui/app.ts"],
@@ -11,6 +35,11 @@ export async function bundleUI() {
       minify: true,
       target: "browser",
       format: "esm",
+      define: {
+        __ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS__: JSON.stringify(
+          allowUnsafeCustomSuggestUrls
+        ),
+      },
     }),
     Bun.build({
       entrypoints: ["src/ui/bench/index.ts"],
@@ -40,7 +69,10 @@ export async function generateCSS(quiet = false): Promise<void> {
   }
 }
 
-export async function buildHTMLAssets(css: string): Promise<void> {
+export async function buildHTMLAssets(
+  css: string,
+  allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled()
+): Promise<void> {
   const inlineCSS = (src: string) =>
     src.replace(
       /<link rel="stylesheet" href="\/styles\.css"\s*\/?>/,
@@ -57,7 +89,11 @@ export async function buildHTMLAssets(css: string): Promise<void> {
     ["home", "src/ui/home/index.html"],
     ["bench", "src/ui/bench/index.html"],
   ] as const) {
-    const html = await Bun.file(source).text();
+    const sourceHtml = await Bun.file(source).text();
+    const html =
+      name === "home"
+        ? configureCustomSuggestOption(sourceHtml, allowUnsafeCustomSuggestUrls)
+        : sourceHtml;
     await Bun.write(
       `dist/${name}.html`,
       minify(Buffer.from(inlineCSS(html)), {
@@ -68,9 +104,11 @@ export async function buildHTMLAssets(css: string): Promise<void> {
   }
 }
 
-export async function assembleUIAssets(): Promise<void> {
+export async function assembleUIAssets(
+  allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled()
+): Promise<void> {
   const css = await Bun.file("dist/styles.css").text();
-  await buildHTMLAssets(css);
+  await buildHTMLAssets(css, allowUnsafeCustomSuggestUrls);
   await copyStaticAssets();
 }
 

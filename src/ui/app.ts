@@ -6,6 +6,9 @@ import { setupVimBlurShortcut } from "./keyboard";
 import { initLiquidMetal } from "./liquid-metal";
 import { setupDialog } from "./modal";
 import { initSettings } from "./settings/index";
+import { resolveSuggestProvider } from "./suggest-provider";
+
+declare const __ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS__: boolean;
 
 const db = new DB();
 
@@ -16,7 +19,7 @@ async function syncSuggestCookie() {
   ]);
 
   setSuggestCookie(
-    settings[0] || "default",
+    resolveSuggestProvider(settings[0], __ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS__),
     settings[1] || "g",
     settings[2] || "",
     custom
@@ -34,7 +37,8 @@ function init() {
   const { openDialog } = setupDialog({
     closeButton: $("#modal-close"),
     modal: $("#settings-modal"),
-    onFirstOpen: () => void initSettings(db),
+    onFirstOpen: () =>
+      void initSettings(db, __ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS__),
     openButton: $("#gear-btn"),
   });
 
