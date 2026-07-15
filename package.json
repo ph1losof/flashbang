@@ -1,5 +1,6 @@
 {
   "name": "flashbang",
+  "description": "The sub-1ms local first duck-duck-go style bang redirects",
   "private": true,
   "version": "1.5.0",
   "type": "module",
