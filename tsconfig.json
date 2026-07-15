@@ -9,6 +9,7 @@
     "types": ["bun"]
   },
   "include": [
+    "uno.config.ts",
     "src/**/*.ts",
     "scripts/**/*.ts",
     "functions/**/*.ts",

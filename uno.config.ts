@@ -1,60 +1,42 @@
-import { defineConfig, presetUno } from "unocss";
+import type { UserConfig } from "@unocss/core";
+import { presetWind3, type Theme } from "@unocss/preset-wind3";
 
-export default defineConfig({
-  presets: [presetUno()],
+const theme = {
+  colors: {
+    text: {
+      DEFAULT: "#e8e8f0",
+      secondary: "#8888a0",
+      hover: "#fff",
+    },
+    bg: {
+      DEFAULT: "#0a0a0f",
+      secondary: "#14141e",
+      hover: "#1e1e2e",
+      active: "#2a2a3a",
+    },
+    border: "#2e2e44",
+    danger: "#f15f6d",
+    success: "#4ade80",
+    chrome: {
+      1: "#6e6e8a",
+      2: "#9e9ebe",
+      3: "#e0e0f0",
+      highlight: "rgba(220, 220, 255, 0.25)",
+    },
+    glow: "rgba(140, 140, 255, 0.1)",
+  },
+  fontFamily: {
+    sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif",
+    mono: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+  },
+};
+
+export default {
+  presets: [presetWind3()],
   content: {
     filesystem: ["src/ui/**/*.{html,ts}"],
   },
-  theme: {
-    colors: {
-      text: {
-        DEFAULT: "#e8e8f0",
-        secondary: "#8888a0",
-        hover: "#fff",
-      },
-      bg: {
-        DEFAULT: "#0a0a0f",
-        secondary: "#14141e",
-        hover: "#1e1e2e",
-        active: "#2a2a3a",
-      },
-      border: "#2e2e44",
-      danger: "#f15f6d",
-      success: "#4ade80",
-      chrome: {
-        1: "#6e6e8a",
-        2: "#9e9ebe",
-        3: "#e0e0f0",
-        highlight: "rgba(220, 220, 255, 0.25)",
-      },
-      glow: "rgba(140, 140, 255, 0.1)",
-    },
-    fontFamily: {
-      sans: [
-        "system-ui",
-        "-apple-system",
-        "BlinkMacSystemFont",
-        "'Segoe UI'",
-        "Roboto",
-        "Oxygen",
-        "Ubuntu",
-        "Cantarell",
-        "'Open Sans'",
-        "'Helvetica Neue'",
-        "sans-serif",
-      ],
-      mono: [
-        "ui-monospace",
-        "SFMono-Regular",
-        "Menlo",
-        "Monaco",
-        "Consolas",
-        "'Liberation Mono'",
-        "'Courier New'",
-        "monospace",
-      ],
-    },
-  },
+  theme,
   safelist: [
     "opacity-100",
     "visible",
@@ -65,7 +47,7 @@ export default defineConfig({
   ],
   preflights: [
     {
-      getCSS: ({ theme }) => `
+      getCSS: () => `
         :root {
           font-family: ${theme.fontFamily.sans};
           font-synthesis: none;
@@ -110,7 +92,7 @@ export default defineConfig({
       `,
     },
     {
-      getCSS: ({ theme }) => `
+      getCSS: () => `
         input, select {
           background: ${theme.colors.bg.hover};
           border: 1px solid ${theme.colors.chrome[1]};
@@ -255,7 +237,7 @@ export default defineConfig({
       `,
     },
     {
-      getCSS: ({ theme }) => `
+      getCSS: () => `
         @keyframes flash {
           0%, 100% { background-color: ${theme.colors.bg.secondary}; }
           50% { background-color: ${theme.colors.bg.active}; }
@@ -430,4 +412,4 @@ export default defineConfig({
     "label-text": "text-sm text-text-secondary",
     "section-title": "text-base font-semibold tracking-tight mb-3 text-text",
   },
-});
+} satisfies UserConfig<Theme>;
