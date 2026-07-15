@@ -31,11 +31,15 @@ bun run clean      # remove dist/
 ```
 flashbang/
 ├── .github/
+│   ├── codeql/
+│   │   ├── actions-config.yml  # Extended CodeQL queries for GitHub Actions
+│   │   └── javascript-config.yml # CodeQL scope and queries for JavaScript/TypeScript
 │   ├── dependabot.yml          # Weekly Bun, GitHub Actions, and Docker updates
 │   ├── images/
 │   │   └── landing.png        # README screenshot
 │   └── workflows/
 │       ├── ci.yaml            # Typecheck, checks, tests, build, and E2E matrix
+│       ├── codeql.yaml         # CodeQL analysis for application and workflow code
 │       ├── release.yaml       # GitHub Release and multi-architecture image publishing
 │       └── update-bangs.yaml  # Daily bang-source refresh
 ├── functions/
@@ -206,7 +210,7 @@ Custom bangs are stored in the `custom-bangs` IndexedDB object store. The UI sup
 
 CSP headers are defined in `src/server/headers.ts` — the single source of truth for all deployment targets. The page CSP and SW CSP differ:
 
-- **Page CSP** — No `unsafe-eval`. The `script-src` value varies by target: `build.ts` uses inline script hashes, while `dev.ts`/`start.ts` use `'unsafe-inline'`
+- **Page CSP** — No `unsafe-eval`. Production targets use inline script hashes; only `dev.ts` uses `'unsafe-inline'` for the live-reload script
 - **SW CSP** — Strict: `default-src 'self'; script-src 'self'; connect-src 'self'`. No `unsafe-eval`; SW runtime avoids eval.
 
 On **Cloudflare Pages**, CSP is set per-path in `_headers` (not `/*`) to avoid CF Pages' additive header merging — `/*` would combine with `/sw.js`, and the browser enforces the intersection. Instead, CSP is set individually on `/`, `/index.html`, `/home.html`, `/bench.html`, and `/sw.js`.
