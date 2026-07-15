@@ -1,17 +1,303 @@
 {
-  "mdn": {
-    "name": "MDN Web Docs",
-    "url": "https://developer.mozilla.org/en-US/search?q={}",
-    "domain": "developer.mozilla.org"
+  "appletv": {
+    "name": "Apple TV",
+    "url": "https://tv.apple.com/search?term={}",
+    "domain": "tv.apple.com"
+  },
+  "arduinoreference": {
+    "name": "Arduino Reference",
+    "url": "https://search.arduino.cc/search/?q={}",
+    "domain": "search.arduino.cc"
+  },
+  "asterisk": {
+    "name": "Asterisk Docs",
+    "url": "https://docs.asterisk.org/?q={}",
+    "domain": "docs.asterisk.org",
+    "snap": "docs.asterisk.org"
+  },
+  "c++ref": {
+    "name": "cppreference.com",
+    "url": "https://cppreference.com/?search={}",
+    "domain": "cppreference.com"
+  },
+  "coolmath": {
+    "name": "Cool Math Games",
+    "url": "https://www.coolmathgames.com/search-results?query={}",
+    "domain": "www.coolmathgames.com"
+  },
+  "cpp": {
+    "name": "cppreference.com",
+    "url": "https://cppreference.com/?search={}",
+    "domain": "cppreference.com"
+  },
+  "cppref": {
+    "name": "cppreference.com",
+    "url": "https://cppreference.com/?search={}",
+    "domain": "cppreference.com"
+  },
+  "dal": {
+    "name": "Abrete Libro Forum",
+    "url": "https://www.abretelibro.com/foro/search.php?keywords={}",
+    "domain": "www.abretelibro.com"
+  },
+  "ddgr": {
+    "name": "Reddit",
+    "url": "https://www.reddit.com/search/?q={}",
+    "domain": "www.reddit.com"
+  },
+  "ddms": {
+    "name": "DansDeals",
+    "url": "https://www.dansdeals.com/?s={}",
+    "domain": "www.dansdeals.com"
+  },
+  "ddso": {
+    "name": "Stack Overflow",
+    "url": "https://stackoverflow.com/search?q={}",
+    "domain": "stackoverflow.com"
+  },
+  "docubufr": {
+    "name": "Ubuntu FR Docs",
+    "url": "https://doc.ubuntu-fr.org/doku.php?do=search&id={}",
+    "domain": "doc.ubuntu-fr.org"
+  },
+  "dpcs": {
+    "name": "PC Soft Docs",
+    "url": "https://doc.pcsoft.fr/fr-FR/search2.awp?q={}&origin=opensearch",
+    "domain": "doc.pcsoft.fr"
+  },
+  "ejmr": {
+    "name": "Econ Job Rumors",
+    "url": "https://www.econjobrumors.com/searchg.php?q={}",
+    "domain": "www.econjobrumors.com"
+  },
+  "elixir-docs": {
+    "name": "Elixir Docs",
+    "url": "https://hexdocs.pm/elixir/search.html?q={}",
+    "domain": "hexdocs.pm",
+    "snap": "hexdocs.pm/elixir"
+  },
+  "emacs": {
+    "name": "Emacs Wiki",
+    "url": "https://www.emacswiki.org/emacs?search={}",
+    "domain": "www.emacswiki.org"
+  },
+  "emacswiki": {
+    "name": "Emacs Wiki",
+    "url": "https://www.emacswiki.org/emacs?search={}",
+    "domain": "www.emacswiki.org"
+  },
+  "equestriadaily": {
+    "name": "Equestria Daily",
+    "url": "https://www.equestriadaily.com/search?q={}",
+    "domain": "www.equestriadaily.com"
+  },
+  "fgentoo": {
+    "name": "Gentoo Forums",
+    "url": "https://forums.gentoo.org/search.php?keywords={}",
+    "domain": "forums.gentoo.org"
+  },
+  "gal": {
+    "name": "Abrete Libro Forum",
+    "url": "https://www.abretelibro.com/foro/search.php?keywords={}",
+    "domain": "www.abretelibro.com"
+  },
+  "genma": {
+    "name": "Genma Blog",
+    "url": "https://blog.genma.fr/spip.php?page=recherche&recherche={}",
+    "domain": "blog.genma.fr",
+    "snap": "blog.genma.fr"
+  },
+  "greddit": {
+    "name": "Reddit",
+    "url": "https://www.reddit.com/search/?q={}",
+    "domain": "www.reddit.com"
+  },
+  "gwpde": {
+    "name": "German Wikipedia",
+    "url": "https://de.wikipedia.org/w/index.php?search={}",
+    "domain": "de.wikipedia.org"
+  },
+  "japi": {
+    "name": "Joomla API",
+    "url": "https://api.joomla.org/results.html?q={}&cx=007628682600509520926:myhvbnm964o",
+    "domain": "api.joomla.org"
   },
   "kagi": {
     "name": "Kagi",
     "url": "https://kagi.com/search?q={}",
     "domain": "kagi.com"
   },
+  "l3u": {
+    "name": "L3utterfish Blog",
+    "url": "https://l3utterfish.blogspot.com/search?q={}",
+    "domain": "l3utterfish.blogspot.com"
+  },
+  "lewrockwell": {
+    "name": "Lew Rockwell",
+    "url": "https://www.lewrockwell.com/?s={}",
+    "domain": "www.lewrockwell.com"
+  },
+  "lj": {
+    "name": "LiveJournal",
+    "url": "https://www.livejournal.com/rsearch?q={}",
+    "domain": "www.livejournal.com"
+  },
+  "lttforum": {
+    "name": "Linus Tech Tips Forum",
+    "url": "https://linustechtips.com/search/?q={}",
+    "domain": "linustechtips.com"
+  },
+  "lupa": {
+    "name": "Lupa",
+    "url": "https://www.agencialupa.org/?s={}",
+    "domain": "www.agencialupa.org",
+    "snap": "www.agencialupa.org"
+  },
+  "lwjgl": {
+    "name": "LWJGL Javadoc",
+    "url": "https://javadoc.lwjgl.org/search.html?q={}",
+    "domain": "javadoc.lwjgl.org",
+    "snap": "javadoc.lwjgl.org"
+  },
+  "manosx": {
+    "name": "Apple Developer",
+    "url": "https://developer.apple.com/search/?q={}",
+    "domain": "developer.apple.com"
+  },
+  "markos": {
+    "name": "Markos Web Tools",
+    "url": "https://www.markosweb.com/www/{}/",
+    "domain": "www.markosweb.com"
+  },
+  "mathworks": {
+    "name": "MathWorks",
+    "url": "https://www.mathworks.com/search.html?q={}",
+    "domain": "www.mathworks.com"
+  },
+  "mdn": {
+    "name": "MDN Web Docs",
+    "url": "https://developer.mozilla.org/en-US/search?q={}",
+    "domain": "developer.mozilla.org"
+  },
+  "mdn.s": {
+    "name": "MDN Web Docs",
+    "url": "https://developer.mozilla.org/search?q={}",
+    "domain": "developer.mozilla.org"
+  },
+  "nvidia": {
+    "name": "NVIDIA",
+    "url": "https://www.nvidia.com/en-us/search/?q={}",
+    "domain": "www.nvidia.com"
+  },
+  "of": {
+    "name": "OpenFrameworks Forum",
+    "url": "https://forum.openframeworks.cc/search?q={}",
+    "domain": "forum.openframeworks.cc"
+  },
+  "phrase": {
+    "name": "Phrase Finder",
+    "url": "https://www.phrases.org.uk/search.html?q={}",
+    "domain": "www.phrases.org.uk"
+  },
+  "rpcs3": {
+    "name": "RPCS3 Wiki",
+    "url": "https://wiki.rpcs3.net/index.php?title=Special%3ASearch&search={}",
+    "domain": "wiki.rpcs3.net"
+  },
+  "sab": {
+    "name": "Skeptics Annotated Bible",
+    "url": "https://www.skepticsannotatedbible.com/searchresults.php?pub=1&bookid=0&sabsch={}",
+    "domain": "www.skepticsannotatedbible.com"
+  },
+  "sage": {
+    "name": "SageMath Docs",
+    "url": "https://doc.sagemath.org/html/en/search.html?q={}",
+    "domain": "doc.sagemath.org"
+  },
+  "saltstack": {
+    "name": "Salt Project Docs",
+    "url": "https://docs.saltproject.io/en/latest/search.html?q={}",
+    "domain": "docs.saltproject.io",
+    "snap": "docs.saltproject.io/en/latest"
+  },
+  "saq": {
+    "name": "Skeptics Annotated Quran",
+    "url": "https://www.skepticsannotatedbible.com/searchresults.php?pub=2&bookid=0&sabsch={}",
+    "domain": "www.skepticsannotatedbible.com"
+  },
+  "sbm": {
+    "name": "Science-Based Medicine",
+    "url": "https://sciencebasedmedicine.org/?s={}",
+    "domain": "sciencebasedmedicine.org"
+  },
+  "searchr": {
+    "name": "Reddit",
+    "url": "https://www.reddit.com/search/?q={}",
+    "domain": "www.reddit.com"
+  },
+  "serjunk": {
+    "name": "Serienjunkies",
+    "url": "https://www.serienjunkies.de/suche/?qr={}",
+    "domain": "www.serienjunkies.de"
+  },
   "settings": {
     "name": "Settings",
     "url": "/settings",
     "domain": "flashbang"
+  },
+  "skepticsbible": {
+    "name": "Skeptics Annotated Bible",
+    "url": "https://www.skepticsannotatedbible.com/searchresults.php?pub=1&bookid=0&sabsch={}",
+    "domain": "www.skepticsannotatedbible.com"
+  },
+  "skepticskoran": {
+    "name": "Skeptics Annotated Quran",
+    "url": "https://www.skepticsannotatedbible.com/searchresults.php?pub=2&bookid=0&sabsch={}",
+    "domain": "www.skepticsannotatedbible.com"
+  },
+  "skepticsquran": {
+    "name": "Skeptics Annotated Quran",
+    "url": "https://www.skepticsannotatedbible.com/searchresults.php?pub=2&bookid=0&sabsch={}",
+    "domain": "www.skepticsannotatedbible.com"
+  },
+  "sklearn": {
+    "name": "Scikit-Learn",
+    "url": "https://scikit-learn.org/stable/search.html?q={}",
+    "domain": "scikit-learn.org"
+  },
+  "sod": {
+    "name": "Stack Overflow",
+    "url": "https://stackoverflow.com/search?q={}",
+    "domain": "stackoverflow.com"
+  },
+  "sog": {
+    "name": "Stack Overflow",
+    "url": "https://stackoverflow.com/search?q={}",
+    "domain": "stackoverflow.com"
+  },
+  "spip": {
+    "name": "SPIP",
+    "url": "https://www.spip.net/spip.php?page=recherche&recherche={}",
+    "domain": "www.spip.net"
+  },
+  "tug": {
+    "name": "Graz University of Technology",
+    "url": "https://www.tugraz.at/suche?search={}",
+    "domain": "www.tugraz.at"
+  },
+  "ubhu": {
+    "name": "Ubuntu Hungary",
+    "url": "https://ubuntu.hu/?q={}",
+    "domain": "ubuntu.hu"
+  },
+  "virtus": {
+    "name": "Virtus",
+    "url": "https://www.virtus.com/search?q={}",
+    "domain": "www.virtus.com"
+  },
+  "webtender": {
+    "name": "Webtender",
+    "url": "https://www.webtender.com/cgi-bin/search?verbose=on&name={}",
+    "domain": "www.webtender.com"
   }
 }

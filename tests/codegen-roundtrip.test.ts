@@ -6,8 +6,11 @@ import {
 } from "../src/generated/bangs-min.js";
 import { hashFNV1a } from "../src/shared/hash";
 
-const bangs: Array<{ trigger: string; url: string }> =
+const bangs: Array<{ regex?: string; trigger: string; url: string }> =
   await Bun.file("data/bangs.json").json();
+const customBangs: Record<string, { url: string }> = await Bun.file(
+  "data/custom-bangs.json"
+).json();
 const generatedSource = await Bun.file("src/generated/bangs-min.js").text();
 
 describe("codegen round-trip", () => {
@@ -27,6 +30,35 @@ describe("codegen round-trip", () => {
       const result = lookupBang(trigger, hashFNV1a(trigger));
       expect(result).not.toBeNull();
       expect(result![0]).toContain("://");
+    }
+  });
+
+  test("preserves upstream site-filter search templates", () => {
+    const siteFiltered = bangs.filter(
+      (bang) =>
+        !bang.regex && /(?:site(?::|%3a)|(?:as_)?sitesearch=)/i.test(bang.url)
+    );
+    expect(siteFiltered.length).toBeGreaterThan(100);
+    for (const bang of siteFiltered) {
+      const generated = lookupBang(bang.trigger, hashFNV1a(bang.trigger));
+      expect(generated).not.toBeNull();
+      expect(`${generated![0]}{}${generated![1]}`).toBe(bang.url);
+    }
+  });
+
+  test("applies every curated custom override", () => {
+    for (const [trigger, bang] of Object.entries(customBangs)) {
+      const generated = lookupBang(trigger, hashFNV1a(trigger));
+      expect(generated).not.toBeNull();
+      const placeholder = bang.url.indexOf("{}");
+      expect(generated).toEqual(
+        placeholder === -1
+          ? [bang.url, null]
+          : [
+              bang.url.substring(0, placeholder),
+              bang.url.substring(placeholder + 2),
+            ]
+      );
     }
   });
 
@@ -62,6 +94,12 @@ describe("codegen round-trip", () => {
     );
     expect(lookupSnapOverride("nr", hashFNV1a("nr"), false)).toBe(
       "+site:github.com/NixOS/nixpkgs"
+    );
+    expect(lookupSnapOverride("sklearn", hashFNV1a("sklearn"), false)).toBe(
+      "+site:scikit-learn.org/stable"
+    );
+    expect(lookupSnapOverride("saltstack", hashFNV1a("saltstack"), true)).toBe(
+      "https://docs.saltproject.io/en/latest"
     );
   });
 });
