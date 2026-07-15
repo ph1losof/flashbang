@@ -1,0 +1,20 @@
+name: Flashbang JavaScript and TypeScript
+
+# Keep the default high-precision security queries and add lower-severity and
+# lower-precision security checks. Code quality is already enforced by Biome
+# and TypeScript in CI.
+queries:
+  - uses: security-extended
+
+# Analyze shipped browser/server code and build scripts. Tests, generated bang
+# data, and local profiling code are omitted to focus alerts on attack surface.
+paths:
+  - functions
+  - scripts
+  - src
+  - uno.config.ts
+  - playwright.config.ts
+
+paths-ignore:
+  - scripts/profile.ts
+  - src/generated

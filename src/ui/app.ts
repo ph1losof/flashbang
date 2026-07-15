@@ -31,14 +31,17 @@ function init() {
   syncSuggestCookie();
 
   initLiquidMetal($<HTMLCanvasElement>("#metal-canvas"), "flashbang");
-  $(".wordmark").classList.add("has-shader");
-  initHome(db);
+  const refreshHomeCatalog = initHome(db);
 
   const { openDialog } = setupDialog({
     closeButton: $("#modal-close"),
     modal: $("#settings-modal"),
     onFirstOpen: () =>
-      void initSettings(db, __ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS__),
+      void initSettings(
+        db,
+        __ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS__,
+        refreshHomeCatalog
+      ),
     openButton: $("#gear-btn"),
   });
 

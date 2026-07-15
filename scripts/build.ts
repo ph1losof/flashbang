@@ -145,8 +145,11 @@ async function main(): Promise<void> {
   console.log("=== Generate _headers with CSP ===");
   function extractScriptHashes(html: string): string[] {
     const hashes: string[] = [];
-    const re = /<script>([\s\S]*?)<\/script>/g;
+    const re = /<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/gi;
     for (const match of html.matchAll(re)) {
+      if (!match[1]) {
+        continue;
+      }
       const hash = createHash("sha256").update(match[1]).digest("base64");
       hashes.push(`'sha256-${hash}'`);
     }

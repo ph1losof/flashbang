@@ -15,7 +15,12 @@ function customDomain(url: string): string {
   }
 }
 
-export function setupBangCommand(db: DB): HTMLInputElement {
+export interface BangCommandController {
+  input: HTMLInputElement;
+  refresh: () => Promise<void>;
+}
+
+export function setupBangCommand(db: DB): BangCommandController {
   const form = $<HTMLFormElement>("#bang-command-form");
   const input = $<HTMLInputElement>("#bang-command-input");
   const selectedBadge = $<HTMLButtonElement>("#bang-command-selected");
@@ -29,6 +34,7 @@ export function setupBangCommand(db: DB): HTMLInputElement {
   let optionElements: HTMLButtonElement[] = [];
   let selectedCommand: { marker: "!" | "@"; trigger: string } | null = null;
   let selected = -1;
+  let catalogVersion = 0;
 
   function closeResults(): void {
     results.classList.add("hidden");
@@ -204,11 +210,15 @@ export function setupBangCommand(db: DB): HTMLInputElement {
     if (loading) {
       return loading;
     }
-    loading = Promise.all([
+    const version = catalogVersion;
+    const request = Promise.all([
       loadBuiltinBangCatalog(),
       db.getAllCustomBangs().catch(() => []),
     ])
       .then(([catalog, custom]) => {
+        if (version !== catalogVersion) {
+          return;
+        }
         if (custom.length === 0) {
           entries = catalog.entries;
         } else {
@@ -232,14 +242,29 @@ export function setupBangCommand(db: DB): HTMLInputElement {
         count.textContent = `${entries.length.toLocaleString()} shortcuts`;
       })
       .catch(() => {
+        if (version !== catalogVersion) {
+          return;
+        }
         entries = [];
         count.textContent = "Bang index unavailable";
       })
       .finally(() => {
-        loading = null;
-        renderResults();
+        if (loading === request) {
+          loading = null;
+        }
+        if (version === catalogVersion) {
+          renderResults();
+        }
       });
-    return loading;
+    loading = request;
+    return request;
+  }
+
+  function refresh(): Promise<void> {
+    catalogVersion++;
+    entries = null;
+    loading = null;
+    return loadEntries();
   }
 
   input.addEventListener("focus", () => void loadEntries());
@@ -325,5 +350,5 @@ export function setupBangCommand(db: DB): HTMLInputElement {
   } else {
     setTimeout(() => void loadEntries(), 800);
   }
-  return input;
+  return { input, refresh };
 }

@@ -28,6 +28,8 @@ describe("custom trigger validation", () => {
       "foo!bar",
       "foo@bar",
       "foo+bar",
+      "foo,bar",
+      "foo:bar",
     ]) {
       expect(validateCustomTrigger(trigger)).not.toBeNull();
     }
@@ -45,7 +47,14 @@ describe("custom trigger validation", () => {
   });
 
   test("rejects reserved triggers case-insensitively", () => {
-    expect(validateCustomTrigger("settings")).toContain("reserved");
-    expect(validateCustomTrigger("SETTINGS")).toContain("reserved");
+    for (const trigger of [
+      "settings",
+      "SETTINGS",
+      "__proto__",
+      "constructor",
+      "prototype",
+    ]) {
+      expect(validateCustomTrigger(trigger)).toContain("reserved");
+    }
   });
 });

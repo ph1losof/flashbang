@@ -212,6 +212,8 @@ describe("sw runtime with real modules", () => {
     await handlers.activate?.(activateEvt.event);
     await Promise.all(activateEvt.waits);
     expect(claimCalls).toBe(1);
+    const swIdb = await import("../src/sw/idb");
+    expect(swIdb.getTopFrecencyRecord()).toEqual({ g: 2 });
     expect(cacheDeleteCalls).toEqual(["fb-old-cache", "flashbang-dev"]);
     expect(cacheDeleteCalls).not.toContain("other-cache");
   });

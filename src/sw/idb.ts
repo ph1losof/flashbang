@@ -54,6 +54,10 @@ let loadFrecencyPromise: Promise<void> | null = null;
 let topFrecency: TopFrecencyEntry[] = [];
 let lastDecayTs: number = 0;
 
+function emptyFrecencyCounts(): Record<string, number> {
+  return Object.create(null) as Record<string, number>;
+}
+
 export function getCachedSettings(): RedirectSettings | null {
   return cachedRedirect;
 }
@@ -185,7 +189,7 @@ function applyDecay(): void {
     return;
   }
   const factor = 0.5 ** (elapsed / FRECENCY_HALF_LIFE_MS);
-  const pruned: Record<string, number> = {};
+  const pruned = emptyFrecencyCounts();
   for (const key of Object.keys(frecencyCounts)) {
     const decayed = Math.round(frecencyCounts[key] * factor);
     if (decayed >= 1) {
@@ -206,7 +210,11 @@ function pruneFrecency(): void {
   }
   const entries = Object.entries(frecencyCounts);
   entries.sort((a, b) => b[1] - a[1]);
-  frecencyCounts = Object.fromEntries(entries.slice(0, MAX_FRECENCY_ENTRIES));
+  const pruned = emptyFrecencyCounts();
+  for (const [trigger, count] of entries.slice(0, MAX_FRECENCY_ENTRIES)) {
+    pruned[trigger] = count;
+  }
+  frecencyCounts = pruned;
 }
 
 export function hasTopFrecency(): boolean {
@@ -236,17 +244,7 @@ export function loadFrecency(): Promise<void> {
           store.get("frecency")
         );
         const stored = result?.value ?? "";
-        if (stored.charCodeAt(0) === 123) {
-          // '{' = old JSON format (migration)
-          const raw = JSON.parse(stored);
-          if (raw.c && typeof raw.t === "number") {
-            frecencyCounts = raw.c;
-            lastDecayTs = raw.t;
-          } else {
-            frecencyCounts = raw;
-            lastDecayTs = Date.now();
-          }
-        } else if (stored) {
+        if (stored) {
           const pipeIdx = stored.indexOf("|");
           lastDecayTs =
             pipeIdx > 0
@@ -254,10 +252,10 @@ export function loadFrecency(): Promise<void> {
               : Date.now();
           frecencyCounts =
             pipeIdx === -1
-              ? {}
+              ? emptyFrecencyCounts()
               : parseFrecencyCompact(stored.substring(pipeIdx + 1));
         } else {
-          frecencyCounts = {};
+          frecencyCounts = emptyFrecencyCounts();
           lastDecayTs = Date.now();
         }
 
@@ -268,7 +266,7 @@ export function loadFrecency(): Promise<void> {
           : [];
         persistFrecencySnapshot(frecencyCounts, lastDecayTs);
       } catch {
-        frecencyCounts = {};
+        frecencyCounts = emptyFrecencyCounts();
         topFrecency = [];
         lastDecayTs = Date.now();
       }
@@ -282,7 +280,7 @@ export function loadFrecency(): Promise<void> {
 
 export function trackBangUsage(trigger: string) {
   if (!frecencyCounts) {
-    frecencyCounts = {};
+    frecencyCounts = emptyFrecencyCounts();
     topFrecency = [];
   }
   const nextCount = (frecencyCounts[trigger] || 0) + 1;

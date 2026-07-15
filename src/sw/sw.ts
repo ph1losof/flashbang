@@ -160,14 +160,15 @@ self.addEventListener("install", (e: ExtendableEvent) => {
 });
 
 self.addEventListener("activate", (e: ExtendableEvent) => {
-  void readRedirectSettings();
-  void loadFrecency();
   e.waitUntil(
-    Promise.all([deleteOldCaches(CACHE_NAME), self.clients.claim()]).then(
-      () => {
-        /* no-op */
-      }
-    )
+    Promise.all([
+      deleteOldCaches(CACHE_NAME),
+      self.clients.claim(),
+      readRedirectSettings(),
+      loadFrecency(),
+    ]).then(() => {
+      /* no-op */
+    })
   );
 });
 

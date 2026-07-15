@@ -5,7 +5,7 @@ export function serializeFrecencyCompact(
     return "";
   }
   const parts: string[] = [];
-  for (const key in counts) {
+  for (const key of Object.keys(counts)) {
     parts.push(`${key}:${counts[key]}`);
   }
   return parts.join(",");

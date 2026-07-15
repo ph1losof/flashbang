@@ -19,7 +19,8 @@ const SETTINGS_KEYS = [
 
 export async function initSettings(
   db: DB,
-  allowUnsafeCustomSuggestUrls = false
+  allowUnsafeCustomSuggestUrls = false,
+  onCatalogChange?: () => void
 ): Promise<void> {
   const defaultInput = $<HTMLInputElement>("#default-bang");
   const importFile = $<HTMLInputElement>("#import-file");
@@ -92,6 +93,7 @@ export async function initSettings(
     (custom) => {
       state.custom = custom;
       syncCookie();
+      onCatalogChange?.();
     },
     writer.run
   );

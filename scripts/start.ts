@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { normalize } from "node:path";
 import {
   handleOpenSearchRequest,
@@ -6,9 +7,7 @@ import {
 import { pageHeaders, SW_HEADERS } from "../src/server/headers";
 import { readPathname } from "../src/shared/raw-url";
 
-const SECURITY_HEADERS = pageHeaders("'unsafe-inline'");
-const SECURITY_HEADER_ENTRIES: ReadonlyArray<readonly [string, string]> =
-  Object.entries(SECURITY_HEADERS);
+let securityHeaders = pageHeaders("");
 const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const REVALIDATE_CACHE_CONTROL = "public, max-age=0, must-revalidate";
 const HASHED_CHUNK_RE = /^\/chunk-[a-z0-9_-]{8,}\.js$/i;
@@ -60,6 +59,20 @@ export function cacheControlForAsset(assetPath: string): string {
     : REVALIDATE_CACHE_CONTROL;
 }
 
+export function extractInlineScriptHashes(html: string): string[] {
+  const hashes: string[] = [];
+  for (const match of html.matchAll(
+    /<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/gi
+  )) {
+    if (!match[1]) {
+      continue;
+    }
+    const hash = createHash("sha256").update(match[1]).digest("base64");
+    hashes.push(`'sha256-${hash}'`);
+  }
+  return hashes;
+}
+
 export function staticAssetHeaders(
   assetPath: string,
   contentType: string,
@@ -71,7 +84,7 @@ export function staticAssetHeaders(
     "Cache-Control": cacheControlForAsset(assetPath),
     Vary: "Accept-Encoding",
     ...(compressed ? { "Content-Encoding": "br" } : {}),
-    ...SECURITY_HEADERS,
+    ...securityHeaders,
     ...extraHeaders,
   };
 }
@@ -127,6 +140,17 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  const pageHtml = await Promise.all(
+    ["index.html", "home.html", "bench.html"].map((name) =>
+      Bun.file(`${DIST_DIR}/${name}`).text()
+    )
+  );
+  const scriptHashes = [
+    ...new Set(pageHtml.flatMap(extractInlineScriptHashes)),
+  ];
+  securityHeaders = pageHeaders(scriptHashes.join(" "));
+  const securityHeaderEntries = Object.entries(securityHeaders);
+
   const staticManifest = buildStaticManifest();
   const port = Number(process.env.PORT) || 3000;
   console.log(`Production server: http://localhost:${port}`);
@@ -137,12 +161,12 @@ async function main(): Promise<void> {
       const pathname = readPathname(req.url);
 
       if (pathname === "/health") {
-        return new Response("ok");
+        return new Response("ok", { headers: securityHeaders });
       }
 
       if (pathname === "/suggest") {
         const res = await handleSuggestRequest(req);
-        for (const [k, v] of SECURITY_HEADER_ENTRIES) {
+        for (const [k, v] of securityHeaderEntries) {
           res.headers.set(k, v);
         }
         return res;
@@ -150,7 +174,7 @@ async function main(): Promise<void> {
 
       if (pathname === "/opensearch.xml") {
         const res = handleOpenSearchRequest(req);
-        for (const [k, v] of SECURITY_HEADER_ENTRIES) {
+        for (const [k, v] of securityHeaderEntries) {
           res.headers.set(k, v);
         }
         return res;
@@ -172,7 +196,7 @@ async function main(): Promise<void> {
       if (!normalized.startsWith(DIST_PREFIX)) {
         return new Response("Not found", {
           status: 404,
-          headers: SECURITY_HEADERS,
+          headers: securityHeaders,
         });
       }
       const fromDist = serveCompressed(

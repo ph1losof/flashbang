@@ -1,0 +1,6 @@
+name: Flashbang GitHub Actions
+
+# Workflows fetch remote data, open pull requests, create releases, and publish
+# containers, so include the extended security checks for privileged CI code.
+queries:
+  - uses: security-extended

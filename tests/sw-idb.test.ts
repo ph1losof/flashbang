@@ -198,21 +198,6 @@ describe("sw/idb frecency", () => {
     expect(mod.getTopFrecencyRecord()).toEqual({ g: 5, ddg: 2 });
   });
 
-  test("migrates legacy JSON frecency format", async () => {
-    await seedDb({
-      settings: [
-        {
-          key: "frecency",
-          value: JSON.stringify({ c: { g: 2, yt: 1 }, t: Date.now() }),
-        },
-      ],
-    });
-
-    const mod = await loadSwIdb();
-    await mod.loadFrecency();
-    expect(mod.getTopFrecencyRecord()).toEqual({ g: 2, yt: 1 });
-  });
-
   test("settings invalidation preserves frecency and increments prior counts", async () => {
     await seedDb({
       settings: [{ key: "frecency", value: `${Date.now()}|` }],

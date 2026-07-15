@@ -1,6 +1,11 @@
 export const MAX_CUSTOM_TRIGGER_LENGTH = 64;
 
-const RESERVED_CUSTOM_TRIGGERS = new Set(["settings"]);
+const RESERVED_CUSTOM_TRIGGERS = new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+  "settings",
+]);
 const ENCODED_TRIGGER_SEPARATOR = /%(?:20|21|40)/i;
 
 export function validateCustomTrigger(trigger: string): string | null {
@@ -15,6 +20,9 @@ export function validateCustomTrigger(trigger: string): string | null {
   }
   if (trigger.includes("!") || trigger.includes("@") || trigger.includes("+")) {
     return "Shortcut cannot contain !, @, or +";
+  }
+  if (trigger.includes(",") || trigger.includes(":")) {
+    return "Shortcut cannot contain comma or colon";
   }
   if (ENCODED_TRIGGER_SEPARATOR.test(trigger)) {
     return "Shortcut cannot contain encoded separators (%20, %21, or %40)";
