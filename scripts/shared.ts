@@ -63,7 +63,7 @@ export async function bundleUI(
 
 export async function generateCSS(quiet = false): Promise<void> {
   const output = `${DIST_DIR}/styles.css`;
-  const command = $`bunx --package @unocss/cli unocss "src/ui/home/index.html" "src/ui/bench/index.html" "src/ui/**/*.ts" -o ${output} --minify`;
+  const command = $`bunx --no-install --package @unocss/cli unocss "src/ui/home/index.html" "src/ui/bench/index.html" "src/ui/**/*.ts" -o ${output} --minify`;
   if (quiet) {
     await command.quiet();
   } else {
