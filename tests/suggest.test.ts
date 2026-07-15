@@ -830,6 +830,14 @@ describe("provider proxying — via suggest()", () => {
     );
   });
 
+  test("provider=qwant → fetches Qwant suggest URL", async () => {
+    fetchSpy.mockResolvedValueOnce(Response.json(["cats", []]));
+    await suggest("cats", { ...defaultSettings, provider: "qwant" });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://api.qwant.com/v3/suggest/?q=cats&client=opensearch"
+    );
+  });
+
   test("provider=startpage → fetches Startpage suggest URL", async () => {
     fetchSpy.mockResolvedValueOnce(Response.json(["cats", []]));
     await suggest("cats", { ...defaultSettings, provider: "startpage" });
@@ -917,6 +925,16 @@ describe("provider proxying — via suggest()", () => {
     expect(fetchSpy).toHaveBeenCalledWith(
       "https://kagi.com/api/autosuggest?q=cats"
     );
+  });
+
+  test("provider=default + Qwant triggers → resolves to Qwant", async () => {
+    for (const trigger of ["qw", "qwant", "qwt", "qww"]) {
+      fetchSpy.mockResolvedValueOnce(Response.json(["cats", []]));
+      await suggest("cats", { ...defaultSettings, trigger });
+      expect(fetchSpy).toHaveBeenLastCalledWith(
+        "https://api.qwant.com/v3/suggest/?q=cats&client=opensearch"
+      );
+    }
   });
 
   test("provider=default + trigger=sp → resolves to Startpage", async () => {

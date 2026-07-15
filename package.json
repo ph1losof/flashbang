@@ -19,7 +19,7 @@
     "profile:cpu": "bun --cpu-prof --cpu-prof-md --cpu-prof-dir profiles scripts/profile.ts",
     "clean": "bun -e \"import{rmSync}from'fs';rmSync('dist',{recursive:true,force:true})\"",
     "test": "bun test",
-    "test:e2e": "bun run build && bunx playwright test"
+    "test:e2e": "DIST_DIR=dist-e2e ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=true bun run build && DIST_DIR=dist-e2e ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=true bunx playwright test --workers=1"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.3",

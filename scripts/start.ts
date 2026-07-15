@@ -12,6 +12,8 @@ const SECURITY_HEADER_ENTRIES: ReadonlyArray<readonly [string, string]> =
 const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const REVALIDATE_CACHE_CONTROL = "public, max-age=0, must-revalidate";
 const HASHED_CHUNK_RE = /^\/chunk-[a-z0-9_-]{8,}\.js$/i;
+const DIST_DIR = process.env.DIST_DIR || "dist";
+const DIST_PREFIX = `${DIST_DIR}/`;
 
 interface StaticAsset {
   br: Bun.BunFile | null;
@@ -75,7 +77,7 @@ export function staticAssetHeaders(
 }
 
 function buildStaticManifest(): Map<string, StaticAsset> {
-  const files = [...new Bun.Glob("**/*").scanSync("dist")];
+  const files = [...new Bun.Glob("**/*").scanSync(DIST_DIR)];
   const byName = new Set(files);
   const map = new Map<string, StaticAsset>();
 
@@ -83,8 +85,10 @@ function buildStaticManifest(): Map<string, StaticAsset> {
     if (name.endsWith(".br")) {
       continue;
     }
-    const file = Bun.file(`dist/${name}`);
-    const br = byName.has(`${name}.br`) ? Bun.file(`dist/${name}.br`) : null;
+    const file = Bun.file(`${DIST_DIR}/${name}`);
+    const br = byName.has(`${name}.br`)
+      ? Bun.file(`${DIST_DIR}/${name}.br`)
+      : null;
     map.set(`/${name}`, { file, br, type: file.type });
   }
 
@@ -115,9 +119,11 @@ function serveCompressed(
 }
 
 async function main(): Promise<void> {
-  const distIndex = Bun.file("dist/index.html");
+  const distIndex = Bun.file(`${DIST_DIR}/index.html`);
   if (!(await distIndex.exists())) {
-    console.error("dist/index.html not found. Run `bun run build` first.");
+    console.error(
+      `${DIST_DIR}/index.html not found. Run \`bun run build\` first.`
+    );
     process.exit(1);
   }
 
@@ -162,8 +168,8 @@ async function main(): Promise<void> {
       }
 
       const path = pathname === "/" ? "/index.html" : pathname;
-      const normalized = normalize(`dist${path}`);
-      if (!normalized.startsWith("dist/")) {
+      const normalized = normalize(`${DIST_DIR}${path}`);
+      if (!normalized.startsWith(DIST_PREFIX)) {
         return new Response("Not found", {
           status: 404,
           headers: SECURITY_HEADERS,
@@ -172,18 +178,18 @@ async function main(): Promise<void> {
       const fromDist = serveCompressed(
         staticManifest,
         req,
-        `/${normalized.substring(5)}`
+        `/${normalized.substring(DIST_PREFIX.length)}`
       );
       if (fromDist) {
         return fromDist;
       }
 
-      const htmlNormalized = normalize(`dist${path}.html`);
-      if (htmlNormalized.startsWith("dist/")) {
+      const htmlNormalized = normalize(`${DIST_DIR}${path}.html`);
+      if (htmlNormalized.startsWith(DIST_PREFIX)) {
         const fromHtml = serveCompressed(
           staticManifest,
           req,
-          `/${htmlNormalized.substring(5)}`
+          `/${htmlNormalized.substring(DIST_PREFIX.length)}`
         );
         if (fromHtml) {
           return fromHtml;

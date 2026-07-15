@@ -6,11 +6,12 @@ import {
   assembleUIAssets,
   bundleUI,
   customSuggestUrlsEnabled,
+  DIST_DIR,
   generateCSS,
 } from "./shared";
 
 const SIZE_THRESHOLD = 50 * 1024; // 50 KB
-const PRELIMINARY_SW_PATH = "dist/sw-cache-input.js";
+const PRELIMINARY_SW_PATH = `${DIST_DIR}/sw-cache-input.js`;
 
 export interface CacheVersionInput {
   bytes: Uint8Array;
@@ -42,14 +43,15 @@ export function precacheFileInputs(
   extraAssets: readonly string[]
 ): ReadonlyArray<readonly [assetPath: string, filePath: string]> {
   return [
-    ["/home", "dist/home.html"],
-    ["/bench", "dist/bench.html"],
-    ["/bench.js", "dist/bench.js"],
-    ["/app.js", "dist/app.js"],
-    ["/icon.svg", "dist/icon.svg"],
-    ["/manifest.json", "dist/manifest.json"],
+    ["/home", `${DIST_DIR}/home.html`],
+    ["/bench", `${DIST_DIR}/bench.html`],
+    ["/bench.js", `${DIST_DIR}/bench.js`],
+    ["/app.js", `${DIST_DIR}/app.js`],
+    ["/icon.svg", `${DIST_DIR}/icon.svg`],
+    ["/manifest.json", `${DIST_DIR}/manifest.json`],
     ...extraAssets.map(
-      (assetPath) => [assetPath, `dist/${assetPath.substring(1)}`] as const
+      (assetPath) =>
+        [assetPath, `${DIST_DIR}/${assetPath.substring(1)}`] as const
     ),
   ];
 }
@@ -61,7 +63,7 @@ async function bundleServiceWorker(
 ): Promise<void> {
   const result = await Bun.build({
     entrypoints: ["src/sw/sw.ts"],
-    outdir: "dist",
+    outdir: DIST_DIR,
     naming,
     minify: true,
     target: "browser",
@@ -85,8 +87,8 @@ async function main(): Promise<void> {
   );
 
   // Start from a clean dist to avoid stale artifacts (e.g. orphaned .br chunks).
-  await rm("dist", { recursive: true, force: true });
-  await mkdir("dist", { recursive: true });
+  await rm(DIST_DIR, { recursive: true, force: true });
+  await mkdir(DIST_DIR, { recursive: true });
 
   console.log("=== Bundle app + bench (to discover chunks) ===");
   const allOutputs = await bundleUI(allowUnsafeCustomSuggestUrls);
@@ -113,7 +115,7 @@ async function main(): Promise<void> {
 
   console.log("=== Inline CSS + minify HTML ===");
   await assembleUIAssets(allowUnsafeCustomSuggestUrls);
-  await rm("dist/styles.css");
+  await rm(`${DIST_DIR}/styles.css`);
 
   console.log("=== Compute service worker cache version ===");
   // This fixed placeholder bundle captures SW implementation and bang-data
@@ -150,9 +152,9 @@ async function main(): Promise<void> {
     }
     return hashes;
   }
-  const distIndex = await Bun.file("dist/index.html").text();
-  const distHome = await Bun.file("dist/home.html").text();
-  const distBench = await Bun.file("dist/bench.html").text();
+  const distIndex = await Bun.file(`${DIST_DIR}/index.html`).text();
+  const distHome = await Bun.file(`${DIST_DIR}/home.html`).text();
+  const distBench = await Bun.file(`${DIST_DIR}/bench.html`).text();
   const scriptHashes = [
     ...extractScriptHashes(distIndex),
     ...extractScriptHashes(distHome),
@@ -169,7 +171,7 @@ async function main(): Promise<void> {
   const pageCspHeader = `Content-Security-Policy: ${pageCsp}`;
   const swCspHeader = `Content-Security-Policy: ${SW_CSP}`;
   await Bun.write(
-    "dist/_headers",
+    `${DIST_DIR}/_headers`,
     [
       "/*",
       `  ${securityHeaders}`,
@@ -197,21 +199,21 @@ async function main(): Promise<void> {
 
   console.log("=== Pre-compress static assets ===");
   for (const file of new Bun.Glob("*.{html,js,svg,json,txt}").scanSync(
-    "dist"
+    DIST_DIR
   )) {
-    const content = await Bun.file(`dist/${file}`).bytes();
+    const content = await Bun.file(`${DIST_DIR}/${file}`).bytes();
 
     const br = brotliCompressSync(content, {
       params: {
         [constants.BROTLI_PARAM_QUALITY]: constants.BROTLI_MAX_QUALITY,
       },
     });
-    await Bun.write(`dist/${file}.br`, br);
+    await Bun.write(`${DIST_DIR}/${file}.br`, br);
   }
 
   console.log("=== Done ===");
-  for (const f of new Bun.Glob("*").scanSync("dist")) {
-    const size = Bun.file(`dist/${f}`).size;
+  for (const f of new Bun.Glob("*").scanSync(DIST_DIR)) {
+    const size = Bun.file(`${DIST_DIR}/${f}`).size;
     const kb = (size / 1024).toFixed(1);
     console.log(`  ${f.padEnd(30)} ${kb} KB`);
   }

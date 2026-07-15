@@ -31,6 +31,19 @@ jobs:
             echo "changed=true" >> $GITHUB_OUTPUT
           fi
 
+      - name: Install Playwright browsers
+        if: steps.diff.outputs.changed == 'true'
+        run: bunx playwright install --with-deps chromium firefox webkit
+
+      - name: Verify update
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          bun run typecheck
+          bun run check
+          bun test
+          bun run build
+          bun run test:e2e
+
       - name: Commit
         if: steps.diff.outputs.changed == 'true'
         run: |

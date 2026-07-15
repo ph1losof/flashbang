@@ -12,6 +12,7 @@ import {
   CAPTURE_ENCODE_RAW,
   parseCaptureTemplate,
   validateCaptureBang,
+  validateSimpleBangUrl,
 } from "../src/shared/capture-template";
 import { hashFNV1a } from "../src/shared/hash";
 import {
@@ -241,21 +242,20 @@ function mergeSources(sources: readonly NamedBangSource[]): Bang[] {
   return [...map.values()].sort((a, b) => a.trigger.localeCompare(b.trigger));
 }
 
-function validateBangs(bangs: Bang[]): Bang[] {
+export function validateBangs(bangs: Bang[]): Bang[] {
   return bangs.filter((b) => {
     if (!b.trigger) {
       return false;
     }
+    let error: string | null = null;
     if (b.regex) {
-      const error = validateCaptureBang(b.url, b.regex);
-      if (error) {
-        console.error(
-          `Warning: bang !${b.trigger} has invalid regex: ${error}`
-        );
-        return false;
-      }
-    } else if (!b.url.includes("{}")) {
-      console.error(`Warning: bang !${b.trigger} has no {} placeholder in URL`);
+      error = validateCaptureBang(b.url, b.regex);
+    } else if (b.url !== "/settings") {
+      error = validateSimpleBangUrl(b.url);
+    }
+    if (error) {
+      console.error(`Warning: bang !${b.trigger} is invalid: ${error}`);
+      return false;
     }
     return true;
   });
@@ -1318,7 +1318,7 @@ async function loadBangs(options: CodegenOptions): Promise<Bang[]> {
   if (fromMerged) {
     console.log("=== Read merged bangs ===");
     const merged = await Bun.file(MERGED_BANGS_PATH).json();
-    const bangs = merged as Bang[];
+    const bangs = validateBangs(merged as Bang[]);
     console.log(`Loaded ${bangs.length} bangs from ${MERGED_BANGS_PATH}`);
     return bangs;
   }

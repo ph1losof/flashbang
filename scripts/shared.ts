@@ -3,6 +3,7 @@ import { $ } from "bun";
 
 const CUSTOM_SUGGEST_OPTION_MARKER = "<!-- custom-suggest-provider-option -->";
 const CUSTOM_SUGGEST_OPTION = '<option value="custom">Custom</option>';
+export const DIST_DIR = process.env.DIST_DIR || "dist";
 
 export function customSuggestUrlsEnabled(
   value = process.env.ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS
@@ -29,7 +30,7 @@ export async function bundleUI(
   const builds = await Promise.all([
     Bun.build({
       entrypoints: ["src/ui/app.ts"],
-      outdir: "dist",
+      outdir: DIST_DIR,
       naming: "app.js",
       splitting: true,
       minify: true,
@@ -43,7 +44,7 @@ export async function bundleUI(
     }),
     Bun.build({
       entrypoints: ["src/ui/bench/index.ts"],
-      outdir: "dist",
+      outdir: DIST_DIR,
       naming: "bench.js",
       minify: true,
       target: "browser",
@@ -61,7 +62,8 @@ export async function bundleUI(
 }
 
 export async function generateCSS(quiet = false): Promise<void> {
-  const command = $`bunx unocss "src/ui/home/index.html" "src/ui/bench/index.html" "src/ui/**/*.ts" -o dist/styles.css --minify`;
+  const output = `${DIST_DIR}/styles.css`;
+  const command = $`bunx unocss "src/ui/home/index.html" "src/ui/bench/index.html" "src/ui/**/*.ts" -o ${output} --minify`;
   if (quiet) {
     await command.quiet();
   } else {
@@ -81,7 +83,7 @@ export async function buildHTMLAssets(
 
   const indexHtml = await Bun.file("src/ui/index.html").text();
   await Bun.write(
-    "dist/index.html",
+    `${DIST_DIR}/index.html`,
     minify(Buffer.from(indexHtml), { minify_css: true, minify_js: true })
   );
 
@@ -95,7 +97,7 @@ export async function buildHTMLAssets(
         ? configureCustomSuggestOption(sourceHtml, allowUnsafeCustomSuggestUrls)
         : sourceHtml;
     await Bun.write(
-      `dist/${name}.html`,
+      `${DIST_DIR}/${name}.html`,
       minify(Buffer.from(inlineCSS(html)), {
         minify_css: true,
         minify_js: true,
@@ -107,15 +109,15 @@ export async function buildHTMLAssets(
 export async function assembleUIAssets(
   allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled()
 ): Promise<void> {
-  const css = await Bun.file("dist/styles.css").text();
+  const css = await Bun.file(`${DIST_DIR}/styles.css`).text();
   await buildHTMLAssets(css, allowUnsafeCustomSuggestUrls);
   await copyStaticAssets();
 }
 
 export async function copyStaticAssets(): Promise<void> {
   await Promise.all([
-    Bun.write("dist/robots.txt", "User-agent: *\nAllow: /\n"),
-    Bun.write("dist/manifest.json", Bun.file("src/ui/manifest.json")),
-    Bun.write("dist/icon.svg", Bun.file("src/ui/icon.svg")),
+    Bun.write(`${DIST_DIR}/robots.txt`, "User-agent: *\nAllow: /\n"),
+    Bun.write(`${DIST_DIR}/manifest.json`, Bun.file("src/ui/manifest.json")),
+    Bun.write(`${DIST_DIR}/icon.svg`, Bun.file("src/ui/icon.svg")),
   ]);
 }

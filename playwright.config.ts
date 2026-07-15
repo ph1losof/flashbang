@@ -49,6 +49,7 @@ export default defineConfig({
     command: "bun run start",
     env: {
       ...process.env,
+      ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS: "true",
       PORT: String(PORT),
     },
     url: `${BASE_URL}/health`,
