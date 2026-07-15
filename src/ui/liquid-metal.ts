@@ -134,6 +134,17 @@ export function initLiquidMetal(
   canvas: HTMLCanvasElement,
   text: string
 ): LiquidMetalControls {
+  try {
+    return initLiquidMetalShader(canvas, text);
+  } catch {
+    return fallback(canvas);
+  }
+}
+
+function initLiquidMetalShader(
+  canvas: HTMLCanvasElement,
+  text: string
+): LiquidMetalControls {
   const maybeGl = canvas.getContext("webgl2", {
     alpha: true,
     premultipliedAlpha: false,
@@ -231,6 +242,8 @@ export function initLiquidMetal(
     rafId = requestAnimationFrame(render);
   }
 
+  canvas.closest(".wordmark")?.classList.add("has-shader");
+
   return {
     destroy() {
       destroyed = true;
@@ -276,6 +289,7 @@ export function initLiquidMetal(
 
 function fallback(canvas: HTMLCanvasElement): LiquidMetalControls {
   canvas.style.display = "none";
+  canvas.closest(".wordmark")?.classList.remove("has-shader");
   return {
     destroy() {
       // no-op when WebGL is unavailable
