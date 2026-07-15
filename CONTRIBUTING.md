@@ -28,7 +28,7 @@ Each repository entry looks like:
 ```
 
 - The key is the trigger (e.g. `!mdn`)
-- `url` uses `{}` as the query placeholder for search bangs; it may omit `{}` for a fixed destination such as the repository's internal `settings` shortcut
+- `url` uses `{}` as the query placeholder for search bangs; the only supported fixed destination is the repository's internal `/settings` shortcut
 - `domain` is used for metadata display in the bang search UI
 
 After editing, run:
@@ -39,12 +39,12 @@ bun run codegen
 
 This fetches the current DuckDuckGo and Kagi sources, merges all sources, updates the committed `data/bangs.json`, and regenerates the ignored `src/generated/` artifacts. Commit both `data/custom-bangs.json` and `data/bangs.json`; do not commit `data/ddg.json`, `data/kagi.json`, or `src/generated/`.
 
-The repository custom-bang file supports simple `{}` templates and fixed-destination URLs. Regex capture templates and alternate snap targets are user-facing advanced settings and upstream Kagi metadata; see [DEVELOPMENT.md](DEVELOPMENT.md#advanced-bangs-and-snap-targets) before changing their parser or generated representation.
+The repository custom-bang file supports simple `{}` templates plus the special internal `/settings` destination. Regex capture templates and alternate snap targets are user-facing advanced settings and upstream Kagi metadata; see [DEVELOPMENT.md](DEVELOPMENT.md#advanced-bangs-and-snap-targets) before changing their parser or generated representation.
 
 ## Pull requests
 
 - Branch from `master`
-- Run `bun run typecheck`, `bun run check`, `bun test`, and `bun run build` before submitting
+- Run `bun run typecheck`, `bun run check`, `bun audit`, `bun test`, and `bun run build` before submitting
 - Run `bun run test:e2e` for UI, Service Worker, settings, or other browser-visible changes
 - Use [conventional commits](https://www.conventionalcommits.org/), including the repository's common `feat:`, `fix:`, `perf:`, `docs:`, `test:`, `refactor:`, and `chore:` types
 - Keep PRs focused — one concern per PR
@@ -53,15 +53,16 @@ The repository custom-bang file supports simple `{}` templates and fixed-destina
 
 We use **GitHub Releases** as the canonical place for release notes and version history.
 
-- Version tags use `vX.Y.Z` (for example `v1.4.1`)
-- Pushing a release tag triggers `.github/workflows/release.yaml`
-- The workflow validates the release, creates or updates its GitHub Release, health-checks a container, and publishes `linux/amd64` and `linux/arm64` images to GHCR
+- Version tags must use strict stable SemVer `vX.Y.Z` (for example `v1.5.0`) and match the version in `package.json`
+- Maintainers push the version commit to `master`, wait for protected-branch CI, then create and push an annotated tag; they do not create the GitHub Release manually
+- The tag-triggered workflow verifies that the tagged commit is contained in `origin/master`, runs its validation gates without repeating Playwright E2E, and creates the GitHub Release with generated notes
+- After release creation, the workflow health-checks a container and publishes `linux/amd64` and `linux/arm64` images to GHCR with the version and `latest` tags
 
-For the full maintainer release procedure (version bump, notes, tag, and workflow verification), see [DEVELOPMENT.md](DEVELOPMENT.md#releasing).
+For the full maintainer release procedure (version bump, annotated tag, and workflow verification), see [DEVELOPMENT.md](DEVELOPMENT.md#releasing).
 
 ## Tests
 
-All tests live in `tests/`. Run the unit and performance suite with:
+All tests live in `tests/`. Run the unit, integration, performance, and docs suite with:
 
 ```sh
 bun test
@@ -82,6 +83,7 @@ bunx playwright install
 Add tests for new logic and user-facing behavior. Look at existing tests for patterns:
 
 - `tests/redirect.test.ts` — redirect, capture bang, and snap routing logic
+- `tests/bang-catalog.test.ts` — bounded bang-catalog search and normalization
 - `tests/suggest.test.ts` — suggestions, providers, and cookie parsing
 - `tests/capture-template.test.ts` and `tests/snap-target.test.ts` — advanced custom-bang validation
 - `tests/codegen-roundtrip.test.ts` — generated regular, capture, and snap lookups
