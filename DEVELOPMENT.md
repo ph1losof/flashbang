@@ -31,6 +31,7 @@ bun run clean      # remove dist/
 ```
 flashbang/
 ├── .github/
+│   ├── dependabot.yml          # Weekly Bun, GitHub Actions, and Docker updates
 │   ├── images/
 │   │   └── landing.png        # README screenshot
 │   └── workflows/
