@@ -35,6 +35,8 @@ describe("bang catalog", () => {
     const catalog = await first;
     const google = catalog.byTrigger.get("g");
     expect(google?.name).toBe("Google");
+    expect(google?.capture).toBe(false);
+    expect(catalog.byTrigger.get("ktr")?.capture).toBe(true);
     expect(catalog.entries).toContain(google);
   });
 });

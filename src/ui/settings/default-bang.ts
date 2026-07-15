@@ -1,6 +1,8 @@
+import type { CustomBangRecord } from "../../shared/capture-template";
 import { flashAnim, shakeAnim } from "../animations";
 import {
   type BangMeta,
+  createBangMeta,
   loadBuiltinBangCatalog,
   searchBangs,
 } from "../bang-catalog";
@@ -11,17 +13,20 @@ import type { RunWrite } from "./write";
 
 interface DefaultBangOptions {
   db: DB;
+  initialCustom: readonly CustomBangRecord[];
   initialBang: string;
   onCommit: (trigger: string) => void;
   runWrite: RunWrite;
 }
 
 export interface DefaultBangController {
-  setCommitted: (trigger: string) => void;
+  setCommitted: (trigger: string) => string;
+  setCustomBangs: (bangs: readonly CustomBangRecord[]) => string;
 }
 
 export async function setupDefaultBangSetting({
   db,
+  initialCustom,
   initialBang,
   onCommit,
   runWrite,
@@ -30,14 +35,51 @@ export async function setupDefaultBangSetting({
   const results = $("#default-bang-results");
   const status = $("#bang-status");
   const catalog = await loadBuiltinBangCatalog();
+  const eligibleBuiltins = catalog.entries.filter((bang) => !bang.capture);
+  const eligibleByTrigger = new Map(
+    eligibleBuiltins.map((bang) => [bang.trigger, bang])
+  );
+  let byTrigger: ReadonlyMap<string, BangMeta> = eligibleByTrigger;
+  let entries: readonly BangMeta[] = eligibleBuiltins;
   let committedBang = initialBang;
   let previewTimer: ReturnType<typeof setTimeout>;
   let hits: BangMeta[] = [];
   let optionElements: HTMLButtonElement[] = [];
   let selected = -1;
 
-  input.value = initialBang;
-  status.textContent = catalog.byTrigger.get(initialBang)?.name || "Unknown";
+  function setCustomBangs(bangs: readonly CustomBangRecord[]): string {
+    const combined = new Map(eligibleByTrigger);
+    for (const bang of bangs) {
+      if (bang.regex) {
+        combined.delete(bang.trigger);
+        continue;
+      }
+      let domain = "Custom";
+      try {
+        domain = new URL(bang.url).hostname || domain;
+      } catch {
+        /* Persisted imports are validated elsewhere. */
+      }
+      combined.set(
+        bang.trigger,
+        createBangMeta(bang.trigger, bang.name, domain)
+      );
+    }
+    byTrigger = combined;
+    entries = [...combined.values()];
+    if (!byTrigger.has(committedBang)) {
+      committedBang = "g";
+    }
+    const current = byTrigger.get(committedBang);
+    input.value = committedBang;
+    status.textContent = current?.name || "Unknown";
+    status.className = current ? "text-sm text-success" : "text-sm text-danger";
+    return committedBang;
+  }
+
+  setCustomBangs(initialCustom);
+  input.value = committedBang;
+  status.textContent = byTrigger.get(committedBang)?.name || "Unknown";
 
   function closePreview(): void {
     results.classList.add("hidden");
@@ -83,12 +125,13 @@ export async function setupDefaultBangSetting({
     input.dispatchEvent(new Event("change"));
   }
 
-  function setCommitted(trigger: string): void {
-    const bang = catalog.byTrigger.get(trigger);
-    committedBang = trigger;
-    input.value = trigger;
+  function setCommitted(trigger: string): string {
+    committedBang = byTrigger.has(trigger) ? trigger : "g";
+    const bang = byTrigger.get(committedBang);
+    input.value = committedBang;
     status.textContent = bang?.name || "Unknown";
     status.className = bang ? "text-sm text-success" : "text-sm text-danger";
+    return committedBang;
   }
 
   input.addEventListener("input", () => {
@@ -99,7 +142,7 @@ export async function setupDefaultBangSetting({
       return;
     }
     previewTimer = setTimeout(() => {
-      hits = searchBangs(catalog.entries, query, 6);
+      hits = searchBangs(entries, query, 6);
       selected = hits.length > 0 ? 0 : -1;
       optionElements = [];
       if (hits.length === 0) {
@@ -178,7 +221,7 @@ export async function setupDefaultBangSetting({
   input.addEventListener("change", () => {
     closePreview();
     const value = input.value.replace(/^!+/, "").toLowerCase().trim();
-    const bang = catalog.byTrigger.get(value);
+    const bang = byTrigger.get(value);
     if (!bang) {
       shakeAnim(input);
       status.textContent = "Unknown bang";
@@ -197,12 +240,11 @@ export async function setupDefaultBangSetting({
       },
       onFailure: () => {
         input.value = committedBang;
-        status.textContent =
-          catalog.byTrigger.get(committedBang)?.name || "Unknown";
+        status.textContent = byTrigger.get(committedBang)?.name || "Unknown";
         status.className = "text-sm text-danger";
       },
     });
   });
 
-  return { setCommitted };
+  return { setCommitted, setCustomBangs };
 }

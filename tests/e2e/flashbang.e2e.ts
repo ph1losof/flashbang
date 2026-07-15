@@ -602,6 +602,47 @@ test("default search engine field previews and selects bangs", async ({
   await waitForSettingsWrite(page, writeCount);
 });
 
+test("user custom bangs can be selected as the default", async ({ page }) => {
+  await openHome(page);
+  await seedCustomBangs(page, [
+    {
+      trigger: "mydocs",
+      name: "My Docs",
+      url: "https://docs.example/search?q={}",
+    },
+  ]);
+  await openSettingsModal(page);
+  const writeCount = await settingsWriteCount(page);
+
+  await page.fill("#default-bang", "mydocs");
+  await page.dispatchEvent("#default-bang", "change");
+
+  await expect(page.locator("#bang-status")).toHaveText("My Docs");
+  await waitForSettingsWrite(page, writeCount);
+});
+
+test("capture bangs cannot be selected as the default", async ({ page }) => {
+  await openHome(page);
+  await seedCustomBangs(page, [
+    {
+      trigger: "translate",
+      name: "Translate",
+      url: "https://translate.example/$1/$2",
+      regex: "(\\w+)\\s+(.*)",
+    },
+  ]);
+  await openSettingsModal(page);
+  const status = page.locator("#bang-status");
+
+  await page.fill("#default-bang", "ktr");
+  await page.dispatchEvent("#default-bang", "change");
+  await expect(status).toHaveText("Unknown bang");
+
+  await page.fill("#default-bang", "translate");
+  await page.dispatchEvent("#default-bang", "change");
+  await expect(status).toHaveText("Unknown bang");
+});
+
 test("settings invalidation applies a new default bang to redirects", async ({
   browserName,
   page,
@@ -1426,6 +1467,30 @@ test("controlled redirect works while offline", async ({
     await navigateAndWaitForRedirect(page, "/?q=%21g%20hello", GOOGLE_REDIRECT);
   } finally {
     await context.unroute(`${origin}/**`);
+  }
+});
+
+test("settings catalog works on its first offline open", async ({
+  browserName,
+  context,
+  page,
+}) => {
+  test.skip(
+    browserName === "webkit",
+    "Playwright WebKit does not support service worker lifecycle testing"
+  );
+  await ensureWarmController(page);
+
+  await context.setOffline(true);
+  try {
+    await openSettingsModal(page);
+    await page.fill("#default-bang", "youtube");
+    await expect(page.locator("#default-bang-results")).toBeVisible();
+    await expect(
+      page.locator('#default-bang-results [data-trigger="youtube"]')
+    ).toContainText("YouTube");
+  } finally {
+    await context.setOffline(false);
   }
 });
 

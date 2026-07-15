@@ -118,7 +118,7 @@ interface NamedBangSource {
 
 type CustomBangMap = Record<
   string,
-  { name: string; url: string; domain: string }
+  { name: string; url: string; domain: string; snap?: string }
 >;
 
 function appendBangWithAliases(
@@ -219,20 +219,25 @@ function parseCustom(data: CustomBangMap): Bang[] {
     domain: b.domain,
     url: b.url,
     relevance: 0,
+    ...(b.snap ? { snap: b.snap } : {}),
   }));
 }
 
 function mergeSources(sources: readonly NamedBangSource[]): Bang[] {
   const map = new Map<string, Bang>();
 
-  for (const { bangs } of sources) {
+  for (const { bangs, name } of sources) {
     for (const bang of bangs) {
       const existing = map.get(bang.trigger);
       if (existing) {
-        map.set(bang.trigger, {
+        const merged = {
           ...bang,
           relevance: Math.max(existing.relevance, bang.relevance),
-        });
+        };
+        if (name === "custom" && !merged.snap && existing.snap) {
+          merged.snap = existing.snap;
+        }
+        map.set(bang.trigger, merged);
       } else {
         map.set(bang.trigger, bang);
       }
@@ -259,125 +264,6 @@ export function validateBangs(bangs: Bang[]): Bang[] {
     }
     return true;
   });
-}
-
-interface SiteFilterResult {
-  domain: string;
-  pattern: string;
-}
-
-const SITE_COLON_RE = /site(?::|%3[aA])([^\s+&]+)/;
-const SITESEARCH_RE = /(?:as_)?sitesearch=([^&]+)/i;
-
-export function extractSiteFilterDomain(url: string): SiteFilterResult | null {
-  if (url.includes("-site:") || url.includes("-site%3")) {
-    return null;
-  }
-
-  let match = url.match(SITE_COLON_RE);
-  if (match) {
-    let raw = match[1];
-    if (raw.includes("%")) {
-      try {
-        raw = decodeURIComponent(raw);
-      } catch {
-        /* keep raw */
-      }
-    }
-    if (raw.includes("{}")) {
-      return null;
-    }
-    raw = raw.replace(/^https?:\/\//, "");
-    raw = raw.replace(/\/+$/, "");
-    const host = raw.split("/")[0].toLowerCase();
-    if (!host) {
-      return null;
-    }
-    return { domain: host, pattern: url.includes("%3") ? "site%3A" : "site:" };
-  }
-
-  match = url.match(SITESEARCH_RE);
-  if (match) {
-    let raw = match[1];
-    if (!raw) {
-      return null;
-    }
-    if (raw.includes("%")) {
-      try {
-        raw = decodeURIComponent(raw);
-      } catch {
-        /* keep raw */
-      }
-    }
-    raw = raw.replace(/^https?:\/\//, "");
-    raw = raw.replace(/\/+$/, "");
-    const host = raw.split("/")[0].toLowerCase();
-    if (!host) {
-      return null;
-    }
-    return { domain: host, pattern: "sitesearch=" };
-  }
-
-  return null;
-}
-
-function extractHostFromUrl(url: string): string | null {
-  const protoEnd = url.indexOf("://");
-  if (protoEnd === -1) {
-    return null;
-  }
-  const hostStart = protoEnd + 3;
-  const pathStart = url.indexOf("/", hostStart);
-  return pathStart === -1
-    ? url.substring(hostStart).toLowerCase()
-    : url.substring(hostStart, pathStart).toLowerCase();
-}
-
-function transformSiteFilterBangs(bangs: Bang[]): Bang[] {
-  let transformed = 0;
-  let skippedSelf = 0;
-  const byPattern: Record<string, number> = {};
-  const byEngine: Record<string, number> = {};
-
-  const result = bangs.map((bang) => {
-    if (bang.regex) {
-      return bang;
-    }
-    const siteFilter = extractSiteFilterDomain(bang.url);
-    if (!siteFilter) {
-      return bang;
-    }
-
-    const urlHost = extractHostFromUrl(bang.url);
-    if (urlHost && urlHost === siteFilter.domain) {
-      skippedSelf++;
-      return bang;
-    }
-
-    transformed++;
-    byPattern[siteFilter.pattern] = (byPattern[siteFilter.pattern] || 0) + 1;
-    const engine = urlHost || "unknown";
-    byEngine[engine] = (byEngine[engine] || 0) + 1;
-
-    return {
-      ...bang,
-      url: `https://${siteFilter.domain}/?q={}`,
-      domain: siteFilter.domain,
-    };
-  });
-
-  console.log(`  Site-filter transform: ${transformed} bangs transformed`);
-  if (skippedSelf > 0) {
-    console.log(`  Skipped ${skippedSelf} self-referencing site filters`);
-  }
-  if (Object.keys(byPattern).length > 0) {
-    console.log(`  By pattern: ${JSON.stringify(byPattern)}`);
-  }
-  if (Object.keys(byEngine).length > 0) {
-    console.log(`  By source engine: ${JSON.stringify(byEngine)}`);
-  }
-
-  return result;
 }
 
 // NOTE: Custom escape functions produce smaller output than JSON.stringify,
@@ -1051,7 +937,7 @@ function generateMeta(bangs: Bang[]): string {
       json += ",";
     }
     const b = bangs[i];
-    json += `"${jsonEscape(b.trigger)}":{"s":"${jsonEscape(b.name)}","d":"${jsonEscape(b.domain)}"}`;
+    json += `"${jsonEscape(b.trigger)}":{"s":"${jsonEscape(b.name)}","d":"${jsonEscape(b.domain)}"${b.regex ? ',"a":1' : ""}}`;
   }
   json += "}";
   // NOTE: Null prototype improves miss performance why not add it for meta bangs
@@ -1385,7 +1271,7 @@ async function writeGeneratedDeclarations(outDir: string): Promise<void> {
     ),
     Bun.write(
       `${outDir}/bangs-meta.d.ts`,
-      "export declare const BANGS: Record<string, { s: string; d: string }>;\n"
+      "export declare const BANGS: Record<string, { s: string; d: string; a?: 1 }>;\n"
     ),
     Bun.write(
       `${outDir}/bangs-trie.d.ts`,
@@ -1408,8 +1294,7 @@ async function writeGeneratedDeclarations(outDir: string): Promise<void> {
 }
 
 export async function runCodegen(options: CodegenOptions = {}): Promise<void> {
-  const raw = await loadBangs(options);
-  const bangs = transformSiteFilterBangs(raw);
+  const bangs = await loadBangs(options);
 
   console.log("=== Generate ===");
   await mkdir(GENERATED_OUT_DIR, { recursive: true });

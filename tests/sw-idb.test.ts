@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { redirectUrl } from "../src/sw/redirect";
 import { installFakeIndexedDb, reqToPromise } from "./helpers/fake-indexeddb";
 
 let restoreIndexedDb: (() => void) | null = null;
@@ -78,6 +79,74 @@ describe("sw/idb redirect settings", () => {
       "https://docs.example/search?q=",
       "",
     ]);
+  });
+
+  test("resolves a user custom bang as the default", async () => {
+    await seedDb({
+      settings: [{ key: "default-bang", value: "mydocs" }],
+      customBangs: [
+        {
+          trigger: "mydocs",
+          url: "https://docs.example/search?q={}&again={}",
+        },
+      ],
+    });
+
+    const settings = await (await loadSwIdb()).readRedirectSettings();
+    expect(redirectUrl("query words", settings)).toBe(
+      "https://docs.example/search?q=query+words&again=query+words"
+    );
+  });
+
+  test("rejects a built-in capture bang as the default", async () => {
+    await seedDb({
+      settings: [{ key: "default-bang", value: "ktr" }],
+    });
+
+    const settings = await (await loadSwIdb()).readRedirectSettings();
+    expect(redirectUrl("japanese hello world", settings)).toContain(
+      "google.com/search?q=japanese+hello+world"
+    );
+    expect(settings.luckyUrl?.[0]).toContain("google.com/search?q=");
+  });
+
+  test("rejects a user capture bang as the default", async () => {
+    await seedDb({
+      settings: [{ key: "default-bang", value: "translate" }],
+      customBangs: [
+        {
+          trigger: "translate",
+          url: "https://translate.example/$1/$2",
+          regex: "(\\w+)\\s+(.*)",
+          encoding: "percent",
+        },
+      ],
+    });
+
+    const settings = await (await loadSwIdb()).readRedirectSettings();
+    expect(redirectUrl("french bonjour monde", settings)).toContain(
+      "google.com/search?q=french+bonjour+monde"
+    );
+    expect(settings.custom.translate?.[3]).toBeInstanceOf(RegExp);
+  });
+
+  test("does not expose a shadowed built-in as an advanced custom default", async () => {
+    await seedDb({
+      settings: [{ key: "default-bang", value: "g" }],
+      customBangs: [
+        {
+          trigger: "g",
+          url: "https://capture.example/$1",
+          regex: "(.+)",
+        },
+      ],
+    });
+
+    const settings = await (await loadSwIdb()).readRedirectSettings();
+    expect(redirectUrl("hello", settings)).toContain(
+      "google.com/search?q=hello"
+    );
+    expect(settings.custom.g?.[3]).toBeInstanceOf(RegExp);
   });
 
   test("returns safe defaults when IndexedDB is unavailable", async () => {

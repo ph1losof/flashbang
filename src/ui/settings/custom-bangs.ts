@@ -14,7 +14,7 @@ type RunWrite = (write: () => Promise<unknown>) => Promise<boolean>;
 
 async function renderCustom(
   db: DB,
-  onChange: ((customTriggers: string[]) => void) | undefined,
+  onChange: ((customBangs: CustomBangRecord[]) => void) | undefined,
   onEdit: (bang: CustomBangRecord) => void,
   onRemove: (trigger: string) => void,
   runWrite?: RunWrite,
@@ -24,7 +24,7 @@ async function renderCustom(
   if (!isCurrent()) {
     return;
   }
-  onChange?.(custom.map((b) => b.trigger));
+  onChange?.(custom);
   const list = $("#custom-list");
   if (custom.length === 0) {
     list.replaceChildren(
@@ -89,7 +89,7 @@ async function renderCustom(
 
 export function setupCustomBangs(
   db: DB,
-  onChange?: (customTriggers: string[]) => void,
+  onChange?: (customBangs: CustomBangRecord[]) => void,
   runWrite?: RunWrite
 ) {
   const form = $<HTMLFormElement>("#add-bang-form");

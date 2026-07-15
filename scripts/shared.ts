@@ -27,7 +27,7 @@ export function configureCustomSuggestOption(
 export async function bundleUI(
   allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled()
 ) {
-  const builds = await Promise.all([
+  const [appBuild, benchBuild] = await Promise.all([
     Bun.build({
       entrypoints: ["src/ui/app.ts"],
       outdir: DIST_DIR,
@@ -51,6 +51,7 @@ export async function bundleUI(
       format: "esm",
     }),
   ]);
+  const builds = [appBuild, benchBuild];
   const failed = builds.filter((build) => !build.success);
   if (failed.length > 0) {
     throw new AggregateError(
@@ -58,7 +59,10 @@ export async function bundleUI(
       "Failed to bundle UI"
     );
   }
-  return builds.flatMap((build) => build.outputs);
+  return {
+    appOutputs: appBuild.outputs,
+    benchOutputs: benchBuild.outputs,
+  };
 }
 
 export async function generateCSS(quiet = false): Promise<void> {

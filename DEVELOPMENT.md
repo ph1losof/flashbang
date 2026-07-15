@@ -223,8 +223,8 @@ On **self-hosted** (Docker/Railway via `start.ts`), the Bun server sets headers 
 
 `bun run build` bundles the app:
 
-1. **Bundle UI + bench** — Bun bundles `src/ui/app.ts` (with code splitting) to `dist/app.js` plus small chunks, and bundles `src/ui/bench/index.ts` to `dist/bench.js`
-2. **Bundle Service Worker** — Bun bundles `src/sw/sw.ts` (including `bangs-min.js`) into `dist/sw.js`; hashes of the precached assets and a preliminary Service Worker bundle determine the injected cache version, while small UI chunks become extra precache assets
+1. **Bundle UI + bench** — Bun bundles `src/ui/app.ts` (with code splitting) to `dist/app.js` plus lazy chunks, and bundles `src/ui/bench/index.ts` to `dist/bench.js`. Every app chunk is marked as a required offline dependency regardless of size; benchmark assets remain optional.
+2. **Bundle Service Worker** — Bun bundles `src/sw/sw.ts` (including `bangs-min.js`) into `dist/sw.js`; hashes of the precached assets and a preliminary Service Worker bundle determine the injected cache version. The worker precaches the complete required app shell before activating, then removes old versioned caches.
 3. **Generate CSS** — UnoCSS scans `src/ui/**/*.ts`, `src/ui/home/index.html`, and `src/ui/bench/index.html`, emitting atomic utility classes
 4. **Inline & minify HTML** — CSS is inlined into `<style>`, HTML is minified with `@minify-html/node`
 5. **Generate static-host headers** — Writes `dist/_headers` with shared security headers, per-page inline-script hashes, the stricter Service Worker CSP, and the OpenSearch content type
