@@ -53,9 +53,12 @@ describe("production static caching", () => {
 
   test("hashes only inline scripts for the production CSP", () => {
     const hashes = extractInlineScriptHashes(
-      '<script>inline()</script><script type="module" src="/app.js"></script>'
+      '<script>inline()</script><SCRIPT nonce="test">upper()</SCRIPT>' +
+        '<script type="module" src="/app.js"></script>'
     );
-    expect(hashes).toHaveLength(1);
-    expect(hashes[0]).toMatch(/^'sha256-[A-Za-z0-9+/]+=*'$/);
+    expect(hashes).toHaveLength(2);
+    for (const hash of hashes) {
+      expect(hash).toMatch(/^'sha256-[A-Za-z0-9+/]+=*'$/);
+    }
   });
 });

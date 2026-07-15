@@ -61,7 +61,12 @@ export function cacheControlForAsset(assetPath: string): string {
 
 export function extractInlineScriptHashes(html: string): string[] {
   const hashes: string[] = [];
-  for (const match of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) {
+  for (const match of html.matchAll(
+    /<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/gi
+  )) {
+    if (!match[1]) {
+      continue;
+    }
     const hash = createHash("sha256").update(match[1]).digest("base64");
     hashes.push(`'sha256-${hash}'`);
   }
