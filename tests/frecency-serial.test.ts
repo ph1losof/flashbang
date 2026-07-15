@@ -10,9 +10,13 @@ describe("frecency compact serialization", () => {
   });
 
   test("round-trips compact key/count pairs", () => {
-    const serialized = serializeFrecencyCompact({ g: 10, ddg: 3 });
+    const counts = Object.create({ inherited: 99 }) as Record<string, number>;
+    counts.g = 10;
+    counts.ddg = 3;
+    const serialized = serializeFrecencyCompact(counts);
     const parsed = parseFrecencyCompact(serialized);
     expect(parsed).toEqual({ g: 10, ddg: 3 });
+    expect(serialized).not.toContain("inherited");
   });
 
   test("ignores malformed and non-positive entries during parse", () => {

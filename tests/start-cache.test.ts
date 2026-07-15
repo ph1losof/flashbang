@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   acceptsBrotli,
   cacheControlForAsset,
+  extractInlineScriptHashes,
   staticAssetHeaders,
 } from "../scripts/start";
 
@@ -45,5 +46,16 @@ describe("production static caching", () => {
     expect(compressed.Vary).toBe("Accept-Encoding");
     expect(identity["Content-Encoding"]).toBeUndefined();
     expect(compressed["Content-Encoding"]).toBe("br");
+    expect(identity["Content-Security-Policy"]).not.toContain(
+      "script-src 'self' 'unsafe-inline'"
+    );
+  });
+
+  test("hashes only inline scripts for the production CSP", () => {
+    const hashes = extractInlineScriptHashes(
+      '<script>inline()</script><script type="module" src="/app.js"></script>'
+    );
+    expect(hashes).toHaveLength(1);
+    expect(hashes[0]).toMatch(/^'sha256-[A-Za-z0-9+/]+=*'$/);
   });
 });

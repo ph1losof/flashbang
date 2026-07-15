@@ -11,6 +11,8 @@ describe("server headers", () => {
     expect(SW_HEADERS["Referrer-Policy"]).toBe(
       "strict-origin-when-cross-origin"
     );
+    expect(SW_HEADERS["Strict-Transport-Security"]).toContain("max-age=");
+    expect(SW_HEADERS["Permissions-Policy"]).toContain("camera=()");
   });
 
   test("page headers compose caller script-src with core directives", () => {
@@ -21,5 +23,11 @@ describe("server headers", () => {
     expect(csp).toContain("frame-ancestors 'none'");
     expect(headers["X-Content-Type-Options"]).toBe("nosniff");
     expect(headers["X-Frame-Options"]).toBe("DENY");
+  });
+
+  test("page headers support hash-only inline script policy", () => {
+    const csp = pageHeaders("'sha256-example'")["Content-Security-Policy"];
+    expect(csp).toContain("script-src 'self' 'sha256-example'");
+    expect(csp).not.toContain("script-src 'self' 'unsafe-inline'");
   });
 });

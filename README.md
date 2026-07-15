@@ -165,14 +165,16 @@ docker run -p 3000:3000 flashbang
 
 To include custom suggestion URLs in a private Docker deployment, build with `docker build --build-arg ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=true -t flashbang .`. The image uses the same value as its runtime default.
 
-The image uses a multi-stage build — fetches bang sources, builds assets, and produces a minimal runtime image. Static assets are pre-compressed with Brotli at build time and served automatically, falling back to uncompressed for clients that don't support it. The port is configurable via the `PORT` environment variable (`-e PORT=8080`); `PUBLIC_ORIGIN` configures the browser-visible origin when running behind a reverse proxy (for example, `-e PUBLIC_ORIGIN=https://search.example.com`). Set it as your browser's custom search engine:
+The image uses a multi-stage build — fetches bang sources, builds assets, and produces a minimal runtime image. Static assets are pre-compressed with Brotli at build time and served automatically, falling back to uncompressed for clients that don't support it. The port is configurable via the `PORT` environment variable (`-e PORT=8080`); `PUBLIC_ORIGIN` configures the browser-visible origin when running behind a reverse proxy (for example, `-e PUBLIC_ORIGIN=https://search.example.com`).
 
-- **Search URL:** `http://your-host:3000?q=%s`
-- **Suggestion URL:** `http://your-host:3000/suggest?q=%s`
+For a remote deployment, terminate TLS with a reverse proxy or hosting provider and expose Flashbang over HTTPS. Browsers only enable Service Workers in secure contexts (HTTPS or localhost), and Flashbang's suggestion settings cookie is `Secure`. Plain HTTP on a VPS will not provide worker redirects or persistent suggestion settings. Set the HTTPS origin as your browser's custom search engine:
+
+- **Search URL:** `https://search.example.com?q=%s`
+- **Suggestion URL:** `https://search.example.com/suggest?q=%s`
 
 ### Self-host without Docker
 
-Requires [Bun](https://bun.sh). Service Workers need an HTTP origin (not `file://`), but a local server works fine:
+Requires [Bun](https://bun.sh). Service Workers require HTTPS except on `localhost`; a local HTTP server works because browsers treat localhost as a secure context:
 
 ```sh
 bun run codegen && bun run build && bun run start

@@ -1,4 +1,6 @@
 const BASE_HEADERS: Record<string, string> = {
+  "Permissions-Policy": "camera=(), geolocation=(), microphone=()",
+  "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
   "X-Content-Type-Options": "nosniff",
   "X-Frame-Options": "DENY",
   "Referrer-Policy": "strict-origin-when-cross-origin",
@@ -17,7 +19,7 @@ export function pageHeaders(scriptSrc: string): Record<string, string> {
   return {
     "Content-Security-Policy": [
       "default-src 'self'",
-      `script-src 'self' ${scriptSrc}`,
+      `script-src 'self'${scriptSrc ? ` ${scriptSrc}` : ""}`,
       "style-src 'self' 'unsafe-inline'",
       "connect-src 'self'",
       "img-src 'self' data:",
