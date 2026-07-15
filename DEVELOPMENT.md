@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- [Bun](https://bun.sh) (runtime and bundler)
+- [Bun](https://bun.sh) 1.3.14 (runtime, package manager, and bundler; the version is pinned in `package.json`, CI, and Docker)
 - [Git](https://git-scm.com)
 
 Playwright browsers are required for end-to-end tests (`bunx playwright install`). Maintainers also need the [GitHub CLI](https://cli.github.com) for releases and Docker for image/health-check work.
@@ -14,14 +14,15 @@ bun install        # install dependencies
 bun run check      # format + lint check (fails on issues)
 bun run fix        # auto-fix format + lint issues
 bun run codegen    # fetch DDG/Kagi sources, merge, and generate bang maps
-bun run build      # bundle, minify + pre-compress with Brotli (auto-runs codegen --from-merged if generated bang files are missing)
+bun run build      # install locked dependencies, then bundle, minify + pre-compress with Brotli (auto-runs codegen --from-merged if generated bang files are missing)
 bun run dev        # bundle + dev server with file watching & live reload (auto-runs codegen if needed)
 bun run start      # serve pre-built dist/ (run `bun run build` first)
 bun run typecheck  # type-check with tsc (no emit)
 bun run profile    # run performance profile benchmarks (auto-runs codegen --from-merged if generated bang files are missing)
 bun run profile:quick  # run a shorter profiling pass
 bun run profile:cpu   # write Bun CPU profiles under profiles/
-bun test           # run tests
+bun audit          # audit dependencies for known vulnerabilities
+bun test           # run unit, integration, performance, and docs tests
 bun run test:e2e   # run Playwright end-to-end tests (build + browser run)
 bun run clean      # remove dist/
 ```
@@ -147,14 +148,15 @@ Every tracked file must appear explicitly or match a glob in this tree. `tests/d
 ## Tests
 
 ```sh
-bun test           # run all tests
+bun test           # run unit, integration, performance, and docs tests
 bun run test:e2e   # run end-to-end tests (build + Playwright)
 ```
 
-Unit and performance tests:
+Unit, integration, performance, and docs tests:
 
 - `tests/redirect.test.ts` — Bang/snap parsing, routing logic, and URL encoding
 - `tests/redirect-perf.test.ts` — Redirect performance benchmarks
+- `tests/bang-catalog.test.ts` — Bounded UI bang-catalog search and normalization
 - `tests/capture-template.test.ts` — Capture template parsing and regex safety
 - `tests/snap-target.test.ts` — Alternate snap target validation
 - `tests/suggest.test.ts` — Cookie parsing, bang/snap suggestions, and provider proxying
@@ -222,8 +224,8 @@ On **self-hosted** (Docker/Railway via `start.ts`), the Bun server sets headers 
 `bun run build` bundles the app:
 
 1. **Bundle UI + bench** — Bun bundles `src/ui/app.ts` (with code splitting) to `dist/app.js` plus small chunks, and bundles `src/ui/bench/index.ts` to `dist/bench.js`
-2. **Bundle Service Worker** — Bun bundles `src/sw/sw.ts` (including `bangs-min.js`) into `dist/sw.js`; hashes of the UI outputs determine the injected cache version and extra precache assets
-3. **Generate CSS** — UnoCSS scans `src/ui/**/*.ts` and HTML files, emitting atomic utility classes
+2. **Bundle Service Worker** — Bun bundles `src/sw/sw.ts` (including `bangs-min.js`) into `dist/sw.js`; hashes of the precached assets and a preliminary Service Worker bundle determine the injected cache version, while small UI chunks become extra precache assets
+3. **Generate CSS** — UnoCSS scans `src/ui/**/*.ts`, `src/ui/home/index.html`, and `src/ui/bench/index.html`, emitting atomic utility classes
 4. **Inline & minify HTML** — CSS is inlined into `<style>`, HTML is minified with `@minify-html/node`
 5. **Generate static-host headers** — Writes `dist/_headers` with shared security headers, per-page inline-script hashes, the stricter Service Worker CSP, and the OpenSearch content type
 6. **Pre-compress** — Eligible text assets are compressed with Brotli (max quality) and written as `.br` files alongside the originals. The production server serves these automatically when the client supports it, falling back to uncompressed
@@ -295,19 +297,30 @@ Static assets are served with Brotli pre-compression when the client supports it
 
 ## CI
 
-A CI workflow (`.github/workflows/ci.yaml`) runs on every push and pull request to `master`. Its main job runs codegen (`--from-merged`), typecheck, lint/format checks, tests, and a full build with no external bang-source fetching. A separate matrix builds the app and runs the Playwright suite in Chromium, Firefox, and WebKit.
+A CI workflow (`.github/workflows/ci.yaml`) runs on every push to `master` and every pull request targeting `master`. Its main job runs codegen (`--from-merged`), typecheck, lint/format checks, `bun audit`, tests, and a full build with no external bang-source fetching. A separate matrix builds the app and runs the Playwright projects in Chromium, Firefox, and WebKit; the WebKit project intentionally selects a supported subset of scenarios. On pull requests and manual runs, a Docker job also builds and health-checks the image when Docker-relevant files changed.
 
-A daily cron workflow (`.github/workflows/update-bangs.yaml`) fetches fresh bang sources from DDG and Kagi, merges them, and commits the updated `data/bangs.json` when there are changes.
+A daily cron workflow (`.github/workflows/update-bangs.yaml`) fetches fresh bang sources from DDG and Kagi and verifies the merged data when it changes. It commits `data/bangs.json` to the `automation/update-bangs` branch, opens or updates a pull request targeting `master`, and dispatches CI for that branch.
 
 ## Releasing
 
 1. Update `version` in `package.json`
-2. Run `bun run typecheck`, `bun run check`, `bun test`, `bun run build`, and the relevant Playwright tests
-3. Commit and push: `chore: bump version to X.Y.Z`
-4. Write GitHub release notes following the previous release's structure, including a `vOLD...vNEW` compare link
-5. Create the tag and release: `gh release create vX.Y.Z --target master --title vX.Y.Z --notes-file <path> --latest`
+2. Run `bun run typecheck`, `bun run check`, `bun audit`, `bun test`, and `bun run build`
+3. Commit and push the version bump so the commit is on `origin/master`:
 
-The release workflow (`.github/workflows/release.yaml`) handles the rest:
-runs codegen (`--from-merged`), typecheck, lint/format checks, tests, and build, then creates or updates the GitHub Release without replacing existing custom notes.
+```sh
+git add package.json
+git commit -m "chore: bump version to X.Y.Z"
+git push origin master
+```
 
-Before publishing, the workflow builds a local image, runs it, and requires Docker's built-in container health status to become `healthy`. It then pushes `linux/amd64` and `linux/arm64` images to `ghcr.io/<owner>/flashbang` with both the release version and `latest` tags.
+4. Wait for the protected-branch CI checks, including Playwright E2E, to pass for that commit
+5. Create and push an annotated tag from that commit:
+
+```sh
+git tag -a vX.Y.Z -m "vX.Y.Z"
+git push origin vX.Y.Z
+```
+
+Do not create the GitHub Release manually. The tag-triggered release workflow (`.github/workflows/release.yaml`) accepts only strict stable `vX.Y.Z` tags, requires the tag version to match `package.json`, and verifies that the tagged commit is contained in `origin/master`. It then runs codegen (`--from-merged`), typecheck, lint/format checks, `bun audit`, the test suite, and the build. It does not rerun Playwright because protected-branch CI already covers E2E.
+
+After validation succeeds, the workflow creates the GitHub Release with generated notes. It then builds and health-checks a local image before publishing `linux/amd64` and `linux/arm64` images to `ghcr.io/<owner>/flashbang` with both the release version and `latest` tags.
