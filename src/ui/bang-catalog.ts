@@ -1,4 +1,5 @@
 export interface BangMeta {
+  capture: boolean;
   domain: string;
   domainLower: string;
   name: string;
@@ -12,6 +13,7 @@ export interface BangCatalog {
 }
 
 interface GeneratedBang {
+  a?: 1;
   d: string;
   s: string;
 }
@@ -26,9 +28,11 @@ let catalogPromise: Promise<BangCatalog> | null = null;
 export function createBangMeta(
   trigger: string,
   name: string,
-  domain: string
+  domain: string,
+  capture = false
 ): BangMeta {
   return {
+    capture,
     domain,
     domainLower: domain.toLowerCase(),
     name,
@@ -42,7 +46,7 @@ export function loadBuiltinBangCatalog(): Promise<BangCatalog> {
     catalogPromise = import("../generated/bangs-meta.js").then((module) => {
       const generated: Record<string, GeneratedBang> = module.BANGS;
       const entries = Object.entries(generated).map(([trigger, bang]) =>
-        createBangMeta(trigger, bang.s, bang.d)
+        createBangMeta(trigger, bang.s, bang.d, bang.a === 1)
       );
       return {
         byTrigger: new Map(entries.map((entry) => [entry.trigger, entry])),

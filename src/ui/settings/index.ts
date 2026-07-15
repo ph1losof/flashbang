@@ -28,10 +28,10 @@ export async function initSettings(
   const providerControls = getProviderControls();
   const [rawSettings, initialCustom] = await Promise.all([
     db.getMultipleSettings(SETTINGS_KEYS),
-    db.getAllCustomBangs().then((all) => all.map((bang) => bang.trigger)),
+    db.getAllCustomBangs(),
   ]);
   const state = {
-    custom: initialCustom,
+    custom: initialCustom.map((bang) => bang.trigger),
     defaultBang: rawSettings[0] || "g",
     suggestProvider: resolveSuggestProvider(
       rawSettings[1],
@@ -81,6 +81,7 @@ export async function initSettings(
   const defaultBang = await setupDefaultBangSetting({
     db,
     initialBang: state.defaultBang,
+    initialCustom,
     onCommit: (trigger) => {
       state.defaultBang = trigger;
       syncCookie();
@@ -88,10 +89,14 @@ export async function initSettings(
     },
     runWrite: writer.run,
   });
+  state.defaultBang = defaultBang.setCommitted(state.defaultBang);
+  syncCookie();
+  providers.updateDefaultDisplays();
   const refreshCustomBangs = setupCustomBangs(
     db,
     (custom) => {
-      state.custom = custom;
+      state.custom = custom.map((bang) => bang.trigger);
+      state.defaultBang = defaultBang.setCustomBangs(custom);
       syncCookie();
       onCatalogChange?.();
     },
@@ -104,17 +109,18 @@ export async function initSettings(
     importFile,
     onImported: async () => {
       const imported = await db.getMultipleSettings(SETTINGS_KEYS);
-      state.defaultBang = imported[0] || "g";
+      const importedDefaultBang = imported[0] || "g";
+      state.defaultBang = importedDefaultBang;
       state.suggestProvider = providers.isFirefox
         ? "google"
         : resolveSuggestProvider(imported[1], allowUnsafeCustomSuggestUrls);
       state.suggestUrl = imported[2] || "";
       state.luckyProvider = imported[3] || "default";
       state.luckyUrl = imported[4] || "";
-      defaultBang.setCommitted(state.defaultBang);
+      await refreshCustomBangs();
+      state.defaultBang = defaultBang.setCommitted(importedDefaultBang);
       providers.refresh();
       writer.clearErrors();
-      await refreshCustomBangs();
       syncCookie();
       notifySW("invalidate");
     },

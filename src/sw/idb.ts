@@ -82,8 +82,30 @@ export function readRedirectSettings(): Promise<RedirectSettings> {
           settings.map((s) => [s.key, s.value])
         );
         const defaultBang = settingsMap["default-bang"] || "g";
-        const tpl = lookupBang(defaultBang, hashFNV1a(defaultBang));
-        const defaultUrl: UrlParts = tpl || splitUrl(DEFAULT_URL);
+        const custom: Record<string, CustomUrlParts> = Object.create(null);
+        for (const e of all) {
+          const snap = e.snap ? compileSnapTarget(e.snap) : null;
+          if (e.regex) {
+            const advanced = compileCaptureUrl(e.url, e.regex, e.encoding);
+            if (advanced) {
+              custom[e.trigger] = attachSnapTarget(advanced, snap);
+            }
+          } else {
+            custom[e.trigger] = attachSnapTarget(splitUrl(e.url), snap);
+          }
+        }
+
+        const customDefault = custom[defaultBang];
+        let defaultEntry: UrlParts | null;
+        if (customDefault) {
+          defaultEntry =
+            customDefault.length < 5 ? (customDefault as UrlParts) : null;
+        } else {
+          defaultEntry = lookupBang(defaultBang, hashFNV1a(defaultBang));
+        }
+        const defaultUrl = defaultEntry || splitUrl(DEFAULT_URL);
+        const effectiveDefaultBang = defaultEntry ? defaultBang : "g";
+
         const luckyProvider = settingsMap["lucky-provider"] ?? "default";
         let luckyUrl: UrlParts | null;
         switch (luckyProvider) {
@@ -106,23 +128,10 @@ export function readRedirectSettings(): Promise<RedirectSettings> {
             break;
           default:
             luckyUrl = splitUrl(
-              LUCKY_URLS[LUCKY_TRIGGER_PROVIDERS[defaultBang]] ||
+              LUCKY_URLS[LUCKY_TRIGGER_PROVIDERS[effectiveDefaultBang]] ||
                 DEFAULT_LUCKY_URL
             );
             break;
-        }
-
-        const custom: Record<string, CustomUrlParts> = Object.create(null);
-        for (const e of all) {
-          const snap = e.snap ? compileSnapTarget(e.snap) : null;
-          if (e.regex) {
-            const advanced = compileCaptureUrl(e.url, e.regex, e.encoding);
-            if (advanced) {
-              custom[e.trigger] = attachSnapTarget(advanced, snap);
-            }
-          } else {
-            custom[e.trigger] = attachSnapTarget(splitUrl(e.url), snap);
-          }
         }
 
         cachedRedirect = { defaultUrl, custom, luckyUrl };
