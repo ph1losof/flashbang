@@ -185,23 +185,29 @@ function findLastSpace(s: string, start: number, before: number): number {
   return -1;
 }
 
-const _querySafeCache = new WeakMap<SimpleEntry, boolean>();
+const ENTRY_QUERY_SAFE = 1;
+const ENTRY_REPEATED_PLACEHOLDER = 2;
+const _entryFlagsCache = new WeakMap<SimpleEntry, number>();
 
-function isQuerySafe(entry: SimpleEntry): boolean {
-  let safe = _querySafeCache.get(entry);
-  if (safe !== undefined) {
-    return safe;
+function entryFlags(entry: SimpleEntry): number {
+  const cached = _entryFlagsCache.get(entry);
+  if (cached !== undefined) {
+    return cached;
   }
   const prefix = entry[0];
   const q = prefix.indexOf("?");
-  if (q === -1) {
-    _querySafeCache.set(entry, false);
-    return false;
+  let flags = 0;
+  if (q !== -1) {
+    const h = prefix.indexOf("#");
+    if (h === -1 || q < h) {
+      flags |= ENTRY_QUERY_SAFE;
+    }
   }
-  const h = prefix.indexOf("#");
-  safe = h === -1 || q < h;
-  _querySafeCache.set(entry, safe);
-  return safe;
+  if (entry[1]?.includes("{}")) {
+    flags |= ENTRY_REPEATED_PLACEHOLDER;
+  }
+  _entryFlagsCache.set(entry, flags);
+  return flags;
 }
 
 function fixupForPath(raw: string): string {
@@ -270,10 +276,32 @@ function buildUrl(
     termStart === 0 && termEnd === s.length
       ? s
       : s.substring(termStart, termEnd);
-  if (isQuerySafe(entry)) {
-    return prefix + raw + suffix;
+  const flags = entryFlags(entry);
+  const querySafe = (flags & ENTRY_QUERY_SAFE) !== 0;
+  const encoded = querySafe ? raw : fixupForPath(raw);
+  if ((flags & ENTRY_REPEATED_PLACEHOLDER) === 0) {
+    return prefix + encoded + suffix;
   }
-  return prefix + fixupForPath(raw) + suffix;
+
+  const pathEncoded = querySafe ? null : encoded;
+  let result = prefix + encoded;
+  let offset = 0;
+  let inQuery = querySafe;
+  while (offset < suffix.length) {
+    const placeholder = suffix.indexOf("{}", offset);
+    if (placeholder === -1) {
+      return result + suffix.substring(offset);
+    }
+    const literal = suffix.substring(offset, placeholder);
+    const queryStart = literal.lastIndexOf("?");
+    const fragmentStart = literal.lastIndexOf("#");
+    if (queryStart !== -1 || fragmentStart !== -1) {
+      inQuery = queryStart > fragmentStart;
+    }
+    result += literal + (inQuery ? raw : (pathEncoded ?? fixupForPath(raw)));
+    offset = placeholder + 2;
+  }
+  return result;
 }
 
 function decodeCaptureInput(raw: string): string | null {

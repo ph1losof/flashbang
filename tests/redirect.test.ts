@@ -157,6 +157,31 @@ describe("redirect — routing logic", () => {
     expect(loc(r)).toBe("https://custom.search/?q=cats");
   });
 
+  test("fills every placeholder in a built-in template", () => {
+    const placeholderCounts: Record<string, number> = {
+      bla: 2,
+      bnbr: 2,
+      eventful: 2,
+      infobae: 2,
+      mpgpure: 3,
+      pagesjaunes: 2,
+      patft: 3,
+      pluggedin: 2,
+      reittiopas: 2,
+      skb: 2,
+      wynk: 2,
+      yesasia: 2,
+    };
+    for (const [trigger, count] of Object.entries(placeholderCounts)) {
+      const location = loc(redirect(`!${trigger} needle`, settings()));
+      expect(location.match(/needle/g)?.length).toBe(count);
+      expect(location).not.toMatch(/(?:\{|%7B)(?:\}|%7D)/i);
+    }
+    expect(loc(redirect("!infobae cats and dogs", settings()))).toBe(
+      "https://www.infobae.com/search/cats%20and%20dogs/?q=cats+and+dogs"
+    );
+  });
+
   test('"!zzz cats" → unknown bang → default URL with full raw query', () => {
     const r = redirect("!zzz cats", settings());
     expect(r.status).toBe(302);
