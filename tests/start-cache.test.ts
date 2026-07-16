@@ -16,8 +16,11 @@ describe("production static caching", () => {
     expect(acceptsBrotli("xbr, gzip")).toBe(false);
   });
 
-  test("only content-hashed chunks are immutable", () => {
+  test("only content-hashed assets are immutable", () => {
     expect(cacheControlForAsset("/chunk-abc12345.js")).toBe(
+      "public, max-age=31536000, immutable"
+    );
+    expect(cacheControlForAsset("/bangs-0123456789ab.bin")).toBe(
       "public, max-age=31536000, immutable"
     );
     for (const path of [

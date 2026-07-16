@@ -78,11 +78,13 @@ flashbang/
 │   │   ├── template.ts        # Bang URL template expansion
 │   │   └── trie.ts            # Radix trie lookup
 │   ├── generated/             # Output of codegen (gitignored, generated from data/bangs.json)
-│   │   ├── bangs-min.js       # trigger→URL map for Service Worker
+│   │   ├── bangs.bin          # packed trigger→URL data for Service Worker
+│   │   ├── bangs-sparse.js    # advanced bang and snap override lookups
 │   │   ├── bangs-meta.js      # trigger→{name, domain} for UI
 │   │   ├── bangs-trie.js      # radix trie for prefix-matched bang suggestions
 │   │   └── *.d.ts             # TypeScript declarations for each generated .js file
 │   ├── sw/
+│   │   ├── bang-data.ts       # Binary bang decoder and regular lookup
 │   │   ├── sw.ts              # Service Worker lifecycle & fetch handler
 │   │   ├── redirect.ts        # Bang/snap parsing & redirect logic (zero-copy raw + decoded paths)
 │   │   ├── idb.ts             # IndexedDB access, settings cache & in-memory frecency
@@ -124,6 +126,7 @@ flashbang/
 │   ├── e2e/
 │   │   └── flashbang.e2e.ts  # Playwright browser scenarios
 │   ├── helpers/
+│   │   ├── bang-data.ts       # Generated binary initialization for tests
 │   │   └── fake-indexeddb.ts # IndexedDB test double
 │   └── *.test.ts             # Unit, integration, performance, and docs checks
 ├── .dockerignore             # Files excluded from Docker build context
@@ -186,12 +189,13 @@ bunx playwright install
 
 ## Bang codegen
 
-`bun run codegen` fetches bang sources and generates the JavaScript bang maps that `build` and `dev` depend on:
+`bun run codegen` fetches bang sources and generates the bang artifacts that `build` and `dev` depend on:
 
 1. **Fetch sources** — Downloads bang definitions from DuckDuckGo (`bang.js`) and Kagi (`bangs.json`) into `data/`
 2. **Merge + validate** — Parses DDG, Kagi, and custom sources. Merges by trigger (deduplicates), validates URLs, and saves the merged result to `data/bangs.json`
-3. **Generate** — Produces three JS files in `src/generated/` from the merged data:
-   - `bangs-min.js` — packed regular lookup plus sparse capture and snap overrides for the Service Worker
+3. **Generate** — Produces the following artifacts in `src/generated/` from the merged data:
+   - `bangs.bin` — packed regular bang lookup data for the Service Worker
+   - `bangs-sparse.js` — sparse capture and snap override lookups for the Service Worker
    - `bangs-meta.js` — trigger→{name, domain} for the UI
    - `bangs-trie.js` — radix trie for prefix-matched bang suggestions
    - plus matching `*.d.ts` declaration files for all generated modules
@@ -224,7 +228,7 @@ On **self-hosted** (Docker/Railway via `start.ts`), the Bun server sets headers 
 `bun run build` bundles the app:
 
 1. **Bundle UI + bench** — Bun bundles `src/ui/app.ts` (with code splitting) to `dist/app.js` plus lazy chunks, and bundles `src/ui/bench/index.ts` to `dist/bench.js`. Every app chunk is marked as a required offline dependency regardless of size; benchmark assets remain optional.
-2. **Bundle Service Worker** — Bun bundles `src/sw/sw.ts` (including `bangs-min.js`) into `dist/sw.js`; hashes of the precached assets and a preliminary Service Worker bundle determine the injected cache version. The worker precaches the complete required app shell before activating, then removes old versioned caches.
+2. **Bundle Service Worker** — Bun bundles `src/sw/sw.ts` and the sparse generated lookups into `dist/sw.js`, then copies `bangs.bin` to a content-hashed production path. The path is injected into the worker and HTML preload tags, and receives immutable cache headers. Hashes of the binary, precached assets, and a preliminary Service Worker bundle determine the injected cache version. The worker caches the binary before activating, then removes old versioned caches.
 3. **Generate CSS** — UnoCSS scans `src/ui/**/*.ts`, `src/ui/home/index.html`, and `src/ui/bench/index.html`, emitting atomic utility classes
 4. **Inline & minify HTML** — CSS is inlined into `<style>`, HTML is minified with `@minify-html/node`
 5. **Generate static-host headers** — Writes `dist/_headers` with shared security headers, per-page inline-script hashes, the stricter Service Worker CSP, and the OpenSearch content type
@@ -261,7 +265,7 @@ The in-memory state (`frecencyCounts` plus `topFrecency` in `idb.ts`) is loaded 
 
 `bun run dev` runs the dev server with `bun --hot` for soft module reloading:
 
-- **Codegen guard** — If `src/generated/bangs-min.js` is missing, automatically runs `bun run codegen` before the first build
+- **Codegen guard** — If a required artifact under `src/generated/` is missing, automatically runs `bun run codegen` before the first build
 - **Inline builds** — Uses `Bun.build()` API directly instead of shelling out to build scripts
 - **File watching** — Watches `src/` recursively via `fs.watch` with 200ms debounce. Any source change triggers a full rebuild
 - **Live reload** — SSE endpoint at `/__dev/events` pushes reload events to the browser. A small script is injected into HTML responses that unregisters the Service Worker, clears all caches, and reloads the page on each rebuild

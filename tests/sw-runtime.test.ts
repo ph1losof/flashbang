@@ -53,6 +53,7 @@ function setupSwGlobals(requiredAppAssets: readonly string[] = []) {
   fetchImpl = () => Promise.resolve(new Response("ok"));
 
   const globals = globalThis as unknown as Record<string, unknown>;
+  globals.__BANG_DATA_ASSET__ = "/bangs.bin";
   globals.__CACHE_VERSION__ = "test-cache";
   globals.__REQUIRED_APP_ASSETS__ = [...requiredAppAssets];
   globals.__IS_DEV__ = false;

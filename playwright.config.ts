@@ -42,7 +42,7 @@ export default defineConfig({
     {
       name: "webkit",
       use: { ...devices["Desktop Safari"] },
-      grep: /suggest endpoint|Firefox locks|opensearch endpoint|suggestions include custom|homepage bang finder|compact address-bar setup|default provider labels|settings persist suggest provider none|settings persist custom bang creation|settings reject invalid/,
+      grep: /suggest endpoint|Firefox locks|opensearch endpoint|suggestions include custom|homepage bang finder|compact address-bar setup|default provider labels|settings persist suggest provider none|settings persist custom bang creation|settings reject invalid|warm redirect/,
     },
   ],
   webServer: {

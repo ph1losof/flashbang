@@ -4,6 +4,9 @@ import { compileCaptureUrl } from "../src/shared/capture-template";
 import { compileSnapTarget } from "../src/shared/snap-target";
 import type { UrlParts } from "../src/sw/redirect";
 import { type RedirectSettings, redirectRaw } from "../src/sw/redirect";
+import { loadTestBangData } from "./helpers/bang-data";
+
+await loadTestBangData();
 
 const DEFAULT_URL: UrlParts = ["https://www.google.com/search?q=", ""];
 const LUCKY_URL: UrlParts = ["https://www.google.com/search?btnI&q=", ""];

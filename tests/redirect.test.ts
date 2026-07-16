@@ -7,6 +7,9 @@ import {
   redirectRaw as redirectRawTuple,
   redirectUrl,
 } from "../src/sw/redirect";
+import { loadTestBangData } from "./helpers/bang-data";
+
+await loadTestBangData();
 
 function redirectRaw(rawQuery: string, settings: RedirectSettings): Response {
   return redirectRawTuple(rawQuery, settings)[0];

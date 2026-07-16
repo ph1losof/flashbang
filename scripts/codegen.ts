@@ -1,10 +1,5 @@
 import { Buffer } from "node:buffer";
 import { mkdir } from "node:fs/promises";
-import {
-  type BrotliOptions,
-  brotliCompress,
-  constants as zlibConstants,
-} from "node:zlib";
 import { $ } from "bun";
 import {
   CAPTURE_ENCODE_PERCENT,
@@ -53,7 +48,8 @@ interface RawKagiEntry {
 }
 
 export const GENERATED_BANG_DATA_FILES = [
-  "src/generated/bangs-min.js",
+  "src/generated/bangs.bin",
+  "src/generated/bangs-sparse.js",
   "src/generated/bangs-meta.js",
   "src/generated/bangs-trie.js",
 ] as const;
@@ -266,11 +262,8 @@ export function validateBangs(bangs: Bang[]): Bang[] {
   });
 }
 
-// NOTE: Custom escape functions produce smaller output than JSON.stringify,
-// which emits \uXXXX for characters that don't need escaping in practice.
-// Using single-quoted JS strings in generateMin also avoids the double-escape
-// problem where JSON.stringify(jsonString) escapes every " to \", nearly
-// doubling the output size.
+// Custom escape functions produce smaller generated modules than
+// JSON.stringify, which emits \uXXXX for characters that do not need it.
 
 function escapeString(
   s: string,
@@ -361,17 +354,6 @@ function dedupeStrings(values: readonly string[]): {
   return { ids, unique };
 }
 
-function toBase64U8(values: readonly number[]): string {
-  return Buffer.from(Uint8Array.from(values)).toString("base64");
-}
-
-function toBase64U16(values: readonly number[]): string {
-  const arr = Uint16Array.from(values);
-  return Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength).toString(
-    "base64"
-  );
-}
-
 function nextPow2(n: number): number {
   let p = 1;
   while (p < n) {
@@ -380,7 +362,11 @@ function nextPow2(n: number): number {
   return p;
 }
 
-interface PackedMinData {
+function align2(value: number): number {
+  return (value + 1) & ~1;
+}
+
+interface PackedBangData {
   entryCount: number;
   prefixIds: number[];
   suffixIdsPlusOne: number[];
@@ -393,11 +379,11 @@ interface PackedMinData {
   suffixBlob: ReturnType<typeof packBlob>;
 }
 
-function packMinData(bangs: Bang[]): PackedMinData {
+function packBangData(bangs: Bang[]): PackedBangData {
   const entryCount = bangs.length;
   if (entryCount > 0xffff) {
     throw new Error(
-      `bangs-min packed format requires <= 65535 entries, got ${entryCount}`
+      `Binary bang format requires <= 65535 entries, got ${entryCount}`
     );
   }
 
@@ -416,7 +402,7 @@ function packMinData(bangs: Bang[]): PackedMinData {
   const { ids: prefixIds, unique: uniquePrefixes } = dedupeStrings(prefixes);
   if (uniquePrefixes.length > 0xffff) {
     throw new Error(
-      `bangs-min packed format requires <= 65535 unique prefixes, got ${uniquePrefixes.length}`
+      `Binary bang format requires <= 65535 unique prefixes, got ${uniquePrefixes.length}`
     );
   }
 
@@ -437,7 +423,7 @@ function packMinData(bangs: Bang[]): PackedMinData {
     const id = uniqueSuffixes.length;
     if (id >= 0xffff) {
       throw new Error(
-        `bangs-min packed format requires <= 65535 unique suffixes, got ${id + 1}`
+        `Binary bang format requires <= 65535 unique suffixes, got ${id + 1}`
       );
     }
     uniqueSuffixes.push(suffix);
@@ -457,14 +443,14 @@ function packMinData(bangs: Bang[]): PackedMinData {
   for (const len of prefixBlob.lengths) {
     if (len > 0xffff) {
       throw new Error(
-        `bangs-min packed format requires prefix length <= 65535, got ${len}`
+        `Binary bang format requires prefix length <= 65535, got ${len}`
       );
     }
   }
   for (const len of suffixBlob.lengths) {
     if (len > 0xffff) {
       throw new Error(
-        `bangs-min packed format requires suffix length <= 65535, got ${len}`
+        `Binary bang format requires suffix length <= 65535, got ${len}`
       );
     }
   }
@@ -481,6 +467,91 @@ function packMinData(bangs: Bang[]): PackedMinData {
     uniqueSuffixes,
     triggers,
   };
+}
+
+function copyTypedArray(
+  output: Uint8Array,
+  offset: number,
+  values: Uint8Array | Uint16Array
+): number {
+  output.set(
+    new Uint8Array(values.buffer, values.byteOffset, values.byteLength),
+    offset
+  );
+  return offset + values.byteLength;
+}
+
+function generateBinary(bangs: readonly Bang[]): Uint8Array {
+  const packed = packBangData(bangs.filter((bang) => !bang.regex));
+  const encoder = new TextEncoder();
+  const triggerBytes = encoder.encode(packed.triggerBlob.blob);
+  const prefixBytes = encoder.encode(packed.prefixBlob.blob);
+  const suffixBytes = encoder.encode(packed.suffixBlob.blob);
+  const triggerLengths =
+    packed.triggerLensKind === "u8"
+      ? Uint8Array.from(packed.triggerBlob.lengths)
+      : Uint16Array.from(packed.triggerBlob.lengths);
+  const prefixLengths = Uint16Array.from(packed.prefixBlob.lengths);
+  const suffixLengths = Uint16Array.from(packed.suffixBlob.lengths);
+  const prefixIds = Uint16Array.from(packed.prefixIds);
+  const suffixIds = Uint16Array.from(packed.suffixIdsPlusOne);
+
+  const hashSize = nextPow2(Math.max(2, Math.ceil(packed.entryCount / 0.55)));
+  const hashTable = new Uint16Array(hashSize);
+  const hashMask = hashSize - 1;
+  for (let i = 0; i < packed.triggers.length; i++) {
+    let slot = hashFNV1a(packed.triggers[i]) & hashMask;
+    while (hashTable[slot] !== 0) {
+      slot = (slot + 1) & hashMask;
+    }
+    hashTable[slot] = i + 1;
+  }
+
+  const headerWords = 12;
+  const headerBytes = headerWords * Uint32Array.BYTES_PER_ELEMENT;
+  let numericEnd = headerBytes + hashTable.byteLength;
+  numericEnd += triggerLengths.byteLength;
+  numericEnd = align2(numericEnd);
+  numericEnd +=
+    prefixLengths.byteLength +
+    suffixLengths.byteLength +
+    prefixIds.byteLength +
+    suffixIds.byteLength;
+  const totalBytes =
+    numericEnd +
+    triggerBytes.byteLength +
+    prefixBytes.byteLength +
+    suffixBytes.byteLength;
+  const output = new Uint8Array(new ArrayBuffer(totalBytes));
+  new Uint32Array(output.buffer, 0, headerWords).set([
+    0x31424246,
+    1,
+    packed.entryCount,
+    hashSize,
+    packed.triggerLensKind === "u8" ? 1 : 2,
+    packed.uniquePrefixes.length,
+    packed.uniqueSuffixes.length,
+    triggerBytes.byteLength,
+    prefixBytes.byteLength,
+    suffixBytes.byteLength,
+    numericEnd,
+    totalBytes,
+  ]);
+
+  let offset = headerBytes;
+  offset = copyTypedArray(output, offset, hashTable);
+  offset = copyTypedArray(output, offset, triggerLengths);
+  offset = align2(offset);
+  offset = copyTypedArray(output, offset, prefixLengths);
+  offset = copyTypedArray(output, offset, suffixLengths);
+  offset = copyTypedArray(output, offset, prefixIds);
+  offset = copyTypedArray(output, offset, suffixIds);
+  output.set(triggerBytes, offset);
+  offset += triggerBytes.byteLength;
+  output.set(prefixBytes, offset);
+  offset += prefixBytes.byteLength;
+  output.set(suffixBytes, offset);
+  return output;
 }
 
 function renderAdvancedLookup(bangs: readonly Bang[]): string {
@@ -603,324 +674,14 @@ function renderSnapLookup(overrides: readonly GeneratedSnapOverride[]): string {
   return `const _ST=[${definitions.join(",")}];${lookup}`;
 }
 
-function renderMinOpenAddress(
-  packed: PackedMinData,
-  advanced: readonly Bang[],
-  snapOverrides: readonly GeneratedSnapOverride[],
-  totalCount: number
-): string {
-  const {
-    entryCount,
-    triggerBlob,
-    triggerLensKind,
-    prefixBlob,
-    suffixBlob,
-    prefixIds,
-    suffixIdsPlusOne,
-    triggers,
-  } = packed;
-
-  const HASH_TARGET_LOAD = 0.55;
-  const hashSize = nextPow2(
-    Math.max(2, Math.ceil(entryCount / HASH_TARGET_LOAD))
-  );
-  if (hashSize > 0xffff) {
-    throw new Error(
-      `bangs-min packed format requires hash table size <= 65535, got ${hashSize}`
-    );
-  }
-
-  const hashTable = new Uint16Array(hashSize);
-  const hashMask = hashSize - 1;
-  for (let idx = 0; idx < entryCount; idx++) {
-    let slot = hashFNV1a(triggers[idx]) & hashMask;
-    while (hashTable[slot] !== 0) {
-      slot = (slot + 1) & hashMask;
-    }
-    hashTable[slot] = idx + 1;
-  }
-
-  let longestCluster = 0;
-  let currentCluster = 0;
-  for (let i = 0; i < hashSize * 2; i++) {
-    if (hashTable[i & hashMask] === 0) {
-      currentCluster = 0;
-    } else {
-      currentCluster++;
-      if (currentCluster > longestCluster) {
-        longestCluster = currentCluster;
-      }
-    }
-  }
-  console.log(
-    `  Hash table: size=${hashSize} load=${(entryCount / hashSize).toFixed(2)} longest_cluster=${longestCluster}`
-  );
-
-  const triggerLensB64 =
-    triggerLensKind === "u8"
-      ? toBase64U8(triggerBlob.lengths)
-      : toBase64U16(triggerBlob.lengths);
-  const prefixLensB64 = toBase64U16(prefixBlob.lengths);
-  const suffixLensB64 = toBase64U16(suffixBlob.lengths);
-  const prefixIdsB64 = toBase64U16(prefixIds);
-  const suffixIdsB64 = toBase64U16(suffixIdsPlusOne);
-  const hashTableB64 = Buffer.from(hashTable.buffer).toString("base64");
-
-  // Keep the packed tables private and materialize URL parts only for entries
-  // that are actually looked up.
-  return (
-    "const{_TB,_TL,_TO,_tuple,_HT,_HM}=(()=>{" +
-    "function _b64bytes(s){if(typeof atob==='function'){const b=atob(s);const n=b.length;const o=new Uint8Array(n);for(let i=0;i<n;i++){o[i]=b.charCodeAt(i)}return o}if(typeof Buffer!=='undefined'){const b=Buffer.from(s,'base64');return new Uint8Array(b.buffer,b.byteOffset,b.byteLength)}throw new Error('No base64 decoder available')}" +
-    "function _b64u8(s){return _b64bytes(s)}" +
-    "function _b64u16(s){const b=_b64bytes(s);if((b.byteOffset&1)===0){return new Uint16Array(b.buffer,b.byteOffset,b.byteLength>>>1)}const c=new Uint8Array(b.byteLength);c.set(b);return new Uint16Array(c.buffer)}" +
-    "function _off(lengths){const n=lengths.length;const o=new Uint32Array(n+1);let p=0;for(let i=0;i<n;i++){o[i]=p;p+=lengths[i]}o[n]=p;return o}" +
-    `const _TB='${jsEscape(triggerBlob.blob)}';` +
-    `const _TL=${triggerLensKind === "u8" ? `_b64u8('${triggerLensB64}')` : `_b64u16('${triggerLensB64}')`};` +
-    "const _TO=_off(_TL);" +
-    `const _PB='${jsEscape(prefixBlob.blob)}';` +
-    `const _PL=_b64u16('${prefixLensB64}');` +
-    "const _PO=_off(_PL);" +
-    `const _SB='${jsEscape(suffixBlob.blob)}';` +
-    `const _SL=_b64u16('${suffixLensB64}');` +
-    "const _SO=_off(_SL);" +
-    `const _EP=_b64u16('${prefixIdsB64}');` +
-    `const _ES=_b64u16('${suffixIdsB64}');` +
-    `const _HT=_b64u16('${hashTableB64}');` +
-    `const _HM=${hashMask};` +
-    "" +
-    "const _PC=[],_SC=[],_TC=[];" +
-    "function _prefix(id){let s=_PC[id];if(s!==undefined)return s;s=_PB.substring(_PO[id],_PO[id+1]);_PC[id]=s;return s}" +
-    "function _suffix(id){let s=_SC[id];if(s!==undefined)return s;s=_SB.substring(_SO[id],_SO[id+1]);_SC[id]=s;return s}" +
-    "function _tuple(idx){let c=_TC[idx];if(c!==undefined)return c;const s=_ES[idx];c=s===0?[_prefix(_EP[idx]),null]:[_prefix(_EP[idx]),_suffix(s-1)];_TC[idx]=c;return c}" +
-    "return{_TB,_TL,_TO,_tuple,_HT,_HM}" +
-    "})();" +
-    `export const BANG_COUNT=${totalCount};` +
-    "export function lookupBang(trigger,h){let slot=(h>>>0)&_HM;for(;;){const ep=_HT[slot];if(ep===0){return null}const idx=ep-1;if(_TL[idx]===trigger.length&&_TB.startsWith(trigger,_TO[idx]))return _tuple(idx);slot=(slot+1)&_HM}}" +
-    renderAdvancedLookup(advanced) +
-    renderSnapLookup(snapOverrides)
-  );
-}
-
-type StringOrderMode = "lex" | "lenlex";
-type MinCandidateLabel = "insertion" | StringOrderMode;
-
-const BROTLI_SORT_ORDERS: readonly StringOrderMode[] = ["lex", "lenlex"];
-const BROTLI_EVAL_RUNS = 9;
-const BROTLI_MAX_QUALITY_PARAMS: BrotliOptions["params"] = {
-  [zlibConstants.BROTLI_PARAM_QUALITY]: zlibConstants.BROTLI_MAX_QUALITY,
-};
-
-interface ReorderMap {
-  newStrings: string[];
-  oldToNew: number[];
-}
-
-function reorderUniqueStrings(
-  values: readonly string[],
-  mode: StringOrderMode
-): ReorderMap {
-  const order = values.map((_, i) => i);
-  if (mode === "lex") {
-    order.sort((a, b) => values[a].localeCompare(values[b]));
-  } else {
-    order.sort((a, b) => {
-      const la = values[a].length;
-      const lb = values[b].length;
-      if (la !== lb) {
-        return lb - la;
-      }
-      return values[a].localeCompare(values[b]);
-    });
-  }
-  const oldToNew = new Array<number>(values.length);
-  const newStrings = new Array<string>(values.length);
-  for (let i = 0; i < order.length; i++) {
-    const oldIdx = order[i];
-    oldToNew[oldIdx] = i;
-    newStrings[i] = values[oldIdx];
-  }
-  return { newStrings, oldToNew };
-}
-
-function reorderPackedForBrotli(
-  packed: PackedMinData,
-  mode: StringOrderMode
-): PackedMinData {
-  const prefixRemap = reorderUniqueStrings(packed.uniquePrefixes, mode);
-  const suffixRemap = reorderUniqueStrings(packed.uniqueSuffixes, mode);
-  const prefixIds = new Array<number>(packed.prefixIds.length);
-  const suffixIdsPlusOne = new Array<number>(packed.suffixIdsPlusOne.length);
-  for (let i = 0; i < packed.prefixIds.length; i++) {
-    prefixIds[i] = prefixRemap.oldToNew[packed.prefixIds[i]];
-  }
-  for (let i = 0; i < packed.suffixIdsPlusOne.length; i++) {
-    const old = packed.suffixIdsPlusOne[i];
-    suffixIdsPlusOne[i] = old === 0 ? 0 : suffixRemap.oldToNew[old - 1] + 1;
-  }
-  return {
-    ...packed,
-    prefixIds,
-    suffixIdsPlusOne,
-    uniquePrefixes: prefixRemap.newStrings,
-    uniqueSuffixes: suffixRemap.newStrings,
-    prefixBlob: packBlob(prefixRemap.newStrings),
-    suffixBlob: packBlob(suffixRemap.newStrings),
-  };
-}
-
-function medianNs(values: readonly number[]): number {
-  const sorted = values.slice().sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)];
-}
-
-function estimateEvalNs(source: string, runs = BROTLI_EVAL_RUNS): number {
-  const evalCode = source
-    .replaceAll("export const ", "const ")
-    .replaceAll("export function ", "function ");
-  const times = new Array<number>(runs);
-  for (let i = 0; i < runs; i++) {
-    const t0 = Bun.nanoseconds();
-    // Parse+execute proxy in codegen for cold-start sensitive codegen choices.
-    new Function(evalCode)();
-    times[i] = Bun.nanoseconds() - t0;
-  }
-  return medianNs(times);
-}
-
-interface BrotliCandidate {
-  brBytes: number;
-  evalNs: number | null;
-  js: string;
-  label: MinCandidateLabel;
-}
-
-function buildBrotliCandidate(
-  label: MinCandidateLabel,
-  js: string,
-  brBytes: number
-): BrotliCandidate {
-  return { label, js, brBytes, evalNs: null };
-}
-
-interface BrotliCandidateInput {
-  js: string;
-  label: MinCandidateLabel;
-}
-
-function createBrotliCandidateInputs(
-  base: PackedMinData,
-  advanced: readonly Bang[],
-  snapOverrides: readonly GeneratedSnapOverride[],
-  totalCount: number
-): BrotliCandidateInput[] {
-  const inputs: BrotliCandidateInput[] = [
-    {
-      label: "insertion",
-      js: renderMinOpenAddress(base, advanced, snapOverrides, totalCount),
-    },
-  ];
-  for (const mode of BROTLI_SORT_ORDERS) {
-    const packed = reorderPackedForBrotli(base, mode);
-    inputs.push({
-      label: mode,
-      js: renderMinOpenAddress(packed, advanced, snapOverrides, totalCount),
-    });
-  }
-  return inputs;
-}
-
-function brotliSizeBytes(source: string): Promise<number> {
-  return new Promise((resolve, reject) => {
-    brotliCompress(
-      Buffer.from(source),
-      { params: BROTLI_MAX_QUALITY_PARAMS },
-      (error, output) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve(output.byteLength);
-      }
-    );
-  });
-}
-
-async function buildBrotliCandidates(
-  base: PackedMinData,
-  advanced: readonly Bang[],
-  snapOverrides: readonly GeneratedSnapOverride[],
-  totalCount: number
-): Promise<BrotliCandidate[]> {
-  const inputs = createBrotliCandidateInputs(
-    base,
-    advanced,
-    snapOverrides,
-    totalCount
-  );
-  const compressedSizes = await Promise.all(
-    inputs.map((input) => brotliSizeBytes(input.js))
-  );
-  const candidates = new Array<BrotliCandidate>(inputs.length);
-  for (let i = 0; i < inputs.length; i++) {
-    const input = inputs[i];
-    candidates[i] = buildBrotliCandidate(
-      input.label,
-      input.js,
-      compressedSizes[i]
-    );
-  }
-  return candidates;
-}
-
-function selectBestCandidate(
-  candidates: readonly BrotliCandidate[]
-): BrotliCandidate {
-  let bestBrBytes = candidates[0].brBytes;
-  for (let i = 1; i < candidates.length; i++) {
-    if (candidates[i].brBytes < bestBrBytes) {
-      bestBrBytes = candidates[i].brBytes;
-    }
-  }
-  const finalists = candidates.filter(
-    (candidate) => candidate.brBytes === bestBrBytes
-  );
-  if (finalists.length === 1) {
-    return finalists[0];
-  }
-  let best = finalists[0];
-  best.evalNs = estimateEvalNs(best.js);
-  for (let i = 1; i < finalists.length; i++) {
-    const candidate = finalists[i];
-    candidate.evalNs = estimateEvalNs(candidate.js);
-    if (
-      (candidate.evalNs ?? Number.MAX_SAFE_INTEGER) <
-      (best.evalNs ?? Number.MAX_SAFE_INTEGER)
-    ) {
-      best = candidate;
-    }
-  }
-  return best;
-}
-
-async function generateMin(bangs: Bang[]): Promise<string> {
-  const advanced = bangs.filter((bang) => bang.regex);
-  const regular = bangs.filter((bang) => !bang.regex);
+function generateSparse(bangs: readonly Bang[]): string {
   const snapOverrides = collectSnapOverrides(bangs);
   console.log(`  Snap overrides: ${snapOverrides.length} generated`);
-  const base = packMinData(regular);
-  const candidates = await buildBrotliCandidates(
-    base,
-    advanced,
-    snapOverrides,
-    bangs.length
+  return (
+    `export const BANG_COUNT=${bangs.length};` +
+    renderAdvancedLookup(bangs.filter((bang) => bang.regex)) +
+    renderSnapLookup(snapOverrides)
   );
-  const best = selectBestCandidate(candidates);
-  console.log(
-    best.evalNs === null
-      ? `  bangs-min optimization: selected=${best.label} br=${best.brBytes}B`
-      : `  bangs-min optimization: selected=${best.label} br=${best.brBytes}B eval=${Math.round(best.evalNs)}ns (tie-break)`
-  );
-  return best.js;
 }
 
 function generateMeta(bangs: Bang[]): string {
@@ -1218,15 +979,13 @@ async function loadBangs(options: CodegenOptions): Promise<Bang[]> {
 }
 
 interface GeneratedArtifacts {
+  binary: Uint8Array;
   metaJs: string;
-  minJs: string;
+  sparseJs: string;
   trieJs: string;
 }
 
-async function buildGeneratedArtifacts(
-  bangs: Bang[]
-): Promise<GeneratedArtifacts> {
-  const minJsPromise = generateMin(bangs);
+function buildGeneratedArtifacts(bangs: Bang[]): GeneratedArtifacts {
   const trieRoot = buildRadixTrie(
     bangs,
     (b) => b.trigger,
@@ -1234,10 +993,10 @@ async function buildGeneratedArtifacts(
   );
   const trieData = flattenTrie(trieRoot);
   const trieRuntimeHelpers = buildMinifiedTrieRuntimeHelpers();
-  const minJs = await minJsPromise;
   return {
-    minJs,
+    binary: generateBinary(bangs),
     metaJs: generateMeta(bangs),
+    sparseJs: generateSparse(bangs),
     trieJs: generateTrie(trieData, trieRuntimeHelpers),
   };
 }
@@ -1247,32 +1006,33 @@ async function writeGeneratedArtifacts(
   artifacts: GeneratedArtifacts
 ): Promise<void> {
   await Promise.all([
-    Bun.write(`${outDir}/bangs-min.js`, artifacts.minJs),
+    Bun.write(`${outDir}/bangs.bin`, artifacts.binary),
     Bun.write(`${outDir}/bangs-meta.js`, artifacts.metaJs),
+    Bun.write(`${outDir}/bangs-sparse.js`, artifacts.sparseJs),
     Bun.write(`${outDir}/bangs-trie.js`, artifacts.trieJs),
   ]);
-  console.log(`  bangs-min.js: ${artifacts.minJs.length} bytes`);
+  console.log(`  bangs.bin: ${artifacts.binary.byteLength} bytes`);
   console.log(`  bangs-meta.js: ${artifacts.metaJs.length} bytes`);
+  console.log(`  bangs-sparse.js: ${artifacts.sparseJs.length} bytes`);
   console.log(`  bangs-trie.js: ${artifacts.trieJs.length} bytes`);
 }
 
 async function writeGeneratedDeclarations(outDir: string): Promise<void> {
   await Promise.all([
     Bun.write(
-      `${outDir}/bangs-min.d.ts`,
-      [
-        "export declare const BANG_COUNT: number;",
-        "export declare function lookupBang(trigger: string, hash: number): readonly [string, string | null] | null;",
-        "export declare function lookupAdvancedBang(trigger: string): readonly [string, readonly string[], readonly number[], RegExp, number] | null;",
-        "export declare function lookupSnapOverride(trigger: string, hash: number, origin: boolean): string | null;",
-        "",
-      ].join("\n")
-    ),
-    Bun.write(
       `${outDir}/bangs-meta.d.ts`,
       [
         "export declare const BANGS: readonly string[];",
         "export declare const CAPTURE_INDEXES: readonly number[];",
+        "",
+      ].join("\n")
+    ),
+    Bun.write(
+      `${outDir}/bangs-sparse.d.ts`,
+      [
+        "export declare const BANG_COUNT: number;",
+        "export declare function lookupAdvancedBang(trigger: string): readonly [string, readonly string[], readonly number[], RegExp, number] | null;",
+        "export declare function lookupSnapOverride(trigger: string, hash: number, origin: boolean): string | null;",
         "",
       ].join("\n")
     ),
@@ -1301,7 +1061,7 @@ export async function runCodegen(options: CodegenOptions = {}): Promise<void> {
 
   console.log("=== Generate ===");
   await mkdir(GENERATED_OUT_DIR, { recursive: true });
-  const artifacts = await buildGeneratedArtifacts(bangs);
+  const artifacts = buildGeneratedArtifacts(bangs);
   await writeGeneratedArtifacts(GENERATED_OUT_DIR, artifacts);
   await writeGeneratedDeclarations(GENERATED_OUT_DIR);
   console.log(`Generated ${bangs.length} bangs in ${GENERATED_OUT_DIR}/`);

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { BANG_COUNT } from "../src/generated/bangs-min.js";
+import { BANG_COUNT } from "../src/generated/bangs-sparse.js";
 import {
   createBangMeta,
   loadBuiltinBangCatalog,

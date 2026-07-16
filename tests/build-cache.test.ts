@@ -5,6 +5,7 @@ import {
   requiredAppAssetPaths,
 } from "../scripts/build";
 import {
+  configureBangDataAsset,
   configureCustomSuggestOption,
   customSuggestUrlsEnabled,
 } from "../scripts/shared";
@@ -47,6 +48,7 @@ describe("build cache version", () => {
 
   test("maps every concrete core and chunk precache input", () => {
     expect(precacheFileInputs(["/chunk-abc12345.js"])).toEqual([
+      ["/bangs.bin", "dist/bangs.bin"],
       ["/home", "dist/home.html"],
       ["/bench", "dist/bench.html"],
       ["/bench.js", "dist/bench.js"],
@@ -54,6 +56,13 @@ describe("build cache version", () => {
       ["/icon.svg", "dist/icon.svg"],
       ["/manifest.json", "dist/manifest.json"],
       ["/chunk-abc12345.js", "dist/chunk-abc12345.js"],
+    ]);
+  });
+
+  test("maps a content-hashed binary asset", () => {
+    expect(precacheFileInputs([], "/bangs-0123456789ab.bin")[0]).toEqual([
+      "/bangs-0123456789ab.bin",
+      "dist/bangs-0123456789ab.bin",
     ]);
   });
 
@@ -94,5 +103,16 @@ describe("custom suggestion build flag", () => {
     const html = configureCustomSuggestOption(source, true);
     expect(html).toContain('<option value="custom">Custom</option>');
     expect(html).not.toContain("custom-suggest-provider-option");
+  });
+});
+
+describe("bang data asset injection", () => {
+  test("replaces the generated binary path marker", () => {
+    expect(
+      configureBangDataAsset(
+        '<link href="__BANG_DATA_ASSET__">',
+        "/bangs-0123456789ab.bin"
+      )
+    ).toBe('<link href="/bangs-0123456789ab.bin">');
   });
 });
