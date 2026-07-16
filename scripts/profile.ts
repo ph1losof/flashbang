@@ -447,7 +447,7 @@ console.log(
   `bangs-min.js:  ${fmtBytesExact(minBytes)}  (trigger→URL parts, used by SW)`
 );
 console.log(
-  `bangs-meta.js: ${fmtBytesExact(metaBytes)}  (trigger→{s,d}, used by UI)`
+  `bangs-meta.js: ${fmtBytesExact(metaBytes)}  (packed catalog metadata, used by UI)`
 );
 
 const trieFile = await Bun.file(triePath).text();
@@ -553,7 +553,10 @@ console.log(
 
 separator("3b. BANG LOOKUP — COLD VS WARM PATH");
 
-const allTriggers = Object.keys(BANGS as Record<string, unknown>);
+const allTriggers = new Array<string>(BANGS.length / 3);
+for (let i = 0, triggerIndex = 0; i < BANGS.length; i += 3, triggerIndex++) {
+  allTriggers[triggerIndex] = BANGS[i];
+}
 
 const coldT0 = Bun.nanoseconds();
 for (const tr of allTriggers) {
@@ -1190,12 +1193,7 @@ const fullFile = await Bun.file(metaPath).text();
 const minEvalCode = minFile
   .replaceAll("export const ", "const ")
   .replaceAll("export function ", "function ");
-const fullEvalCode = fullFile
-  .replace("export const BANGS=", "var __BANGS=")
-  .replace(
-    "Object.setPrototypeOf(BANGS,null)",
-    "Object.setPrototypeOf(__BANGS,null)"
-  );
+const fullEvalCode = fullFile.replaceAll("export const ", "const ");
 const trieEvalCode = trieFile.replace(/export const /g, "var ");
 
 const EVAL_RUNS = profileOptions.quick ? 8 : 20;
@@ -1203,7 +1201,7 @@ const EVAL_RUNS = profileOptions.quick ? 8 : 20;
 const evalMinTimes: number[] = [];
 for (let i = 0; i < EVAL_RUNS; i++) {
   const t0 = Bun.nanoseconds();
-  new Function(minEvalCode)();
+  new Function(`${minEvalCode};${i}`)();
   evalMinTimes.push(Bun.nanoseconds() - t0);
 }
 const evalMinStats = summarizeRuns(evalMinTimes);
@@ -1219,7 +1217,7 @@ console.log(
 const evalFullTimes: number[] = [];
 for (let i = 0; i < EVAL_RUNS; i++) {
   const t0 = Bun.nanoseconds();
-  new Function(fullEvalCode)();
+  new Function(`${fullEvalCode};${i}`)();
   evalFullTimes.push(Bun.nanoseconds() - t0);
 }
 const evalFullStats = summarizeRuns(evalFullTimes);
@@ -1235,7 +1233,7 @@ console.log(
 const evalTrieTimes: number[] = [];
 for (let i = 0; i < EVAL_RUNS; i++) {
   const t0 = Bun.nanoseconds();
-  new Function(trieEvalCode)();
+  new Function(`${trieEvalCode};${i}`)();
   evalTrieTimes.push(Bun.nanoseconds() - t0);
 }
 const evalTrieStats = summarizeRuns(evalTrieTimes);

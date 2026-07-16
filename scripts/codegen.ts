@@ -272,7 +272,11 @@ export function validateBangs(bangs: Bang[]): Bang[] {
 // problem where JSON.stringify(jsonString) escapes every " to \", nearly
 // doubling the output size.
 
-function escapeString(s: string, quoteCode: number, escapedQuote: string): string {
+function escapeString(
+  s: string,
+  quoteCode: number,
+  escapedQuote: string
+): string {
   let out = "";
   let chunkStart = 0;
   for (let i = 0; i < s.length; i++) {
@@ -920,17 +924,23 @@ async function generateMin(bangs: Bang[]): Promise<string> {
 }
 
 function generateMeta(bangs: Bang[]): string {
-  let json = "{";
+  let json = "[";
+  const captureIndexes: number[] = [];
   for (let i = 0; i < bangs.length; i++) {
     if (i > 0) {
       json += ",";
     }
     const b = bangs[i];
-    json += `"${jsonEscape(b.trigger)}":{"s":"${jsonEscape(b.name)}","d":"${jsonEscape(b.domain)}"${b.regex ? ',"a":1' : ""}}`;
+    json += `"${jsonEscape(b.trigger)}","${jsonEscape(b.name)}","${jsonEscape(b.domain)}"`;
+    if (b.regex) {
+      captureIndexes.push(i);
+    }
   }
-  json += "}";
-  // NOTE: Null prototype improves miss performance why not add it for meta bangs
-  return `export const BANGS=${json};Object.setPrototypeOf(BANGS,null);`;
+  json += "]";
+  return (
+    `export const BANGS=JSON.parse('${jsEscape(json)}');` +
+    `export const CAPTURE_INDEXES=[${captureIndexes.join(",")}];`
+  );
 }
 
 type TrieNode = BuildNode<Bang>;
@@ -1260,7 +1270,11 @@ async function writeGeneratedDeclarations(outDir: string): Promise<void> {
     ),
     Bun.write(
       `${outDir}/bangs-meta.d.ts`,
-      "export declare const BANGS: Record<string, { s: string; d: string; a?: 1 }>;\n"
+      [
+        "export declare const BANGS: readonly string[];",
+        "export declare const CAPTURE_INDEXES: readonly number[];",
+        "",
+      ].join("\n")
     ),
     Bun.write(
       `${outDir}/bangs-trie.d.ts`,
