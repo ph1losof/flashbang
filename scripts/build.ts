@@ -40,9 +40,11 @@ export function createCacheVersion(
 }
 
 export function precacheFileInputs(
-  requiredAppAssets: readonly string[]
+  requiredAppAssets: readonly string[],
+  bangDataAsset = "/bangs.bin"
 ): ReadonlyArray<readonly [assetPath: string, filePath: string]> {
   return [
+    [bangDataAsset, `${DIST_DIR}${bangDataAsset}`],
     ["/home", `${DIST_DIR}/home.html`],
     ["/bench", `${DIST_DIR}/bench.html`],
     ["/bench.js", `${DIST_DIR}/bench.js`],
@@ -71,7 +73,8 @@ export function requiredAppAssetPaths(
 async function bundleServiceWorker(
   naming: string,
   cacheVersion: string,
-  requiredAppAssets: readonly string[]
+  requiredAppAssets: readonly string[],
+  bangDataAsset: string
 ): Promise<void> {
   const result = await Bun.build({
     entrypoints: ["src/sw/sw.ts"],
@@ -81,6 +84,7 @@ async function bundleServiceWorker(
     target: "browser",
     format: "esm",
     define: {
+      __BANG_DATA_ASSET__: JSON.stringify(bangDataAsset),
       __CACHE_VERSION__: JSON.stringify(cacheVersion),
       __REQUIRED_APP_ASSETS__: JSON.stringify(requiredAppAssets),
       __IS_DEV__: JSON.stringify(false),
@@ -101,6 +105,13 @@ async function main(): Promise<void> {
   // Start from a clean dist to avoid stale artifacts (e.g. orphaned .br chunks).
   await rm(DIST_DIR, { recursive: true, force: true });
   await mkdir(DIST_DIR, { recursive: true });
+  const bangDataBytes = await Bun.file("src/generated/bangs.bin").bytes();
+  const bangDataHash = createHash("sha256")
+    .update(bangDataBytes)
+    .digest("hex")
+    .slice(0, 12);
+  const bangDataAsset = `/bangs-${bangDataHash}.bin`;
+  await Bun.write(`${DIST_DIR}${bangDataAsset}`, bangDataBytes);
 
   console.log("=== Bundle app + bench (to discover chunks) ===");
   const { appOutputs } = await bundleUI(allowUnsafeCustomSuggestUrls);
@@ -114,7 +125,7 @@ async function main(): Promise<void> {
   await generateCSS();
 
   console.log("=== Inline CSS + minify HTML ===");
-  await assembleUIAssets(allowUnsafeCustomSuggestUrls);
+  await assembleUIAssets(allowUnsafeCustomSuggestUrls, bangDataAsset);
   await rm(`${DIST_DIR}/styles.css`);
 
   console.log("=== Compute service worker cache version ===");
@@ -123,10 +134,11 @@ async function main(): Promise<void> {
   await bundleServiceWorker(
     "sw-cache-input.js",
     "fb-cache-version-input",
-    requiredAppAssets
+    requiredAppAssets,
+    bangDataAsset
   );
   const cacheInputs: CacheVersionInput[] = await Promise.all(
-    precacheFileInputs(requiredAppAssets).map(
+    precacheFileInputs(requiredAppAssets, bangDataAsset).map(
       async ([assetPath, filePath]) => ({
         path: assetPath,
         bytes: await Bun.file(filePath).bytes(),
@@ -142,7 +154,12 @@ async function main(): Promise<void> {
   console.log(`Cache version: ${cacheVersion}`);
 
   console.log("=== Bundle service worker ===");
-  await bundleServiceWorker("sw.js", cacheVersion, requiredAppAssets);
+  await bundleServiceWorker(
+    "sw.js",
+    cacheVersion,
+    requiredAppAssets,
+    bangDataAsset
+  );
 
   console.log("=== Generate _headers with CSP ===");
   function extractScriptHashes(html: string): string[] {
@@ -196,6 +213,9 @@ async function main(): Promise<void> {
       "/sw.js",
       `  ${swCspHeader}`,
       "",
+      bangDataAsset,
+      "  Cache-Control: public, max-age=31536000, immutable",
+      "",
       "/opensearch.xml",
       "  Content-Type: application/opensearchdescription+xml",
       "",
@@ -203,7 +223,7 @@ async function main(): Promise<void> {
   );
 
   console.log("=== Pre-compress static assets ===");
-  for (const file of new Bun.Glob("*.{html,js,svg,json,txt}").scanSync(
+  for (const file of new Bun.Glob("*.{bin,html,js,svg,json,txt}").scanSync(
     DIST_DIR
   )) {
     const content = await Bun.file(`${DIST_DIR}/${file}`).bytes();

@@ -1,8 +1,7 @@
 import {
   lookupAdvancedBang,
-  lookupBang,
   lookupSnapOverride,
-} from "../generated/bangs-min.js";
+} from "../generated/bangs-sparse.js";
 import {
   CAPTURE_ENCODE_PLUS,
   CAPTURE_ENCODE_RAW,
@@ -23,6 +22,7 @@ import {
   CH_PLUS,
 } from "../shared/chars";
 import type { SnapTargetParts } from "../shared/snap-target";
+import { lookupBang } from "./bang-data";
 
 // NOTE: pos + char-width packed into one int to skip tuple alloc:
 //   findExcl/findSpace:         (pos << 2) | width        → >> 2 for pos, & 0b11 for width

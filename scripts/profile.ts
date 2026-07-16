@@ -16,7 +16,7 @@ import {
 import type { RedirectSettings } from "../src/sw/redirect";
 import { ensureGeneratedBangData, GENERATED_BANG_DATA_FILES } from "./codegen";
 
-const [minPath, metaPath, triePath] = GENERATED_BANG_DATA_FILES;
+const [binaryPath, sparsePath, metaPath, triePath] = GENERATED_BANG_DATA_FILES;
 
 interface ProfileOptions {
   quick: boolean;
@@ -381,9 +381,11 @@ let sink = 0;
 import { hashFNV1a as fnvHash } from "../src/shared/hash";
 
 await ensureGeneratedBangData(true);
+const { initializeBangData, lookupBang } = await import("../src/sw/bang-data");
+initializeBangData(await Bun.file(binaryPath).arrayBuffer());
 
 const [
-  { BANG_COUNT, lookupBang },
+  { BANG_COUNT },
   { EDGES, NODES, ROOT, TERM_K_BLOB, TERM_K_OFF },
   { handleSuggestRequest },
   {
@@ -397,7 +399,7 @@ const [
   { readQueryParam, readTwoQueryParams },
   { BANGS },
 ] = await Promise.all([
-  import("../src/generated/bangs-min.js"),
+  import("../src/generated/bangs-sparse.js"),
   import("../src/generated/bangs-trie.js"),
   import("../src/server/handlers"),
   import("../src/suggest-bang"),
@@ -437,14 +439,18 @@ console.log(
 
 separator("1. DATA SIZE & STRUCTURE ANALYSIS");
 
-const minBytes = Bun.file(minPath).size;
 const metaBytes = Bun.file(metaPath).size;
 const trieBytes = Bun.file(triePath).size;
-const totalGeneratedBytes = minBytes + metaBytes + trieBytes;
+const binaryBytes = Bun.file(binaryPath).size;
+const sparseBytes = Bun.file(sparsePath).size;
+const totalGeneratedBytes = binaryBytes + sparseBytes + metaBytes + trieBytes;
 
 console.log(`\nBang count: ${BANG_COUNT.toLocaleString()}`);
 console.log(
-  `bangs-min.js:  ${fmtBytesExact(minBytes)}  (trigger→URL parts, used by SW)`
+  `bangs.bin:       ${fmtBytesExact(binaryBytes)}  (trigger→URL parts, used by SW)`
+);
+console.log(
+  `bangs-sparse.js: ${fmtBytesExact(sparseBytes)}  (advanced bangs + snap overrides, used by SW)`
 );
 console.log(
   `bangs-meta.js: ${fmtBytesExact(metaBytes)}  (packed catalog metadata, used by UI)`
@@ -454,7 +460,7 @@ const trieFile = await Bun.file(triePath).text();
 console.log(
   `bangs-trie.js: ${fmtBytesExact(trieBytes)}  (radix trie, used by suggest)`
 );
-console.log(`Total generated: ${fmtBytesExact(totalGeneratedBytes)}`);
+console.log(`Production generated: ${fmtBytesExact(totalGeneratedBytes)}`);
 console.log(
   `Avg bytes per bang: ${Math.round(totalGeneratedBytes / BANG_COUNT).toLocaleString()}B`
 );
@@ -1188,31 +1194,11 @@ console.log(
 
 separator("11. MODULE PARSE/EVAL TIME");
 
-const minFile = await Bun.file(minPath).text();
 const fullFile = await Bun.file(metaPath).text();
-const minEvalCode = minFile
-  .replaceAll("export const ", "const ")
-  .replaceAll("export function ", "function ");
 const fullEvalCode = fullFile.replaceAll("export const ", "const ");
 const trieEvalCode = trieFile.replace(/export const /g, "var ");
 
 const EVAL_RUNS = profileOptions.quick ? 8 : 20;
-
-const evalMinTimes: number[] = [];
-for (let i = 0; i < EVAL_RUNS; i++) {
-  const t0 = Bun.nanoseconds();
-  new Function(`${minEvalCode};${i}`)();
-  evalMinTimes.push(Bun.nanoseconds() - t0);
-}
-const evalMinStats = summarizeRuns(evalMinTimes);
-
-console.log(`\nbangs-min.js eval time (${fmtBytesExact(minBytes)}):`);
-console.log(`  Median: ${fmt(evalMinStats.p50)}`);
-console.log(`  p90:    ${fmt(evalMinStats.p90)}`);
-console.log(`  p99:    ${fmt(evalMinStats.p99)}`);
-console.log(
-  `  Spread: ${fmt(evalMinStats.min)}..${fmt(evalMinStats.max)} (cv ${evalMinStats.cvPct.toFixed(1)}%)`
-);
 
 const evalFullTimes: number[] = [];
 for (let i = 0; i < EVAL_RUNS; i++) {
@@ -1273,12 +1259,6 @@ function pointMetric(
 }
 
 const summaryRows: ProfileMetric[] = [
-  metric(
-    "module-eval.min",
-    "Module eval (bangs-min.js)",
-    "Cold start",
-    evalMinStats
-  ),
   metric(
     "module-eval.meta",
     "Module eval (bangs-meta.js)",

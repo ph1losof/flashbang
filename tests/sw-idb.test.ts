@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { redirectUrl } from "../src/sw/redirect";
+import { loadTestBangData } from "./helpers/bang-data";
 import { installFakeIndexedDb, reqToPromise } from "./helpers/fake-indexeddb";
+
+await loadTestBangData();
 
 let restoreIndexedDb: (() => void) | null = null;
 let swIdbModule: typeof import("../src/sw/idb");

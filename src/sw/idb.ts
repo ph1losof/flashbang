@@ -1,4 +1,3 @@
-import { lookupBang } from "../generated/bangs-min.js";
 import {
   type CaptureUrlParts,
   type CustomBangRecord,
@@ -19,6 +18,7 @@ import {
 import { hashFNV1a } from "../shared/hash";
 import { idbWrap, openDB, resetDB } from "../shared/idb";
 import { compileSnapTarget, type SnapTargetParts } from "../shared/snap-target";
+import { lookupBang } from "./bang-data";
 import {
   buildTopFrecency,
   type TopFrecencyEntry,

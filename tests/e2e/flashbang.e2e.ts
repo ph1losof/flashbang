@@ -1540,8 +1540,17 @@ test("worker activation creates its cache and removes the old cache", async ({
     `${process.env.DIST_DIR || "dist"}/sw.js`,
     "utf8"
   );
+  const indexSource = await readFile(
+    `${process.env.DIST_DIR || "dist"}/index.html`,
+    "utf8"
+  );
   const builtCacheName = workerSource.match(/fb-[a-f0-9]{8}/)?.[0];
+  const builtBangDataAsset = workerSource.match(
+    /\/bangs-[a-f0-9]{12}\.bin/
+  )?.[0];
   expect(builtCacheName).toBeDefined();
+  expect(builtBangDataAsset).toBeDefined();
+  expect(indexSource).toContain(builtBangDataAsset!);
   const initialCacheName = "fb-e2e-initial";
   const lifecyclePage = await context.newPage();
   await lifecyclePage.goto("/health");
@@ -1557,6 +1566,17 @@ test("worker activation creates its cache and removes the old cache", async ({
   await expect
     .poll(() => lifecyclePage.evaluate(() => caches.keys()))
     .toContain(builtCacheName!);
+  await expect
+    .poll(() =>
+      lifecyclePage.evaluate(
+        async ({ assetPath, cacheName }) => {
+          const cache = await caches.open(cacheName);
+          return Boolean(await cache.match(assetPath));
+        },
+        { cacheName: builtCacheName!, assetPath: builtBangDataAsset! }
+      )
+    )
+    .toBe(true);
   await expect
     .poll(() => lifecyclePage.evaluate(() => caches.keys()))
     .not.toContain(initialCacheName);

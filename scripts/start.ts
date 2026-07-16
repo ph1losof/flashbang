@@ -10,7 +10,8 @@ import { readPathname } from "../src/shared/raw-url";
 let securityHeaders = pageHeaders("");
 const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const REVALIDATE_CACHE_CONTROL = "public, max-age=0, must-revalidate";
-const HASHED_CHUNK_RE = /^\/chunk-[a-z0-9_-]{8,}\.js$/i;
+const HASHED_ASSET_RE =
+  /^\/(?:chunk-[a-z0-9_-]{8,}\.js|bangs-[a-f0-9]{8,}\.bin)$/i;
 const DIST_DIR = process.env.DIST_DIR || "dist";
 const DIST_PREFIX = `${DIST_DIR}/`;
 
@@ -54,7 +55,7 @@ export function cacheControlForAsset(assetPath: string): string {
   if (assetPath === "/sw.js" || assetPath.endsWith(".html")) {
     return "no-cache";
   }
-  return HASHED_CHUNK_RE.test(assetPath)
+  return HASHED_ASSET_RE.test(assetPath)
     ? IMMUTABLE_CACHE_CONTROL
     : REVALIDATE_CACHE_CONTROL;
 }

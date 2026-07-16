@@ -5,6 +5,7 @@ import {
   encodeSuggestCookieValue,
   parseSuggestCookieValue,
 } from "../shared/suggest-cookie";
+import { initializeBangData, isBangDataInitialized } from "./bang-data";
 import {
   getCachedSettings,
   getTopFrecencyRecord,
@@ -17,6 +18,7 @@ import {
 import { type RedirectSettings, redirectRaw, redirectUrl } from "./redirect";
 
 declare const __CACHE_VERSION__: string;
+declare const __BANG_DATA_ASSET__: string;
 declare const __REQUIRED_APP_ASSETS__: string[];
 declare const __IS_DEV__: boolean;
 
@@ -25,6 +27,7 @@ const LEGACY_CACHE_NAMES = new Set(["flashbang-dev"]);
 const CACHE_NAME = __CACHE_VERSION__.startsWith(CACHE_PREFIX)
   ? __CACHE_VERSION__
   : `${CACHE_PREFIX}${__CACHE_VERSION__}`;
+const BANG_DATA_ASSET = __BANG_DATA_ASSET__;
 const APP_ASSETS = [
   "/home",
   "/app.js",
@@ -36,11 +39,41 @@ const APP_ASSETS = [
 const DEFERRED_ASSETS = [...APP_ASSETS, "/bench", "/bench.js"];
 const PRECACHE_CONCURRENCY = 4;
 let deferredPrecachePromise: Promise<void> | null = null;
+let bangDataPromise: Promise<void> | null = null;
 let benchmarkClientId: string | null = null;
 const RESOLVED_PROMISE: Promise<void> = Promise.resolve();
 const swallowError = () => {
   /* best-effort */
 };
+
+async function loadBangData(): Promise<void> {
+  const request = new Request(BANG_DATA_ASSET);
+  const cache = await caches.open(CACHE_NAME);
+  let response = await cache.match(request);
+  if (!response) {
+    response = await fetch(request);
+    if (!response.ok) {
+      throw new Error(
+        `Failed to load ${BANG_DATA_ASSET}: ${response.status} ${response.statusText}`
+      );
+    }
+    await cache.put(request, response.clone());
+  }
+  initializeBangData(await response.arrayBuffer());
+}
+
+function ensureBangData(): Promise<void> {
+  if (isBangDataInitialized()) {
+    return RESOLVED_PROMISE;
+  }
+  if (!bangDataPromise) {
+    bangDataPromise = loadBangData().catch((error) => {
+      bangDataPromise = null;
+      throw error;
+    });
+  }
+  return bangDataPromise;
+}
 
 async function precacheAssets(
   cacheName: string,
@@ -154,7 +187,7 @@ function queueBangSideEffects(e: FetchEvent, trigger: string): void {
 }
 
 self.addEventListener("install", (e: ExtendableEvent) => {
-  e.waitUntil(self.skipWaiting());
+  e.waitUntil(ensureBangData().then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (e: ExtendableEvent) => {
@@ -162,7 +195,7 @@ self.addEventListener("activate", (e: ExtendableEvent) => {
     Promise.all([
       deleteOldCaches(CACHE_NAME),
       self.clients.claim(),
-      readRedirectSettings(),
+      ensureBangData().then(() => readRedirectSettings()),
       loadFrecency(),
     ]).then(() => {
       /* no-op */
@@ -196,13 +229,41 @@ self.addEventListener("message", (e: ExtendableMessageEvent) => {
       });
     };
     const cached = getCachedSettings();
-    if (cached) {
-      resolve(cached);
+    if (isBangDataInitialized()) {
+      if (cached) {
+        resolve(cached);
+      } else {
+        e.waitUntil(readRedirectSettings().then(resolve));
+      }
     } else {
-      readRedirectSettings().then(resolve);
+      e.waitUntil(
+        ensureBangData().then(() => {
+          const readySettings = getCachedSettings();
+          if (readySettings) {
+            resolve(readySettings);
+            return;
+          }
+          return readRedirectSettings().then(resolve);
+        })
+      );
     }
   }
 });
+
+function respondToRedirect(
+  e: FetchEvent,
+  rawQuery: string,
+  settings: RedirectSettings
+): Response {
+  const [response, trigger] = redirectRaw(rawQuery, settings);
+  if (
+    trigger &&
+    (benchmarkClientId === null || e.clientId !== benchmarkClientId)
+  ) {
+    queueBangSideEffects(e, trigger);
+  }
+  return response;
+}
 
 self.addEventListener("fetch", (e: FetchEvent) => {
   const raw = e.request.url;
@@ -217,27 +278,27 @@ self.addEventListener("fetch", (e: FetchEvent) => {
     const rawQ =
       vEnd === -1 ? raw.substring(vStart) : raw.substring(vStart, vEnd);
     if (rawQ) {
-      const cached = getCachedSettings();
-      if (cached) {
-        const [resp, trigger] = redirectRaw(rawQ, cached);
-        if (
-          trigger &&
-          (benchmarkClientId === null || e.clientId !== benchmarkClientId)
-        ) {
-          queueBangSideEffects(e, trigger);
+      if (isBangDataInitialized()) {
+        const cached = getCachedSettings();
+        if (cached) {
+          e.respondWith(respondToRedirect(e, rawQ, cached));
+        } else {
+          e.respondWith(
+            readRedirectSettings().then((settings) =>
+              respondToRedirect(e, rawQ, settings)
+            )
+          );
         }
-        e.respondWith(resp);
       } else {
         e.respondWith(
-          readRedirectSettings().then((s) => {
-            const [resp, trigger] = redirectRaw(rawQ, s);
-            if (
-              trigger &&
-              (benchmarkClientId === null || e.clientId !== benchmarkClientId)
-            ) {
-              queueBangSideEffects(e, trigger);
+          ensureBangData().then(() => {
+            const cached = getCachedSettings();
+            if (cached) {
+              return respondToRedirect(e, rawQ, cached);
             }
-            return resp;
+            return readRedirectSettings().then((settings) =>
+              respondToRedirect(e, rawQ, settings)
+            );
           })
         );
       }

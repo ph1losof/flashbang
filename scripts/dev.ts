@@ -59,6 +59,7 @@ async function build() {
   await mkdir("dist", { recursive: true });
 
   await Promise.all([
+    Bun.write("dist/bangs.bin", Bun.file("src/generated/bangs.bin")),
     Bun.build({
       entrypoints: ["src/sw/sw.ts"],
       outdir: "dist",
@@ -67,6 +68,7 @@ async function build() {
       target: "browser",
       format: "esm",
       define: {
+        __BANG_DATA_ASSET__: '"/bangs.bin"',
         __CACHE_VERSION__: '"flashbang-dev"',
         __REQUIRED_APP_ASSETS__: "[]",
         __IS_DEV__: JSON.stringify(true),
@@ -81,8 +83,15 @@ async function build() {
   console.log(`Build done in ${(performance.now() - t).toFixed(0)}ms`);
 }
 
-const generated = Bun.file("src/generated/bangs-min.js");
-if (!(await generated.exists())) {
+const generated = [
+  Bun.file("src/generated/bangs.bin"),
+  Bun.file("src/generated/bangs-sparse.js"),
+  Bun.file("src/generated/bangs-meta.js"),
+  Bun.file("src/generated/bangs-trie.js"),
+];
+if (
+  !(await Promise.all(generated.map((file) => file.exists()))).every(Boolean)
+) {
   console.warn("Generated bang data not found. Running codegen...");
   await $`bun run codegen`;
 }

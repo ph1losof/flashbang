@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { loadTestBangData } from "./helpers/bang-data";
 import { installFakeIndexedDb, reqToPromise } from "./helpers/fake-indexeddb";
 
 type SwHandler = (event: unknown) => Promise<void> | void;
@@ -53,6 +54,7 @@ function setupSwGlobals(requiredAppAssets: readonly string[] = []) {
   fetchImpl = () => Promise.resolve(new Response("ok"));
 
   const globals = globalThis as unknown as Record<string, unknown>;
+  globals.__BANG_DATA_ASSET__ = "/bangs.bin";
   globals.__CACHE_VERSION__ = "test-cache";
   globals.__REQUIRED_APP_ASSETS__ = [...requiredAppAssets];
   globals.__IS_DEV__ = false;
@@ -179,6 +181,7 @@ async function loadSwRuntime(requiredAppAssets: readonly string[] = []) {
 }
 
 beforeEach(async () => {
+  await loadTestBangData();
   restoreIndexedDb = installFakeIndexedDb();
   const swIdb = await import("../src/sw/idb");
   swIdb.invalidateCache();
@@ -277,7 +280,8 @@ describe("sw runtime with real modules", () => {
       }
     );
     await handlers.message?.(redirectEvt.event);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(redirectEvt.waits).toHaveLength(1);
+    await Promise.all(redirectEvt.waits);
     expect(String((posted[0] as { url: string }).url)).toContain("google.com");
 
     // Change default bang, invalidate cache, and verify redirect reflects new settings.
@@ -294,7 +298,8 @@ describe("sw runtime with real modules", () => {
       }
     );
     await handlers.message?.(redirectEvt2.event);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(redirectEvt2.waits).toHaveLength(1);
+    await Promise.all(redirectEvt2.waits);
     expect(String((postedAfterInvalidate[0] as { url: string }).url)).toContain(
       "duckduckgo.com"
     );

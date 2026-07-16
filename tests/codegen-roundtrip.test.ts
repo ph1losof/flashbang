@@ -1,17 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import {
   lookupAdvancedBang,
-  lookupBang,
   lookupSnapOverride,
-} from "../src/generated/bangs-min.js";
+} from "../src/generated/bangs-sparse.js";
 import { hashFNV1a } from "../src/shared/hash";
+import { initializeBangData, lookupBang } from "../src/sw/bang-data";
+import { loadTestBangData } from "./helpers/bang-data";
+
+await loadTestBangData();
 
 const bangs: Array<{ regex?: string; trigger: string; url: string }> =
   await Bun.file("data/bangs.json").json();
 const customBangs: Record<string, { url: string }> = await Bun.file(
   "data/custom-bangs.json"
 ).json();
-const generatedSource = await Bun.file("src/generated/bangs-min.js").text();
 
 describe("codegen round-trip", () => {
   test("every 100th bang resolves to a non-null entry", () => {
@@ -69,11 +71,27 @@ describe("codegen round-trip", () => {
     expect(lookupBang("g", hash)).toBe(first);
   });
 
-  test("keeps triggers and URL parts packed during initialization", () => {
-    expect(generatedSource).not.toContain("const _TS=");
-    expect(generatedSource).not.toContain("_TC[_i]=");
-    expect(generatedSource).toContain("_TB.startsWith(trigger,_TO[idx])");
-    expect(generatedSource).toContain("function _tuple(idx)");
+  test("emits the binary lookup artifact", async () => {
+    const binary = await Bun.file("src/generated/bangs.bin").arrayBuffer();
+    const header = new Uint32Array(binary, 0, 12);
+    expect(header[0]).toBe(0x31424246);
+    expect(header[1]).toBe(1);
+    expect(header[2]).toBe(bangs.filter((bang) => !bang.regex).length);
+    expect(header[11]).toBe(binary.byteLength);
+  });
+
+  test("rejects invalid binary lookup metadata", async () => {
+    const binary = await Bun.file("src/generated/bangs.bin").arrayBuffer();
+    for (const [word, value, message] of [
+      [3, 0, "Invalid binary bang hash table size"],
+      [3, 3, "Invalid binary bang hash table size"],
+      [4, 0, "Invalid binary bang trigger length width"],
+      [4, 3, "Invalid binary bang trigger length width"],
+    ] as const) {
+      const invalid = binary.slice(0);
+      new Uint32Array(invalid, 0, 12)[word] = value;
+      expect(() => initializeBangData(invalid)).toThrow(message);
+    }
   });
 
   test("regex bangs are emitted only through the sparse advanced lookup", () => {

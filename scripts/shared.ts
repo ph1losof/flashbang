@@ -3,6 +3,7 @@ import { $ } from "bun";
 
 const CUSTOM_SUGGEST_OPTION_MARKER = "<!-- custom-suggest-provider-option -->";
 const CUSTOM_SUGGEST_OPTION = '<option value="custom">Custom</option>';
+const BANG_DATA_ASSET_MARKER = "__BANG_DATA_ASSET__";
 export const DIST_DIR = process.env.DIST_DIR || "dist";
 
 export function customSuggestUrlsEnabled(
@@ -22,6 +23,13 @@ export function configureCustomSuggestOption(
     CUSTOM_SUGGEST_OPTION_MARKER,
     enabled ? CUSTOM_SUGGEST_OPTION : ""
   );
+}
+
+export function configureBangDataAsset(
+  html: string,
+  assetPath: string
+): string {
+  return html.replaceAll(BANG_DATA_ASSET_MARKER, assetPath);
 }
 
 export async function bundleUI(
@@ -77,7 +85,8 @@ export async function generateCSS(quiet = false): Promise<void> {
 
 export async function buildHTMLAssets(
   css: string,
-  allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled()
+  allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled(),
+  bangDataAsset = "/bangs.bin"
 ): Promise<void> {
   const inlineCSS = (src: string) =>
     src.replace(
@@ -85,7 +94,10 @@ export async function buildHTMLAssets(
       `<style>${css}</style>`
     );
 
-  const indexHtml = await Bun.file("src/ui/index.html").text();
+  const indexHtml = configureBangDataAsset(
+    await Bun.file("src/ui/index.html").text(),
+    bangDataAsset
+  );
   await Bun.write(
     `${DIST_DIR}/index.html`,
     minify(Buffer.from(indexHtml), { minify_css: true, minify_js: true })
@@ -95,7 +107,10 @@ export async function buildHTMLAssets(
     ["home", "src/ui/home/index.html"],
     ["bench", "src/ui/bench/index.html"],
   ] as const) {
-    const sourceHtml = await Bun.file(source).text();
+    const sourceHtml = configureBangDataAsset(
+      await Bun.file(source).text(),
+      bangDataAsset
+    );
     const html =
       name === "home"
         ? configureCustomSuggestOption(sourceHtml, allowUnsafeCustomSuggestUrls)
@@ -111,10 +126,11 @@ export async function buildHTMLAssets(
 }
 
 export async function assembleUIAssets(
-  allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled()
+  allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled(),
+  bangDataAsset = "/bangs.bin"
 ): Promise<void> {
   const css = await Bun.file(`${DIST_DIR}/styles.css`).text();
-  await buildHTMLAssets(css, allowUnsafeCustomSuggestUrls);
+  await buildHTMLAssets(css, allowUnsafeCustomSuggestUrls, bangDataAsset);
   await copyStaticAssets();
 }
 
