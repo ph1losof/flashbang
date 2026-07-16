@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { BANG_COUNT } from "../src/generated/bangs-min.js";
 import {
   createBangMeta,
   loadBuiltinBangCatalog,
@@ -33,6 +34,7 @@ describe("bang catalog", () => {
     expect(first).toBe(second);
 
     const catalog = await first;
+    expect(catalog.entries).toHaveLength(BANG_COUNT);
     const google = catalog.byTrigger.get("g");
     expect(google?.name).toBe("Google");
     expect(google?.capture).toBe(false);

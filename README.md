@@ -1,6 +1,6 @@
 # flashbang
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/flashbang?referralCode=cxTxcH&utm_medium=integration&utm_source=template&utm_campaign=generic)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://dash.cloudflare.com/?to=/:account/workers-and-pages) [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/flashbang?referralCode=cxTxcH&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
 ![Flashbang](.github/images/landing.png)
 

@@ -1,5 +1,12 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { validateBangs } from "../scripts/codegen";
+import { jsEscape, jsonEscape, validateBangs } from "../scripts/codegen";
+
+describe("codegen string escaping", () => {
+  test("preserves the minimal custom escape sets", () => {
+    expect(jsEscape(`a'b\\c\nd\re"f\t`)).toBe(`a\\'b\\\\c\\nd\\re"f\t`);
+    expect(jsonEscape(`a"b\\c\nd\re'f\t`)).toBe(`a\\"b\\\\c\\nd\\re'f\t`);
+  });
+});
 
 describe("validateBangs", () => {
   test("rejects regular bangs that fail custom URL validation", () => {

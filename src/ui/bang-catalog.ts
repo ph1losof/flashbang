@@ -12,12 +12,6 @@ export interface BangCatalog {
   entries: readonly BangMeta[];
 }
 
-interface GeneratedBang {
-  a?: 1;
-  d: string;
-  s: string;
-}
-
 interface ScoredBang {
   entry: BangMeta;
   score: number;
@@ -44,12 +38,31 @@ export function createBangMeta(
 export function loadBuiltinBangCatalog(): Promise<BangCatalog> {
   if (!catalogPromise) {
     catalogPromise = import("../generated/bangs-meta.js").then((module) => {
-      const generated: Record<string, GeneratedBang> = module.BANGS;
-      const entries = Object.entries(generated).map(([trigger, bang]) =>
-        createBangMeta(trigger, bang.s, bang.d, bang.a === 1)
-      );
+      const generated = module.BANGS;
+      const captureIndexes = module.CAPTURE_INDEXES;
+      const entries = new Array<BangMeta>(generated.length / 3);
+      const byTrigger = new Map<string, BangMeta>();
+      let captureOffset = 0;
+      for (
+        let i = 0, entryIndex = 0;
+        i < generated.length;
+        i += 3, entryIndex++
+      ) {
+        const capture = captureIndexes[captureOffset] === entryIndex;
+        if (capture) {
+          captureOffset++;
+        }
+        const entry = createBangMeta(
+          generated[i],
+          generated[i + 1],
+          generated[i + 2],
+          capture
+        );
+        entries[entryIndex] = entry;
+        byTrigger.set(entry.trigger, entry);
+      }
       return {
-        byTrigger: new Map(entries.map((entry) => [entry.trigger, entry])),
+        byTrigger,
         entries,
       };
     });
