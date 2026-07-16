@@ -23,6 +23,9 @@ describe("production static caching", () => {
     expect(cacheControlForAsset("/bangs-0123456789ab.bin")).toBe(
       "public, max-age=31536000, immutable"
     );
+    expect(cacheControlForAsset("/bangs-meta-0123456789ab.bin")).toBe(
+      "public, max-age=31536000, immutable"
+    );
     for (const path of [
       "/app.js",
       "/bench.js",

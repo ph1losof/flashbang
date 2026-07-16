@@ -1,3 +1,12 @@
+import { readBangMeta } from "./bang-meta";
+
+declare const __BANG_META_ASSET__: string;
+
+const BANG_META_ASSET =
+  typeof __BANG_META_ASSET__ === "string"
+    ? __BANG_META_ASSET__
+    : "/bangs-meta.bin";
+
 export interface BangMeta {
   capture: boolean;
   domain: string;
@@ -37,37 +46,27 @@ export function createBangMeta(
 
 export function loadBuiltinBangCatalog(): Promise<BangCatalog> {
   if (!catalogPromise) {
-    catalogPromise = import("../generated/bangs-meta.js").then((module) => {
-      const generated = module.BANGS;
-      const captureIndexes = module.CAPTURE_INDEXES;
-      const entries = new Array<BangMeta>(generated.length / 3);
-      const byTrigger = new Map<string, BangMeta>();
-      let captureOffset = 0;
-      for (
-        let i = 0, entryIndex = 0;
-        i < generated.length;
-        i += 3, entryIndex++
-      ) {
-        const capture = captureIndexes[captureOffset] === entryIndex;
-        if (capture) {
-          captureOffset++;
-        }
-        const entry = createBangMeta(
-          generated[i],
-          generated[i + 1],
-          generated[i + 2],
-          capture
+    catalogPromise = fetch(BANG_META_ASSET).then(async (response) => {
+      if (!response.ok) {
+        throw new Error(
+          `Failed to load ${BANG_META_ASSET}: ${response.status} ${response.statusText}`
         );
-        entries[entryIndex] = entry;
-        byTrigger.set(entry.trigger, entry);
       }
-      return {
-        byTrigger,
-        entries,
-      };
+      return decodeBangCatalog(await response.arrayBuffer());
     });
   }
   return catalogPromise;
+}
+
+export function decodeBangCatalog(buffer: ArrayBuffer): BangCatalog {
+  const entries: BangMeta[] = [];
+  const byTrigger = new Map<string, BangMeta>();
+  readBangMeta(buffer, (trigger, name, domain, capture, index) => {
+    const entry = createBangMeta(trigger, name, domain, capture);
+    entries[index] = entry;
+    byTrigger.set(trigger, entry);
+  });
+  return { byTrigger, entries };
 }
 
 function scoreBang(entry: BangMeta, query: string): number {

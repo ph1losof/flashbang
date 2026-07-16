@@ -11,7 +11,7 @@ let securityHeaders = pageHeaders("");
 const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const REVALIDATE_CACHE_CONTROL = "public, max-age=0, must-revalidate";
 const HASHED_ASSET_RE =
-  /^\/(?:chunk-[a-z0-9_-]{8,}\.js|bangs-[a-f0-9]{8,}\.bin)$/i;
+  /^\/(?:chunk-[a-z0-9_-]{8,}\.js|bangs(?:-meta)?-[a-f0-9]{8,}\.bin)$/i;
 const DIST_DIR = process.env.DIST_DIR || "dist";
 const DIST_PREFIX = `${DIST_DIR}/`;
 

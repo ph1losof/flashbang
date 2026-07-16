@@ -14,6 +14,7 @@ import {
   NODE_TERMINAL_INDEX,
 } from "../src/suggest-bang";
 import type { RedirectSettings } from "../src/sw/redirect";
+import { decodeBangCatalog } from "../src/ui/bang-catalog";
 import { ensureGeneratedBangData, GENERATED_BANG_DATA_FILES } from "./codegen";
 
 const [binaryPath, sparsePath, metaPath, triePath] = GENERATED_BANG_DATA_FILES;
@@ -397,7 +398,6 @@ const [
   { parseCookie, parseSettingsFromRawUrl },
   { buildTopFrecency, updateTopFrecencyOnIncrement },
   { readQueryParam, readTwoQueryParams },
-  { BANGS },
 ] = await Promise.all([
   import("../src/generated/bangs-sparse.js"),
   import("../src/generated/bangs-trie.js"),
@@ -406,8 +406,9 @@ const [
   import("../src/suggest"),
   import("../src/sw/frecency"),
   import("../src/shared/raw-query"),
-  import("../src/generated/bangs-meta.js"),
 ]);
+const metaBuffer = await Bun.file(metaPath).arrayBuffer();
+const metaCatalog = decodeBangCatalog(metaBuffer);
 
 function terminalIndexFor(trigger: string): number {
   for (let i = 0; i < TERM_K_OFF.length - 1; i++) {
@@ -453,7 +454,7 @@ console.log(
   `bangs-sparse.js: ${fmtBytesExact(sparseBytes)}  (advanced bangs + snap overrides, used by SW)`
 );
 console.log(
-  `bangs-meta.js: ${fmtBytesExact(metaBytes)}  (packed catalog metadata, used by UI)`
+  `bangs-meta.bin: ${fmtBytesExact(metaBytes)}  (packed catalog metadata, used by UI)`
 );
 
 const trieFile = await Bun.file(triePath).text();
@@ -559,10 +560,7 @@ console.log(
 
 separator("3b. BANG LOOKUP — COLD VS WARM PATH");
 
-const allTriggers = new Array<string>(BANGS.length / 3);
-for (let i = 0, triggerIndex = 0; i < BANGS.length; i += 3, triggerIndex++) {
-  allTriggers[triggerIndex] = BANGS[i];
-}
+const allTriggers = metaCatalog.entries.map((entry) => entry.trigger);
 
 const coldT0 = Bun.nanoseconds();
 for (const tr of allTriggers) {
@@ -1192,10 +1190,8 @@ console.log(
   `  spread ${fmt(warmThenBangStats.min)}..${fmt(warmThenBangStats.max)} (${COLD_RUNS} isolated runs)`
 );
 
-separator("11. MODULE PARSE/EVAL TIME");
+separator("11. ARTIFACT INITIALIZATION TIME");
 
-const fullFile = await Bun.file(metaPath).text();
-const fullEvalCode = fullFile.replaceAll("export const ", "const ");
 const trieEvalCode = trieFile.replace(/export const /g, "var ");
 
 const EVAL_RUNS = profileOptions.quick ? 8 : 20;
@@ -1203,12 +1199,12 @@ const EVAL_RUNS = profileOptions.quick ? 8 : 20;
 const evalFullTimes: number[] = [];
 for (let i = 0; i < EVAL_RUNS; i++) {
   const t0 = Bun.nanoseconds();
-  new Function(`${fullEvalCode};${i}`)();
+  sink += decodeBangCatalog(metaBuffer).entries.length + i;
   evalFullTimes.push(Bun.nanoseconds() - t0);
 }
 const evalFullStats = summarizeRuns(evalFullTimes);
 
-console.log(`\nbangs-meta.js eval time (${fmtBytesExact(metaBytes)}):`);
+console.log(`\nbangs-meta.bin decode time (${fmtBytesExact(metaBytes)}):`);
 console.log(`  Median: ${fmt(evalFullStats.p50)}`);
 console.log(`  p90:    ${fmt(evalFullStats.p90)}`);
 console.log(`  p99:    ${fmt(evalFullStats.p99)}`);
@@ -1261,7 +1257,7 @@ function pointMetric(
 const summaryRows: ProfileMetric[] = [
   metric(
     "module-eval.meta",
-    "Module eval (bangs-meta.js)",
+    "Metadata decode (bangs-meta.bin)",
     "Cold start",
     evalFullStats
   ),

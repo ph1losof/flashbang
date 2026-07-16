@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { BANG_COUNT } from "../src/generated/bangs-sparse.js";
 import {
   createBangMeta,
@@ -29,16 +29,24 @@ describe("bang catalog", () => {
   });
 
   test("normalizes built-ins once and reuses the catalog", async () => {
+    const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(Bun.file("src/generated/bangs-meta.bin"))
+    );
     const first = loadBuiltinBangCatalog();
     const second = loadBuiltinBangCatalog();
     expect(first).toBe(second);
 
-    const catalog = await first;
-    expect(catalog.entries).toHaveLength(BANG_COUNT);
-    const google = catalog.byTrigger.get("g");
-    expect(google?.name).toBe("Google");
-    expect(google?.capture).toBe(false);
-    expect(catalog.byTrigger.get("ktr")?.capture).toBe(true);
-    expect(catalog.entries).toContain(google);
+    try {
+      const catalog = await first;
+      expect(catalog.entries).toHaveLength(BANG_COUNT);
+      const google = catalog.byTrigger.get("g");
+      expect(google?.name).toBe("Google");
+      expect(google?.capture).toBe(false);
+      expect(catalog.byTrigger.get("ktr")?.capture).toBe(true);
+      expect(catalog.entries).toContain(google);
+      expect(fetchSpy).toHaveBeenCalledWith("/bangs-meta.bin");
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 });

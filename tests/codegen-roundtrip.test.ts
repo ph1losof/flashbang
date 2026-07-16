@@ -5,12 +5,18 @@ import {
 } from "../src/generated/bangs-sparse.js";
 import { hashFNV1a } from "../src/shared/hash";
 import { initializeBangData, lookupBang } from "../src/sw/bang-data";
+import { decodeBangCatalog } from "../src/ui/bang-catalog";
 import { loadTestBangData } from "./helpers/bang-data";
 
 await loadTestBangData();
 
-const bangs: Array<{ regex?: string; trigger: string; url: string }> =
-  await Bun.file("data/bangs.json").json();
+const bangs: Array<{
+  domain: string;
+  name: string;
+  regex?: string;
+  trigger: string;
+  url: string;
+}> = await Bun.file("data/bangs.json").json();
 const customBangs: Record<string, { url: string }> = await Bun.file(
   "data/custom-bangs.json"
 ).json();
@@ -78,6 +84,48 @@ describe("codegen round-trip", () => {
     expect(header[1]).toBe(1);
     expect(header[2]).toBe(bangs.filter((bang) => !bang.regex).length);
     expect(header[11]).toBe(binary.byteLength);
+  });
+
+  test("preserves metadata records and sparse captures in source order", async () => {
+    const binary = await Bun.file("src/generated/bangs-meta.bin").arrayBuffer();
+    const header = new Uint32Array(binary, 0, 6);
+    expect(header[0]).toBe(0x314d4246);
+    expect(header[1]).toBe(1);
+    expect(header[2]).toBe(bangs.length);
+    expect(header[3]).toBe(bangs.filter((bang) => bang.regex).length);
+    expect(header[5]).toBe(binary.byteLength);
+
+    const catalog = decodeBangCatalog(binary);
+    expect(catalog.entries).toHaveLength(bangs.length);
+    for (let i = 0; i < bangs.length; i += 100) {
+      expect(catalog.entries[i]).toMatchObject({
+        capture: Boolean(bangs[i].regex),
+        domain: bangs[i].domain,
+        name: bangs[i].name,
+        trigger: bangs[i].trigger,
+      });
+    }
+  });
+
+  test("rejects malformed metadata fields, captures, and UTF-8", async () => {
+    const binary = await Bun.file("src/generated/bangs-meta.bin").arrayBuffer();
+    const header = new Uint32Array(binary, 0, 6);
+
+    const invalidCapture = binary.slice(0);
+    new Uint32Array(invalidCapture, 24, header[3])[0] = header[2];
+    expect(() => decodeBangCatalog(invalidCapture)).toThrow(
+      "Invalid bang metadata capture indexes"
+    );
+
+    const invalidFields = binary.slice(0);
+    new Uint8Array(invalidFields)[invalidFields.byteLength - 1] = 1;
+    expect(() => decodeBangCatalog(invalidFields)).toThrow(
+      "Invalid bang metadata fields"
+    );
+
+    const invalidUtf8 = binary.slice(0);
+    new Uint8Array(invalidUtf8)[header[4]] = 0xff;
+    expect(() => decodeBangCatalog(invalidUtf8)).toThrow();
   });
 
   test("rejects invalid binary lookup metadata", async () => {

@@ -33,7 +33,8 @@ export function configureBangDataAsset(
 }
 
 export async function bundleUI(
-  allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled()
+  allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled(),
+  bangMetaAsset = "/bangs-meta.bin"
 ) {
   const [appBuild, benchBuild] = await Promise.all([
     Bun.build({
@@ -48,6 +49,7 @@ export async function bundleUI(
         __ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS__: JSON.stringify(
           allowUnsafeCustomSuggestUrls
         ),
+        __BANG_META_ASSET__: JSON.stringify(bangMetaAsset),
       },
     }),
     Bun.build({

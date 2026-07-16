@@ -80,7 +80,7 @@ flashbang/
 │   ├── generated/             # Output of codegen (gitignored, generated from data/bangs.json)
 │   │   ├── bangs.bin          # packed trigger→URL data for Service Worker
 │   │   ├── bangs-sparse.js    # advanced bang and snap override lookups
-│   │   ├── bangs-meta.js      # trigger→{name, domain} for UI
+│   │   ├── bangs-meta.bin     # packed trigger/name/domain catalog for UI
 │   │   ├── bangs-trie.js      # radix trie for prefix-matched bang suggestions
 │   │   └── *.d.ts             # TypeScript declarations for each generated .js file
 │   ├── sw/
@@ -93,6 +93,7 @@ flashbang/
 │       ├── index.html         # HTML template
 │       ├── app.ts             # Initialization & orchestration
 │       ├── bang-catalog.ts    # Shared normalized bang metadata and bounded search
+│       ├── bang-meta.ts       # Packed metadata validation and cursor decoder
 │       ├── suggest-provider.ts # Suggestion provider feature availability
 │       ├── bench/
 │       │   ├── index.html     # Benchmark page
@@ -196,7 +197,7 @@ bunx playwright install
 3. **Generate** — Produces the following artifacts in `src/generated/` from the merged data:
    - `bangs.bin` — packed regular bang lookup data for the Service Worker
    - `bangs-sparse.js` — sparse capture and snap override lookups for the Service Worker
-   - `bangs-meta.js` — trigger→{name, domain} for the UI
+   - `bangs-meta.bin` — packed trigger/name/domain catalog for the UI
    - `bangs-trie.js` — radix trie for prefix-matched bang suggestions
    - plus matching `*.d.ts` declaration files for all generated modules
 
@@ -228,7 +229,7 @@ On **self-hosted** (Docker/Railway via `start.ts`), the Bun server sets headers 
 `bun run build` bundles the app:
 
 1. **Bundle UI + bench** — Bun bundles `src/ui/app.ts` (with code splitting) to `dist/app.js` plus lazy chunks, and bundles `src/ui/bench/index.ts` to `dist/bench.js`. Every app chunk is marked as a required offline dependency regardless of size; benchmark assets remain optional.
-2. **Bundle Service Worker** — Bun bundles `src/sw/sw.ts` and the sparse generated lookups into `dist/sw.js`, then copies `bangs.bin` to a content-hashed production path. The path is injected into the worker and HTML preload tags, and receives immutable cache headers. Hashes of the binary, precached assets, and a preliminary Service Worker bundle determine the injected cache version. The worker caches the binary before activating, then removes old versioned caches.
+2. **Bundle Service Worker** — Bun bundles `src/sw/sw.ts` and the sparse generated lookups into `dist/sw.js`, then copies `bangs.bin` and `bangs-meta.bin` to content-hashed production paths. The lookup path is injected into the worker and HTML preload tags; the metadata path is injected into the UI bundle and included in deferred precaching. Both receive immutable cache headers. Hashes of the binaries, precached assets, and a preliminary Service Worker bundle determine the injected cache version. The worker caches lookup data before activating, then removes old versioned caches.
 3. **Generate CSS** — UnoCSS scans `src/ui/**/*.ts`, `src/ui/home/index.html`, and `src/ui/bench/index.html`, emitting atomic utility classes
 4. **Inline & minify HTML** — CSS is inlined into `<style>`, HTML is minified with `@minify-html/node`
 5. **Generate static-host headers** — Writes `dist/_headers` with shared security headers, per-page inline-script hashes, the stricter Service Worker CSP, and the OpenSearch content type
