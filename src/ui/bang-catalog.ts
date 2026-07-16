@@ -46,14 +46,19 @@ export function createBangMeta(
 
 export function loadBuiltinBangCatalog(): Promise<BangCatalog> {
   if (!catalogPromise) {
-    catalogPromise = fetch(BANG_META_ASSET).then(async (response) => {
-      if (!response.ok) {
-        throw new Error(
-          `Failed to load ${BANG_META_ASSET}: ${response.status} ${response.statusText}`
-        );
-      }
-      return decodeBangCatalog(await response.arrayBuffer());
-    });
+    catalogPromise = fetch(BANG_META_ASSET)
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(
+            `Failed to load ${BANG_META_ASSET}: ${response.status} ${response.statusText}`
+          );
+        }
+        return decodeBangCatalog(await response.arrayBuffer());
+      })
+      .catch((error) => {
+        catalogPromise = null;
+        throw error;
+      });
   }
   return catalogPromise;
 }
