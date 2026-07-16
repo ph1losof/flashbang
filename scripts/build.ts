@@ -112,10 +112,23 @@ async function main(): Promise<void> {
     .slice(0, 12);
   const bangDataAsset = `/bangs-${bangDataHash}.bin`;
   await Bun.write(`${DIST_DIR}${bangDataAsset}`, bangDataBytes);
+  const bangMetaBytes = await Bun.file("src/generated/bangs-meta.bin").bytes();
+  const bangMetaHash = createHash("sha256")
+    .update(bangMetaBytes)
+    .digest("hex")
+    .slice(0, 12);
+  const bangMetaAsset = `/bangs-meta-${bangMetaHash}.bin`;
+  await Bun.write(`${DIST_DIR}${bangMetaAsset}`, bangMetaBytes);
 
   console.log("=== Bundle app + bench (to discover chunks) ===");
-  const { appOutputs } = await bundleUI(allowUnsafeCustomSuggestUrls);
-  const requiredAppAssets = requiredAppAssetPaths(appOutputs);
+  const { appOutputs } = await bundleUI(
+    allowUnsafeCustomSuggestUrls,
+    bangMetaAsset
+  );
+  const requiredAppAssets = [
+    ...requiredAppAssetPaths(appOutputs),
+    bangMetaAsset,
+  ].sort();
 
   if (requiredAppAssets.length) {
     console.log(`Required app assets: ${requiredAppAssets.join(", ")}`);
@@ -214,6 +227,9 @@ async function main(): Promise<void> {
       `  ${swCspHeader}`,
       "",
       bangDataAsset,
+      "  Cache-Control: public, max-age=31536000, immutable",
+      "",
+      bangMetaAsset,
       "  Cache-Control: public, max-age=31536000, immutable",
       "",
       "/opensearch.xml",

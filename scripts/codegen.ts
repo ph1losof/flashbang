@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { $ } from "bun";
 import {
   CAPTURE_ENCODE_PERCENT,
@@ -50,7 +50,7 @@ interface RawKagiEntry {
 export const GENERATED_BANG_DATA_FILES = [
   "src/generated/bangs.bin",
   "src/generated/bangs-sparse.js",
-  "src/generated/bangs-meta.js",
+  "src/generated/bangs-meta.bin",
   "src/generated/bangs-trie.js",
 ] as const;
 
@@ -388,6 +388,116 @@ function nextPow2(n: number): number {
   return p;
 }
 
+const MPH_SLOT_MULTIPLIER = 0x85ebca6b;
+const MPH_MAX_DISPLACEMENT = 1_000_000;
+
+function mphBucket(hash: number, mask: number): number {
+  return hash & mask;
+}
+
+function mphSlot(hash: number, displacement: number, size: number): number {
+  return (
+    (Math.imul(hash ^ (displacement + 1), MPH_SLOT_MULTIPLIER) >>> 0) % size
+  );
+}
+
+interface MinimalPerfectHash {
+  displacements: Int16Array | Int32Array;
+  slotToEntry: Uint16Array;
+}
+
+function buildMinimalPerfectHash(
+  triggers: readonly string[]
+): MinimalPerfectHash {
+  const entryCount = triggers.length;
+  if (entryCount === 0) {
+    throw new Error("Binary bang format requires at least one regular entry");
+  }
+  const bucketCount = nextPow2(Math.max(2, Math.ceil(entryCount / 4)));
+  const bucketMask = bucketCount - 1;
+  const hashes = Uint32Array.from(triggers, hashFNV1a);
+  const knownHashes = new Map<number, string>();
+  const buckets = Array.from({ length: bucketCount }, () => [] as number[]);
+  for (let i = 0; i < entryCount; i++) {
+    const hash = hashes[i];
+    const collision = knownHashes.get(hash);
+    if (collision !== undefined) {
+      throw new Error(
+        `Binary bang MPHF requires collision-free hashes: ${collision}, ${triggers[i]}`
+      );
+    }
+    knownHashes.set(hash, triggers[i]);
+    buckets[mphBucket(hash, bucketMask)].push(i);
+  }
+
+  const orderedBuckets = buckets
+    .map((entries, id) => ({ entries, id }))
+    .filter((bucket) => bucket.entries.length > 1)
+    .sort((a, b) => b.entries.length - a.entries.length || a.id - b.id);
+  const occupied = new Uint8Array(entryCount);
+  const seen = new Uint32Array(entryCount);
+  const slotToEntry = new Uint16Array(entryCount);
+  const wideDisplacements = new Int32Array(bucketCount);
+  wideDisplacements.fill(-1);
+  let stamp = 0;
+  let maxDisplacement = 0;
+
+  for (const bucket of orderedBuckets) {
+    let displacement = 0;
+    for (; displacement <= MPH_MAX_DISPLACEMENT; displacement++) {
+      stamp++;
+      let available = true;
+      for (const entry of bucket.entries) {
+        const slot = mphSlot(hashes[entry], displacement, entryCount);
+        if (occupied[slot] || seen[slot] === stamp) {
+          available = false;
+          break;
+        }
+        seen[slot] = stamp;
+      }
+      if (available) {
+        break;
+      }
+    }
+    if (displacement > MPH_MAX_DISPLACEMENT) {
+      throw new Error(`Unable to build binary bang MPHF bucket ${bucket.id}`);
+    }
+    wideDisplacements[bucket.id] = displacement;
+    maxDisplacement = Math.max(maxDisplacement, displacement);
+    for (const entry of bucket.entries) {
+      const slot = mphSlot(hashes[entry], displacement, entryCount);
+      occupied[slot] = 1;
+      slotToEntry[slot] = entry;
+    }
+  }
+
+  const freeSlots: number[] = [];
+  for (let slot = 0; slot < entryCount; slot++) {
+    if (!occupied[slot]) {
+      freeSlots.push(slot);
+    }
+  }
+  let freeOffset = 0;
+  for (let bucketId = 0; bucketId < buckets.length; bucketId++) {
+    const entries = buckets[bucketId];
+    if (entries.length !== 1) {
+      continue;
+    }
+    const slot = freeSlots[freeOffset++];
+    wideDisplacements[bucketId] = -(slot + 1);
+    slotToEntry[slot] = entries[0];
+  }
+  if (freeOffset !== freeSlots.length) {
+    throw new Error("Binary bang MPHF did not assign every slot");
+  }
+
+  const displacements =
+    entryCount <= 0x7fff && maxDisplacement <= 0x7fff
+      ? Int16Array.from(wideDisplacements)
+      : wideDisplacements;
+  return { displacements, slotToEntry };
+}
+
 function align2(value: number): number {
   return (value + 1) & ~1;
 }
@@ -511,7 +621,7 @@ function packBangData(bangs: Bang[]): PackedBangData {
 function copyTypedArray(
   output: Uint8Array,
   offset: number,
-  values: Uint8Array | Uint16Array
+  values: Uint8Array | Uint16Array | Int16Array | Int32Array
 ): number {
   output.set(
     new Uint8Array(values.buffer, values.byteOffset, values.byteLength),
@@ -522,33 +632,36 @@ function copyTypedArray(
 
 function generateBinary(bangs: readonly Bang[]): Uint8Array {
   const packed = packBangData(bangs.filter((bang) => !bang.regex));
+  const mph = buildMinimalPerfectHash(packed.triggers);
+  const triggers = Array.from(
+    mph.slotToEntry,
+    (entry) => packed.triggers[entry]
+  );
+  const reorderedPrefixIds = Array.from(
+    mph.slotToEntry,
+    (entry) => packed.prefixIds[entry]
+  );
+  const reorderedSuffixIds = Array.from(
+    mph.slotToEntry,
+    (entry) => packed.suffixIdsPlusOne[entry]
+  );
+  const triggerBlob = packBlob(triggers);
   const encoder = new TextEncoder();
-  const triggerBytes = encoder.encode(packed.triggerBlob.blob);
+  const triggerBytes = encoder.encode(triggerBlob.blob);
   const prefixBytes = encoder.encode(packed.prefixBlob.blob);
   const suffixBytes = encoder.encode(packed.suffixBlob.blob);
   const triggerLengths =
     packed.triggerLensKind === "u8"
-      ? Uint8Array.from(packed.triggerBlob.lengths)
-      : Uint16Array.from(packed.triggerBlob.lengths);
+      ? Uint8Array.from(triggerBlob.lengths)
+      : Uint16Array.from(triggerBlob.lengths);
   const prefixLengths = Uint16Array.from(packed.prefixBlob.lengths);
   const suffixLengths = Uint16Array.from(packed.suffixBlob.lengths);
-  const prefixIds = Uint16Array.from(packed.prefixIds);
-  const suffixIds = Uint16Array.from(packed.suffixIdsPlusOne);
+  const prefixIds = Uint16Array.from(reorderedPrefixIds);
+  const suffixIds = Uint16Array.from(reorderedSuffixIds);
 
-  const hashSize = nextPow2(Math.max(2, Math.ceil(packed.entryCount / 0.55)));
-  const hashTable = new Uint16Array(hashSize);
-  const hashMask = hashSize - 1;
-  for (let i = 0; i < packed.triggers.length; i++) {
-    let slot = hashFNV1a(packed.triggers[i]) & hashMask;
-    while (hashTable[slot] !== 0) {
-      slot = (slot + 1) & hashMask;
-    }
-    hashTable[slot] = i + 1;
-  }
-
-  const headerWords = 12;
+  const headerWords = 13;
   const headerBytes = headerWords * Uint32Array.BYTES_PER_ELEMENT;
-  let numericEnd = headerBytes + hashTable.byteLength;
+  let numericEnd = headerBytes + mph.displacements.byteLength;
   numericEnd += triggerLengths.byteLength;
   numericEnd = align2(numericEnd);
   numericEnd +=
@@ -564,9 +677,9 @@ function generateBinary(bangs: readonly Bang[]): Uint8Array {
   const output = new Uint8Array(new ArrayBuffer(totalBytes));
   new Uint32Array(output.buffer, 0, headerWords).set([
     0x31424246,
-    1,
+    2,
     packed.entryCount,
-    hashSize,
+    mph.displacements.length,
     packed.triggerLensKind === "u8" ? 1 : 2,
     packed.uniquePrefixes.length,
     packed.uniqueSuffixes.length,
@@ -575,10 +688,11 @@ function generateBinary(bangs: readonly Bang[]): Uint8Array {
     suffixBytes.byteLength,
     numericEnd,
     totalBytes,
+    mph.displacements.BYTES_PER_ELEMENT,
   ]);
 
   let offset = headerBytes;
-  offset = copyTypedArray(output, offset, hashTable);
+  offset = copyTypedArray(output, offset, mph.displacements);
   offset = copyTypedArray(output, offset, triggerLengths);
   offset = align2(offset);
   offset = copyTypedArray(output, offset, prefixLengths);
@@ -723,24 +837,45 @@ function generateSparse(bangs: readonly Bang[]): string {
   );
 }
 
-function generateMeta(bangs: Bang[]): string {
-  let json = "[";
+function generateMeta(bangs: Bang[]): Uint8Array {
+  const fields: string[] = [];
   const captureIndexes: number[] = [];
   for (let i = 0; i < bangs.length; i++) {
-    if (i > 0) {
-      json += ",";
-    }
     const b = bangs[i];
-    json += `"${jsonEscape(b.trigger)}","${jsonEscape(b.name)}","${jsonEscape(b.domain)}"`;
+    for (const value of [b.trigger, b.name, b.domain]) {
+      if (value.includes("\0")) {
+        throw new Error(`Bang metadata contains NUL: ${b.trigger}`);
+      }
+      fields.push(value);
+    }
     if (b.regex) {
       captureIndexes.push(i);
     }
   }
-  json += "]";
-  return (
-    `export const BANGS=JSON.parse('${jsEscape(json)}');` +
-    `export const CAPTURE_INDEXES=[${captureIndexes.join(",")}];`
+
+  const payload = new TextEncoder().encode(
+    fields.length === 0 ? "" : `${fields.join("\0")}\0`
   );
+  const headerWords = 6;
+  const payloadOffset =
+    headerWords * Uint32Array.BYTES_PER_ELEMENT +
+    captureIndexes.length * Uint32Array.BYTES_PER_ELEMENT;
+  const output = new Uint8Array(payloadOffset + payload.byteLength);
+  new Uint32Array(output.buffer, 0, headerWords).set([
+    0x314d4246,
+    1,
+    bangs.length,
+    captureIndexes.length,
+    payloadOffset,
+    output.byteLength,
+  ]);
+  new Uint32Array(
+    output.buffer,
+    headerWords * Uint32Array.BYTES_PER_ELEMENT,
+    captureIndexes.length
+  ).set(captureIndexes);
+  output.set(payload, payloadOffset);
+  return output;
 }
 
 type TrieNode = BuildNode<Bang>;
@@ -752,6 +887,8 @@ const NODE_MAX_RELEVANCE = 3;
 const NODE_STRIDE = 4;
 
 const EDGE_CHILD_INDEX = 2;
+const EDGE_LABEL_LENGTH = 1;
+const EDGE_LABEL_START = 0;
 const EDGE_STRIDE = 3;
 
 interface FlatTrieData {
@@ -766,12 +903,18 @@ interface FlatTrieData {
 
 interface PackedStringData {
   blob: string;
-  offsets: number[];
+  lengths: number[];
 }
 
-interface PackedI32Data {
+interface PackedUnsignedSection {
+  length: number;
+  offset: number;
+  reader: "_u8" | "_u16" | "_u32";
+}
+
+interface PackedUnsignedData {
   base64: string;
-  offsets: number[];
+  sections: PackedUnsignedSection[];
 }
 
 const TRIE_RUNTIME_HELPERS_SOURCE = `
@@ -792,14 +935,36 @@ function _b64bytes(s: string): Uint8Array {
   throw new Error("No base64 decoder available");
 }
 
-function _b64i32(s: string): Int32Array {
-  const b = _b64bytes(s);
-  if ((b.byteOffset & 3) === 0) {
-    return new Int32Array(b.buffer, b.byteOffset, b.byteLength >>> 2);
+function _u8(b: Uint8Array, offset: number, length: number): Uint8Array {
+  return new Uint8Array(b.buffer, b.byteOffset + offset, length);
+}
+
+function _u16(b: Uint8Array, offset: number, length: number): Uint16Array {
+  const byteOffset = b.byteOffset + offset;
+  if ((byteOffset & 1) === 0) {
+    return new Uint16Array(b.buffer, byteOffset, length);
   }
-  const a = new Uint8Array(b.byteLength);
-  a.set(b);
-  return new Int32Array(a.buffer);
+  const copy = new Uint8Array(length * 2);
+  copy.set(b.subarray(offset, offset + copy.byteLength));
+  return new Uint16Array(copy.buffer);
+}
+
+function _u32(b: Uint8Array, offset: number, length: number): Uint32Array {
+  const byteOffset = b.byteOffset + offset;
+  if ((byteOffset & 3) === 0) {
+    return new Uint32Array(b.buffer, byteOffset, length);
+  }
+  const copy = new Uint8Array(length * 4);
+  copy.set(b.subarray(offset, offset + copy.byteLength));
+  return new Uint32Array(copy.buffer);
+}
+
+function _offsets(lengths: Uint8Array | Uint16Array | Uint32Array): Int32Array {
+  const out = new Int32Array(lengths.length + 1);
+  for (let i = 0; i < lengths.length; i++) {
+    out[i + 1] = out[i] + lengths[i];
+  }
+  return out;
 }
 `;
 
@@ -867,31 +1032,63 @@ function flattenTrie(root: TrieNode): FlatTrieData {
 }
 
 function packStrings(items: string[]): PackedStringData {
-  const offsets = new Array<number>(items.length + 1);
-  offsets[0] = 0;
-  let cursor = 0;
+  const lengths = new Array<number>(items.length);
   for (let i = 0; i < items.length; i++) {
-    cursor += items[i].length;
-    offsets[i + 1] = cursor;
+    lengths[i] = items[i].length;
   }
-  return { blob: items.join(""), offsets };
+  return { blob: items.join(""), lengths };
 }
 
-function packI32Sections(sections: number[][]): PackedI32Data {
-  const offsets = new Array<number>(sections.length + 1);
-  offsets[0] = 0;
-  for (let i = 0; i < sections.length; i++) {
-    offsets[i + 1] = offsets[i] + sections[i].length;
+function narrowUnsigned(values: readonly number[]): {
+  data: Uint8Array | Uint16Array | Uint32Array;
+  reader: PackedUnsignedSection["reader"];
+} {
+  let max = 0;
+  for (const value of values) {
+    if (!(Number.isInteger(value) && value >= 0 && value <= 0xffff_ffff)) {
+      throw new Error(`Cannot pack unsigned integer: ${value}`);
+    }
+    if (value > max) {
+      max = value;
+    }
+  }
+  if (max <= 0xff) {
+    return { data: Uint8Array.from(values), reader: "_u8" };
+  }
+  if (max <= 0xffff) {
+    return { data: Uint16Array.from(values), reader: "_u16" };
+  }
+  return { data: Uint32Array.from(values), reader: "_u32" };
+}
+
+function packUnsignedSections(
+  sections: readonly number[][]
+): PackedUnsignedData {
+  const packed = sections.map(narrowUnsigned);
+  const metadata: PackedUnsignedSection[] = [];
+  let byteLength = 0;
+  for (const section of packed) {
+    const width = section.data.BYTES_PER_ELEMENT;
+    byteLength = (byteLength + width - 1) & ~(width - 1);
+    metadata.push({
+      length: section.data.length,
+      offset: byteLength,
+      reader: section.reader,
+    });
+    byteLength += section.data.byteLength;
   }
 
-  const merged = new Int32Array(offsets[offsets.length - 1]);
-  for (let i = 0; i < sections.length; i++) {
-    merged.set(sections[i], offsets[i]);
+  const output = new Uint8Array(byteLength);
+  for (let i = 0; i < packed.length; i++) {
+    const data = packed[i].data;
+    output.set(
+      new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
+      metadata[i].offset
+    );
   }
-
   return {
-    base64: Buffer.from(new Uint8Array(merged.buffer)).toString("base64"),
-    offsets,
+    base64: Buffer.from(output).toString("base64"),
+    sections: metadata,
   };
 }
 
@@ -903,7 +1100,7 @@ function buildMinifiedTrieRuntimeHelpers(): string {
     minifyWhitespace: true,
   });
   const minified = transpiler.transformSync(TRIE_RUNTIME_HELPERS_SOURCE).trim();
-  if (!minified.includes("function _b64i32(")) {
+  if (!minified.includes("function _b64bytes(")) {
     throw new Error("Failed to build trie runtime helpers");
   }
   return minified;
@@ -913,32 +1110,64 @@ function generateTrie(data: FlatTrieData, trieRuntimeHelpers: string): string {
   const termK = packStrings(data.termK);
   const termS = packStrings(data.termS);
   const termD = packStrings(data.termD);
-  const i32 = packI32Sections([
-    data.nodes,
-    data.edges,
+  const nodeCount = data.nodes.length / NODE_STRIDE;
+  const edgeCount = data.edges.length / EDGE_STRIDE;
+  const nodeEdgeStarts = new Array<number>(nodeCount);
+  const nodeEdgeCounts = new Array<number>(nodeCount);
+  const nodeTerminalIds = new Array<number>(nodeCount);
+  const nodeMaxRelevance = new Array<number>(nodeCount);
+  for (let i = 0; i < nodeCount; i++) {
+    const offset = i * NODE_STRIDE;
+    nodeEdgeStarts[i] = data.nodes[offset + NODE_EDGE_START];
+    nodeEdgeCounts[i] = data.nodes[offset + NODE_EDGE_COUNT];
+    nodeTerminalIds[i] = data.nodes[offset + NODE_TERMINAL_INDEX] + 1;
+    nodeMaxRelevance[i] = data.nodes[offset + NODE_MAX_RELEVANCE];
+  }
+
+  const edgeLabelStarts = new Array<number>(edgeCount);
+  const edgeLabelLengths = new Array<number>(edgeCount);
+  const edgeChildren = new Array<number>(edgeCount);
+  for (let i = 0; i < edgeCount; i++) {
+    const offset = i * EDGE_STRIDE;
+    edgeLabelStarts[i] = data.edges[offset + EDGE_LABEL_START];
+    edgeLabelLengths[i] = data.edges[offset + EDGE_LABEL_LENGTH];
+    edgeChildren[i] = data.edges[offset + EDGE_CHILD_INDEX];
+  }
+
+  const packed = packUnsignedSections([
+    nodeEdgeStarts,
+    nodeEdgeCounts,
+    nodeTerminalIds,
+    nodeMaxRelevance,
+    edgeLabelStarts,
+    edgeLabelLengths,
+    edgeChildren,
     data.termR,
-    termK.offsets,
-    termS.offsets,
-    termD.offsets,
+    termK.lengths,
+    termS.lengths,
+    termD.lengths,
   ]);
-  const [nodesStart, nodesEnd, edgesEnd, termREnd, termKOffEnd, termSOffEnd] =
-    i32.offsets;
+  const views = packed.sections.map(
+    (section, index) =>
+      `const _V${index}=${section.reader}(_B,${section.offset},${section.length});`
+  );
 
   return (
-    // NOTE: base64-decoded typed arrays avoid tokenizing huge numeric literals.
-    // All numeric arrays share one backing buffer to minimize decode overhead.
     trieRuntimeHelpers +
+    `const _B=_b64bytes('${packed.base64}');` +
+    views.join("") +
+    `export const NODES=new Int32Array(${data.nodes.length});` +
+    `for(let i=0;i<${nodeCount};i++){const o=i*${NODE_STRIDE};NODES[o]=_V0[i];NODES[o+1]=_V1[i];NODES[o+2]=_V2[i]-1;NODES[o+3]=_V3[i]}` +
+    `export const EDGES=new Int32Array(${data.edges.length});` +
+    `for(let i=0;i<${edgeCount};i++){const o=i*${EDGE_STRIDE};EDGES[o]=_V4[i];EDGES[o+1]=_V5[i];EDGES[o+2]=_V6[i]}` +
+    "export const TERM_R=Int32Array.from(_V7);" +
     `export const LABELS='${jsEscape(data.labels)}';` +
-    `const _I32=_b64i32('${i32.base64}');` +
-    `export const NODES=_I32.subarray(${nodesStart},${nodesEnd});` +
-    `export const EDGES=_I32.subarray(${nodesEnd},${edgesEnd});` +
-    `export const TERM_R=_I32.subarray(${edgesEnd},${termREnd});` +
     `export const TERM_K_BLOB='${jsEscape(termK.blob)}';` +
-    `export const TERM_K_OFF=_I32.subarray(${termREnd},${termKOffEnd});` +
+    "export const TERM_K_OFF=_offsets(_V8);" +
     `export const TERM_S_BLOB='${jsEscape(termS.blob)}';` +
-    `export const TERM_S_OFF=_I32.subarray(${termKOffEnd},${termSOffEnd});` +
+    "export const TERM_S_OFF=_offsets(_V9);" +
     `export const TERM_D_BLOB='${jsEscape(termD.blob)}';` +
-    `export const TERM_D_OFF=_I32.subarray(${termSOffEnd},${i32.offsets[6]});` +
+    "export const TERM_D_OFF=_offsets(_V10);" +
     "export const ROOT=0;"
   );
 }
@@ -1019,7 +1248,7 @@ async function loadBangs(options: CodegenOptions): Promise<Bang[]> {
 
 interface GeneratedArtifacts {
   binary: Uint8Array;
-  metaJs: string;
+  meta: Uint8Array;
   sparseJs: string;
   trieJs: string;
 }
@@ -1034,7 +1263,7 @@ function buildGeneratedArtifacts(bangs: Bang[]): GeneratedArtifacts {
   const trieRuntimeHelpers = buildMinifiedTrieRuntimeHelpers();
   return {
     binary: generateBinary(bangs),
-    metaJs: generateMeta(bangs),
+    meta: generateMeta(bangs),
     sparseJs: generateSparse(bangs),
     trieJs: generateTrie(trieData, trieRuntimeHelpers),
   };
@@ -1045,27 +1274,21 @@ async function writeGeneratedArtifacts(
   artifacts: GeneratedArtifacts
 ): Promise<void> {
   await Promise.all([
+    rm(`${outDir}/bangs-meta.js`, { force: true }),
+    rm(`${outDir}/bangs-meta.d.ts`, { force: true }),
     Bun.write(`${outDir}/bangs.bin`, artifacts.binary),
-    Bun.write(`${outDir}/bangs-meta.js`, artifacts.metaJs),
+    Bun.write(`${outDir}/bangs-meta.bin`, artifacts.meta),
     Bun.write(`${outDir}/bangs-sparse.js`, artifacts.sparseJs),
     Bun.write(`${outDir}/bangs-trie.js`, artifacts.trieJs),
   ]);
   console.log(`  bangs.bin: ${artifacts.binary.byteLength} bytes`);
-  console.log(`  bangs-meta.js: ${artifacts.metaJs.length} bytes`);
+  console.log(`  bangs-meta.bin: ${artifacts.meta.byteLength} bytes`);
   console.log(`  bangs-sparse.js: ${artifacts.sparseJs.length} bytes`);
   console.log(`  bangs-trie.js: ${artifacts.trieJs.length} bytes`);
 }
 
 async function writeGeneratedDeclarations(outDir: string): Promise<void> {
   await Promise.all([
-    Bun.write(
-      `${outDir}/bangs-meta.d.ts`,
-      [
-        "export declare const BANGS: readonly string[];",
-        "export declare const CAPTURE_INDEXES: readonly number[];",
-        "",
-      ].join("\n")
-    ),
     Bun.write(
       `${outDir}/bangs-sparse.d.ts`,
       [

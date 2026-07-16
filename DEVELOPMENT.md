@@ -13,7 +13,7 @@ Playwright browsers are required for end-to-end tests (`bunx playwright install`
 bun install        # install dependencies
 bun run check      # format + lint check (fails on issues)
 bun run fix        # auto-fix format + lint issues
-bun run codegen    # fetch DDG/Kagi sources, merge, and generate bang maps
+bun run codegen    # fetch DDG/Kagi sources, merge, and generate bang artifacts
 bun run build      # install locked dependencies, then bundle, minify + pre-compress with Brotli (auto-runs codegen --from-merged if generated bang files are missing)
 bun run dev        # bundle + dev server with file watching & live reload (auto-runs codegen if needed)
 bun run start      # serve pre-built dist/ (run `bun run build` first)
@@ -47,7 +47,7 @@ flashbang/
 │   ├── suggest.ts            # Cloudflare Pages Function for /suggest
 │   └── opensearch.xml.ts     # Cloudflare Pages Function for /opensearch.xml
 ├── scripts/
-│   ├── codegen.ts            # Fetch sources, parse, merge, generate bang maps
+│   ├── codegen.ts            # Fetch sources, parse, merge, generate bang artifacts
 │   ├── build.ts              # Bundle + minify pipeline
 │   ├── dev.ts                # Dev server with file watching, rebuild & live reload
 │   ├── profile.ts            # Profiling script
@@ -80,7 +80,7 @@ flashbang/
 │   ├── generated/             # Output of codegen (gitignored, generated from data/bangs.json)
 │   │   ├── bangs.bin          # packed trigger→URL data for Service Worker
 │   │   ├── bangs-sparse.js    # advanced bang and snap override lookups
-│   │   ├── bangs-meta.js      # trigger→{name, domain} for UI
+│   │   ├── bangs-meta.bin     # packed trigger/name/domain catalog for UI
 │   │   ├── bangs-trie.js      # radix trie for prefix-matched bang suggestions
 │   │   └── *.d.ts             # TypeScript declarations for each generated .js file
 │   ├── sw/
@@ -93,6 +93,7 @@ flashbang/
 │       ├── index.html         # HTML template
 │       ├── app.ts             # Initialization & orchestration
 │       ├── bang-catalog.ts    # Shared normalized bang metadata and bounded search
+│       ├── bang-meta.ts       # Packed metadata validation and cursor decoder
 │       ├── suggest-provider.ts # Suggestion provider feature availability
 │       ├── bench/
 │       │   ├── index.html     # Benchmark page
@@ -196,13 +197,17 @@ bunx playwright install
 3. **Generate** — Produces the following artifacts in `src/generated/` from the merged data:
    - `bangs.bin` — packed regular bang lookup data for the Service Worker
    - `bangs-sparse.js` — sparse capture and snap override lookups for the Service Worker
-   - `bangs-meta.js` — trigger→{name, domain} for the UI
+   - `bangs-meta.bin` — packed trigger/name/domain catalog for the UI
    - `bangs-trie.js` — radix trie for prefix-matched bang suggestions
    - plus matching `*.d.ts` declaration files for all generated modules
 
 The `--from-merged` flag skips steps 1–2 and generates directly from the committed `data/bangs.json`. This is what CI builds use — no network fetch needed. The generated directory is gitignored; `data/bangs.json` is the committed build input.
 
-The bang data is split into two tiers so the Service Worker loads only what it needs for fast redirects, while the UI gets the full metadata for searching and display.
+The generated data is split by consumer. The Service Worker loads the regular lookup binary plus sparse executable capture/snap lookups, the UI fetches metadata only when its catalog is first needed, and the suggestion endpoint uses the generated radix trie.
+
+`bangs.bin` stores regular records directly in deterministic CHD-style minimal-perfect-hash slot order. Codegen derives the table from each trigger's FNV-1a hash, rejects known-key hash collisions, and emits 16- or 32-bit bucket displacements. Runtime lookup computes one slot without probing, verifies the selected trigger so unknown keys cannot produce false matches, and lazily materializes and caches URL tuples.
+
+`bangs-meta.bin` has a versioned header, sparse capture indexes, and NUL-delimited UTF-8 trigger/name/domain fields in source order. `src/ui/bang-meta.ts` validates and cursor-decodes it when the UI catalog is first requested, avoiding an intermediate field array while preserving catalog order.
 
 ## Advanced bangs and snap targets
 
@@ -228,17 +233,17 @@ On **self-hosted** (Docker/Railway via `start.ts`), the Bun server sets headers 
 `bun run build` bundles the app:
 
 1. **Bundle UI + bench** — Bun bundles `src/ui/app.ts` (with code splitting) to `dist/app.js` plus lazy chunks, and bundles `src/ui/bench/index.ts` to `dist/bench.js`. Every app chunk is marked as a required offline dependency regardless of size; benchmark assets remain optional.
-2. **Bundle Service Worker** — Bun bundles `src/sw/sw.ts` and the sparse generated lookups into `dist/sw.js`, then copies `bangs.bin` to a content-hashed production path. The path is injected into the worker and HTML preload tags, and receives immutable cache headers. Hashes of the binary, precached assets, and a preliminary Service Worker bundle determine the injected cache version. The worker caches the binary before activating, then removes old versioned caches.
+2. **Bundle Service Worker** — Bun bundles `src/sw/sw.ts` and the sparse generated lookups into `dist/sw.js`, then copies `bangs.bin` and `bangs-meta.bin` to content-hashed production paths. The lookup path is injected into the worker and HTML preload tags; the metadata path is injected into the UI bundle and included in deferred precaching. Both receive immutable cache headers. Hashes of the binaries, precached assets, and a preliminary Service Worker bundle determine the injected cache version. The worker caches lookup data before activating, then removes old versioned caches.
 3. **Generate CSS** — UnoCSS scans `src/ui/**/*.ts`, `src/ui/home/index.html`, and `src/ui/bench/index.html`, emitting atomic utility classes
 4. **Inline & minify HTML** — CSS is inlined into `<style>`, HTML is minified with `@minify-html/node`
 5. **Generate static-host headers** — Writes `dist/_headers` with shared security headers, per-page inline-script hashes, the stricter Service Worker CSP, and the OpenSearch content type
-6. **Pre-compress** — Eligible text assets are compressed with Brotli (max quality) and written as `.br` files alongside the originals. The production server serves these automatically when the client supports it, falling back to uncompressed
+6. **Pre-compress** — Eligible static assets, including both bang binaries, are compressed with Brotli (max quality) and written as `.br` files alongside the originals. The production server serves these automatically when the client supports it, falling back to uncompressed
 
 If generated bang artifacts are missing, both `bun run build` and `bun run profile` automatically run `bun run codegen --from-merged` first.
 
 ## Profiling
 
-`bun run profile` benchmarks generated lookup, redirect variants, suggestions, cookie/query parsing, first-hit isolation, and module evaluation. Use `bun run profile:quick` for a shorter directional pass and `bun run profile:cpu` for Bun CPU profiles.
+`bun run profile` benchmarks generated lookup, redirect variants, suggestions, cookie/query parsing, first-hit isolation, metadata decoding, and generated-module evaluation. Use `bun run profile:quick` for a shorter directional pass and `bun run profile:cpu` for Bun CPU profiles.
 
 The profiler can save and compare structured baselines:
 
@@ -281,7 +286,7 @@ The in-memory state (`frecencyCounts` plus `topFrecency` in `idb.ts`) is loaded 
 
 The Dockerfile uses a multi-stage build to produce a minimal runtime image:
 
-1. **Build stage** — Installs dependencies, runs `codegen --from-merged` to generate bang maps from `data/bangs.json`, then runs `build` to bundle and pre-compress all assets
+1. **Build stage** — Installs dependencies, runs `codegen --from-merged` to generate bang artifacts from `data/bangs.json`, then runs `build` to bundle and pre-compress all assets
 2. **Runtime stage** — Copies `dist/`, `scripts/start.ts`, and only the source modules needed at runtime for dynamic `/suggest` and `/opensearch.xml` handling (plus generated trie data). Dev dependencies are not installed in the final image
 
 The production server exposes `GET /health`, and the runtime image defines a Docker `HEALTHCHECK` against that endpoint.

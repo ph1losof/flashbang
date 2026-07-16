@@ -1623,8 +1623,12 @@ test("worker activation creates its cache and removes the old cache", async ({
   const builtBangDataAsset = workerSource.match(
     /\/bangs-[a-f0-9]{12}\.bin/
   )?.[0];
+  const builtBangMetaAsset = workerSource.match(
+    /\/bangs-meta-[a-f0-9]{12}\.bin/
+  )?.[0];
   expect(builtCacheName).toBeDefined();
   expect(builtBangDataAsset).toBeDefined();
+  expect(builtBangMetaAsset).toBeDefined();
   expect(indexSource).toContain(builtBangDataAsset!);
   const initialCacheName = "fb-e2e-initial";
   const lifecyclePage = await context.newPage();
@@ -1649,6 +1653,17 @@ test("worker activation creates its cache and removes the old cache", async ({
           return Boolean(await cache.match(assetPath));
         },
         { cacheName: builtCacheName!, assetPath: builtBangDataAsset! }
+      )
+    )
+    .toBe(true);
+  await expect
+    .poll(() =>
+      lifecyclePage.evaluate(
+        async ({ assetPath, cacheName }) => {
+          const cache = await caches.open(cacheName);
+          return Boolean(await cache.match(assetPath));
+        },
+        { cacheName: builtCacheName!, assetPath: builtBangMetaAsset! }
       )
     )
     .toBe(true);

@@ -60,6 +60,7 @@ async function build() {
 
   await Promise.all([
     Bun.write("dist/bangs.bin", Bun.file("src/generated/bangs.bin")),
+    Bun.write("dist/bangs-meta.bin", Bun.file("src/generated/bangs-meta.bin")),
     Bun.build({
       entrypoints: ["src/sw/sw.ts"],
       outdir: "dist",
@@ -70,11 +71,11 @@ async function build() {
       define: {
         __BANG_DATA_ASSET__: '"/bangs.bin"',
         __CACHE_VERSION__: '"flashbang-dev"',
-        __REQUIRED_APP_ASSETS__: "[]",
+        __REQUIRED_APP_ASSETS__: '["/bangs-meta.bin"]',
         __IS_DEV__: JSON.stringify(true),
       },
     }),
-    bundleUI(allowUnsafeCustomSuggestUrls),
+    bundleUI(allowUnsafeCustomSuggestUrls, "/bangs-meta.bin"),
   ]);
 
   await generateCSS(true);
@@ -86,7 +87,7 @@ async function build() {
 const generated = [
   Bun.file("src/generated/bangs.bin"),
   Bun.file("src/generated/bangs-sparse.js"),
-  Bun.file("src/generated/bangs-meta.js"),
+  Bun.file("src/generated/bangs-meta.bin"),
   Bun.file("src/generated/bangs-trie.js"),
 ];
 if (
