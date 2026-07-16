@@ -233,7 +233,7 @@ self.addEventListener("message", (e: ExtendableMessageEvent) => {
       if (cached) {
         resolve(cached);
       } else {
-        readRedirectSettings().then(resolve);
+        e.waitUntil(readRedirectSettings().then(resolve));
       }
     } else {
       e.waitUntil(

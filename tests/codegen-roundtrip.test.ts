@@ -4,7 +4,7 @@ import {
   lookupSnapOverride,
 } from "../src/generated/bangs-sparse.js";
 import { hashFNV1a } from "../src/shared/hash";
-import { lookupBang } from "../src/sw/bang-data";
+import { initializeBangData, lookupBang } from "../src/sw/bang-data";
 import { loadTestBangData } from "./helpers/bang-data";
 
 await loadTestBangData();
@@ -78,6 +78,20 @@ describe("codegen round-trip", () => {
     expect(header[1]).toBe(1);
     expect(header[2]).toBe(bangs.filter((bang) => !bang.regex).length);
     expect(header[11]).toBe(binary.byteLength);
+  });
+
+  test("rejects invalid binary lookup metadata", async () => {
+    const binary = await Bun.file("src/generated/bangs.bin").arrayBuffer();
+    for (const [word, value, message] of [
+      [3, 0, "Invalid binary bang hash table size"],
+      [3, 3, "Invalid binary bang hash table size"],
+      [4, 0, "Invalid binary bang trigger length width"],
+      [4, 3, "Invalid binary bang trigger length width"],
+    ] as const) {
+      const invalid = binary.slice(0);
+      new Uint32Array(invalid, 0, 12)[word] = value;
+      expect(() => initializeBangData(invalid)).toThrow(message);
+    }
   });
 
   test("regex bangs are emitted only through the sparse advanced lookup", () => {

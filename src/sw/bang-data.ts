@@ -33,6 +33,12 @@ export function initializeBangData(buffer: ArrayBuffer): void {
   const triggerLengthWidth = header[4];
   const prefixCount = header[5];
   const suffixCount = header[6];
+  if (hashSize === 0 || (hashSize & (hashSize - 1)) !== 0) {
+    throw new Error("Invalid binary bang hash table size");
+  }
+  if (triggerLengthWidth !== 1 && triggerLengthWidth !== 2) {
+    throw new Error("Invalid binary bang trigger length width");
+  }
   let offset = HEADER_BYTES;
 
   const hashTable = new Uint16Array(buffer, offset, hashSize);

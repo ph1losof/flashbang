@@ -382,7 +382,7 @@ import { hashFNV1a as fnvHash } from "../src/shared/hash";
 
 await ensureGeneratedBangData(true);
 const { initializeBangData, lookupBang } = await import("../src/sw/bang-data");
-initializeBangData(await Bun.file("src/generated/bangs.bin").arrayBuffer());
+initializeBangData(await Bun.file(binaryPath).arrayBuffer());
 
 const [
   { BANG_COUNT },
