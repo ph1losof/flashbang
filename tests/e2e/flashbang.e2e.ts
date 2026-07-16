@@ -481,7 +481,10 @@ test("homepage bang finder supports suffix bang and snap selection", async ({
   await expect(input).toHaveValue("Hello World");
 });
 
-test("compact address-bar setup exposes copyable URLs", async ({ page }) => {
+test("compact address-bar setup exposes browser instructions and copyable URLs", async ({
+  browserName,
+  page,
+}) => {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -507,6 +510,78 @@ test("compact address-bar setup exposes copyable URLs", async ({ page }) => {
   );
   await expect(page.locator("#setup-suggest-url")).toHaveValue(
     `${new URL(page.url()).origin}/suggest?q=%s`
+  );
+  const expectedBrowser = {
+    chromium: {
+      id: "chrome",
+      tab: "Chrome",
+      docsHost: "support.google.com",
+      settingsUrl: "chrome://settings/searchEngines",
+    },
+    firefox: {
+      id: "firefox",
+      tab: "Firefox",
+      docsHost: "support.mozilla.org",
+      settingsUrl: "about:preferences#search",
+    },
+    webkit: {
+      id: "safari",
+      tab: "Safari",
+      docsHost: "support.apple.com",
+      settingsUrl: null,
+    },
+  }[browserName];
+  await expect(
+    page.getByRole("tab", { name: expectedBrowser.tab, exact: true })
+  ).toHaveAttribute("aria-selected", "true");
+  const browserPanel = page.getByRole("tabpanel");
+  await expect(browserPanel).toHaveAttribute(
+    "aria-labelledby",
+    `setup-browser-tab-${expectedBrowser.id}`
+  );
+  await expect(page.locator("#setup-browser-steps li")).not.toHaveCount(0);
+  await expect(page.locator("#setup-browser-docs")).toHaveAttribute(
+    "href",
+    new RegExp(`^https://${expectedBrowser.docsHost.replaceAll(".", "\\.")}/`)
+  );
+  const settingsLink = page.locator("#setup-browser-steps a");
+  if (expectedBrowser.settingsUrl) {
+    await expect(settingsLink).toHaveAttribute(
+      "href",
+      expectedBrowser.settingsUrl
+    );
+    await settingsLink.click();
+    await expect(page.getByRole("tooltip")).toBeVisible();
+  } else {
+    await expect(settingsLink).toHaveCount(0);
+  }
+
+  await page.getByRole("tab", { name: "Edge" }).click();
+  await expect(page.getByRole("tab", { name: "Edge" })).toHaveAttribute(
+    "aria-selected",
+    "true"
+  );
+  await expect(browserPanel).toHaveAttribute(
+    "aria-labelledby",
+    "setup-browser-tab-edge"
+  );
+  await expect(page.locator("#setup-browser-steps a")).toHaveAttribute(
+    "href",
+    "edge://settings/searchEngines"
+  );
+  await expect(page.locator(".setup-browser-warning")).toBeVisible();
+  await expect(page.locator("#setup-browser-docs")).toHaveAttribute(
+    "href",
+    /^https:\/\/support\.microsoft\.com\//
+  );
+  await page.getByRole("tab", { name: "Edge" }).press("ArrowRight");
+  await expect(page.getByRole("tab", { name: "Firefox" })).toHaveAttribute(
+    "aria-selected",
+    "true"
+  );
+  await expect(browserPanel).toHaveAttribute(
+    "aria-labelledby",
+    "setup-browser-tab-firefox"
   );
 
   const cardBox = await page.locator("#setup-card").boundingBox();

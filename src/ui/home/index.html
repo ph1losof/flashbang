@@ -159,7 +159,7 @@
     >
       <div
         id="setup-card"
-        class="dialog-card relative w-full max-w-[460px] rounded-t-2xl border border-border bg-bg p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl shadow-black/50 sm:rounded-2xl sm:p-6"
+        class="dialog-card relative max-h-[calc(100dvh-1rem)] w-full max-w-[520px] overflow-y-auto rounded-t-2xl border border-border bg-bg p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl shadow-black/50 sm:max-h-[calc(100dvh-2rem)] sm:rounded-2xl sm:p-6"
         role="dialog"
         aria-modal="true"
         aria-labelledby="setup-title"
@@ -229,6 +229,40 @@
               </button>
             </div>
           </div>
+
+          <div
+            id="setup-browser-tabs"
+            class="flex flex-wrap gap-2"
+            role="tablist"
+            aria-label="Browser setup tabs"
+          ></div>
+
+          <section
+            id="setup-browser-panel"
+            class="rounded-xl border border-border bg-bg-secondary p-4"
+            aria-labelledby="setup-browser-heading"
+            role="tabpanel"
+          >
+            <h3
+              id="setup-browser-heading"
+              class="mb-2 text-sm font-semibold text-text"
+            >
+              <span id="setup-browser-name">Browser</span>
+              setup
+            </h3>
+            <ol
+              id="setup-browser-steps"
+              class="mb-3 space-y-1.5 pl-5 text-sm leading-relaxed text-text-secondary list-decimal"
+            ></ol>
+            <a
+              id="setup-browser-docs"
+              href="https://support.google.com/chrome/answer/95426?hl=en"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="text-sm font-medium text-text underline decoration-2 decoration-text-secondary underline-offset-4 hover:text-text-hover hover:decoration-text"
+              >View official browser setup docs</a
+            >
+          </section>
         </div>
         <span
           id="setup-copy-status"
