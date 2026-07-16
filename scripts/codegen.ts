@@ -354,6 +354,32 @@ function dedupeStrings(values: readonly string[]): {
   return { ids, unique };
 }
 
+function orderStringsByLength(values: readonly string[]): {
+  ordered: string[];
+  remap: number[];
+} {
+  const indexes = values.map((_, index) => index);
+  indexes.sort((a, b) => {
+    const lengthDifference = values[a].length - values[b].length;
+    if (lengthDifference !== 0) {
+      return lengthDifference;
+    }
+    if (values[a] < values[b]) {
+      return -1;
+    }
+    return values[a] > values[b] ? 1 : 0;
+  });
+
+  const ordered = new Array<string>(values.length);
+  const remap = new Array<number>(values.length);
+  for (let id = 0; id < indexes.length; id++) {
+    const oldId = indexes[id];
+    ordered[id] = values[oldId];
+    remap[oldId] = id;
+  }
+  return { ordered, remap };
+}
+
 function nextPow2(n: number): number {
   let p = 1;
   while (p < n) {
@@ -399,14 +425,14 @@ function packBangData(bangs: Bang[]): PackedBangData {
     rawSuffixes[i] = suffix;
   }
 
-  const { ids: prefixIds, unique: uniquePrefixes } = dedupeStrings(prefixes);
+  let { ids: prefixIds, unique: uniquePrefixes } = dedupeStrings(prefixes);
   if (uniquePrefixes.length > 0xffff) {
     throw new Error(
       `Binary bang format requires <= 65535 unique prefixes, got ${uniquePrefixes.length}`
     );
   }
 
-  const uniqueSuffixes: string[] = [];
+  let uniqueSuffixes: string[] = [];
   const suffixIdsPlusOne = new Array<number>(entryCount);
   const suffixMap = new Map<string, number>();
   for (let i = 0; i < entryCount; i++) {
@@ -429,6 +455,19 @@ function packBangData(bangs: Bang[]): PackedBangData {
     uniqueSuffixes.push(suffix);
     suffixMap.set(suffix, id);
     suffixIdsPlusOne[i] = id + 1;
+  }
+
+  const orderedPrefixes = orderStringsByLength(uniquePrefixes);
+  uniquePrefixes = orderedPrefixes.ordered;
+  prefixIds = prefixIds.map((id) => orderedPrefixes.remap[id]);
+
+  const orderedSuffixes = orderStringsByLength(uniqueSuffixes);
+  uniqueSuffixes = orderedSuffixes.ordered;
+  for (let i = 0; i < suffixIdsPlusOne.length; i++) {
+    const id = suffixIdsPlusOne[i];
+    if (id !== 0) {
+      suffixIdsPlusOne[i] = orderedSuffixes.remap[id - 1] + 1;
+    }
   }
 
   const triggerBlob = packBlob(triggers);
