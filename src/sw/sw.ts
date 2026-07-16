@@ -25,7 +25,7 @@ const LEGACY_CACHE_NAMES = new Set(["flashbang-dev"]);
 const CACHE_NAME = __CACHE_VERSION__.startsWith(CACHE_PREFIX)
   ? __CACHE_VERSION__
   : `${CACHE_PREFIX}${__CACHE_VERSION__}`;
-const REQUIRED_ASSETS = [
+const APP_ASSETS = [
   "/home",
   "/app.js",
   "/icon.svg",
@@ -33,9 +33,9 @@ const REQUIRED_ASSETS = [
   ...__REQUIRED_APP_ASSETS__,
 ];
 
-const OPTIONAL_ASSETS = ["/bench", "/bench.js"];
+const DEFERRED_ASSETS = [...APP_ASSETS, "/bench", "/bench.js"];
 const PRECACHE_CONCURRENCY = 4;
-let optionalPrecachePromise: Promise<void> | null = null;
+let deferredPrecachePromise: Promise<void> | null = null;
 let benchmarkClientId: string | null = null;
 const RESOLVED_PROMISE: Promise<void> = Promise.resolve();
 const swallowError = () => {
@@ -87,14 +87,14 @@ async function deleteOldCaches(cacheName: string): Promise<void> {
   );
 }
 
-function ensureOptionalPrecache(): Promise<void> {
-  if (optionalPrecachePromise) {
-    return optionalPrecachePromise;
+function ensureDeferredPrecache(): Promise<void> {
+  if (deferredPrecachePromise) {
+    return deferredPrecachePromise;
   }
-  optionalPrecachePromise = precacheAssets(CACHE_NAME, OPTIONAL_ASSETS).catch(
+  deferredPrecachePromise = precacheAssets(CACHE_NAME, DEFERRED_ASSETS).catch(
     swallowError
   );
-  return optionalPrecachePromise;
+  return deferredPrecachePromise;
 }
 
 function findQueryValueStart(raw: string): number {
@@ -154,9 +154,7 @@ function queueBangSideEffects(e: FetchEvent, trigger: string): void {
 }
 
 self.addEventListener("install", (e: ExtendableEvent) => {
-  e.waitUntil(
-    precacheAssets(CACHE_NAME, REQUIRED_ASSETS).then(() => self.skipWaiting())
-  );
+  e.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener("activate", (e: ExtendableEvent) => {
@@ -247,9 +245,9 @@ self.addEventListener("fetch", (e: FetchEvent) => {
     }
   }
 
-  // Redirect requests should not compete with optional UI asset warmup.
-  if (!optionalPrecachePromise) {
-    e.waitUntil(ensureOptionalPrecache());
+  // Redirect requests should not install or compete with UI assets.
+  if (!deferredPrecachePromise) {
+    e.waitUntil(ensureDeferredPrecache());
   }
 
   if (raw.endsWith("/bench")) {

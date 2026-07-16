@@ -204,7 +204,7 @@ afterEach(async () => {
 });
 
 describe("sw runtime with real modules", () => {
-  test("lifecycle deletes stale Flashbang caches and preserves unrelated caches", async () => {
+  test("lifecycle defers app precaching and preserves unrelated caches", async () => {
     await loadSwRuntime(["/chunk-catalog123.js"]);
     expect(typeof handlers.install).toBe("function");
     expect(typeof handlers.activate).toBe("function");
@@ -213,13 +213,7 @@ describe("sw runtime with real modules", () => {
     await handlers.install?.(installEvt.event);
     await Promise.all(installEvt.waits);
     expect(skipWaitingCalls).toBe(1);
-    expect(fetchCalls.toSorted()).toEqual([
-      "/app.js",
-      "/chunk-catalog123.js",
-      "/home",
-      "/icon.svg",
-      "/manifest.json",
-    ]);
+    expect(fetchCalls).toEqual([]);
 
     const activateEvt = createExtendableEvent();
     await handlers.activate?.(activateEvt.event);
@@ -229,9 +223,23 @@ describe("sw runtime with real modules", () => {
     expect(swIdb.getTopFrecencyRecord()).toEqual({ g: 2 });
     expect(cacheDeleteCalls).toEqual(["fb-old-cache", "flashbang-dev"]);
     expect(cacheDeleteCalls).not.toContain("other-cache");
+
+    const fetchEvt = createFetchEvent("https://flashbang.local/home");
+    await handlers.fetch?.(fetchEvt.event);
+    await Promise.all(fetchEvt.waits);
+    await fetchEvt.response();
+    expect([...new Set(fetchCalls)].toSorted()).toEqual([
+      "/app.js",
+      "/bench",
+      "/bench.js",
+      "/chunk-catalog123.js",
+      "/home",
+      "/icon.svg",
+      "/manifest.json",
+    ]);
   });
 
-  test("does not activate when a required app asset cannot be cached", async () => {
+  test("does not block installation when deferred app precaching fails", async () => {
     await loadSwRuntime(["/chunk-catalog123.js"]);
     fetchImpl = (input) => {
       const raw =
@@ -244,9 +252,15 @@ describe("sw runtime with real modules", () => {
 
     const installEvt = createExtendableEvent();
     await handlers.install?.(installEvt.event);
-    await expect(Promise.all(installEvt.waits)).rejects.toThrow("offline");
-    expect(skipWaitingCalls).toBe(0);
-    expect(cacheDeleteCalls).toEqual([]);
+    await Promise.all(installEvt.waits);
+    expect(skipWaitingCalls).toBe(1);
+    expect(fetchCalls).toEqual([]);
+
+    const fetchEvt = createFetchEvent("https://flashbang.local/home");
+    await handlers.fetch?.(fetchEvt.event);
+    await Promise.all(fetchEvt.waits);
+    await fetchEvt.response();
+    expect(fetchCalls).toContain("/chunk-catalog123.js");
   });
 
   test("message redirect and invalidate paths work end-to-end", async () => {
@@ -286,8 +300,8 @@ describe("sw runtime with real modules", () => {
     );
   });
 
-  test("fetch q= path responds with redirect without optional precaching", async () => {
-    await loadSwRuntime();
+  test("fetch q= path redirects without deferred app precaching", async () => {
+    await loadSwRuntime(["/chunk-catalog123.js"]);
     expect(typeof handlers.fetch).toBe("function");
 
     for (const url of [
@@ -302,6 +316,7 @@ describe("sw runtime with real modules", () => {
       expect(location).toContain("google.com");
       expect(new URL(location!).searchParams.get("q")).toBe("hello");
       expect(fetchEvt.waits).toHaveLength(0);
+      expect(fetchCalls).toEqual([]);
     }
   });
 
