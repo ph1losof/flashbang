@@ -28,15 +28,27 @@ describe("bang catalog", () => {
     ]);
   });
 
-  test("normalizes built-ins once and reuses the catalog", async () => {
-    const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(Bun.file("src/generated/bangs-meta.bin"))
-    );
-    const first = loadBuiltinBangCatalog();
-    const second = loadBuiltinBangCatalog();
-    expect(first).toBe(second);
+  test("retries failures, then normalizes built-ins once", async () => {
+    let attempts = 0;
+    const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(() => {
+      attempts++;
+      return Promise.resolve(
+        attempts === 1
+          ? new Response(null, { status: 503, statusText: "Unavailable" })
+          : new Response(Bun.file("src/generated/bangs-meta.bin"))
+      );
+    });
 
     try {
+      const failed = loadBuiltinBangCatalog();
+      expect(loadBuiltinBangCatalog()).toBe(failed);
+      await expect(failed).rejects.toThrow(
+        "Failed to load /bangs-meta.bin: 503 Unavailable"
+      );
+
+      const first = loadBuiltinBangCatalog();
+      const second = loadBuiltinBangCatalog();
+      expect(first).toBe(second);
       const catalog = await first;
       expect(catalog.entries).toHaveLength(BANG_COUNT);
       const google = catalog.byTrigger.get("g");
@@ -45,6 +57,7 @@ describe("bang catalog", () => {
       expect(catalog.byTrigger.get("ktr")?.capture).toBe(true);
       expect(catalog.entries).toContain(google);
       expect(fetchSpy).toHaveBeenCalledWith("/bangs-meta.bin");
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
     } finally {
       fetchSpy.mockRestore();
     }
