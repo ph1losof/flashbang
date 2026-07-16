@@ -272,52 +272,41 @@ export function validateBangs(bangs: Bang[]): Bang[] {
 // problem where JSON.stringify(jsonString) escapes every " to \", nearly
 // doubling the output size.
 
-/** Escape for embedding in a single-quoted JS string literal. */
-function jsEscape(s: string): string {
+function escapeString(s: string, quoteCode: number, escapedQuote: string): string {
   let out = "";
-  for (const c of s) {
-    switch (c) {
-      case "\\":
-        out += "\\\\";
+  let chunkStart = 0;
+  for (let i = 0; i < s.length; i++) {
+    let escaped: string;
+    switch (s.charCodeAt(i)) {
+      case quoteCode:
+        escaped = escapedQuote;
         break;
-      case "'":
-        out += "\\'";
+      case 0x5c:
+        escaped = "\\\\";
         break;
-      case "\n":
-        out += "\\n";
+      case 0x0a:
+        escaped = "\\n";
         break;
-      case "\r":
-        out += "\\r";
+      case 0x0d:
+        escaped = "\\r";
         break;
       default:
-        out += c;
+        continue;
     }
+    out += s.substring(chunkStart, i) + escaped;
+    chunkStart = i + 1;
   }
-  return out;
+  return chunkStart === 0 ? s : out + s.substring(chunkStart);
+}
+
+/** Escape for embedding in a single-quoted JS string literal. */
+export function jsEscape(s: string): string {
+  return escapeString(s, 0x27, "\\'");
 }
 
 /** Escape for embedding in a double-quoted JSON string. */
-function jsonEscape(s: string): string {
-  let out = "";
-  for (const c of s) {
-    switch (c) {
-      case '"':
-        out += '\\"';
-        break;
-      case "\\":
-        out += "\\\\";
-        break;
-      case "\n":
-        out += "\\n";
-        break;
-      case "\r":
-        out += "\\r";
-        break;
-      default:
-        out += c;
-    }
-  }
-  return out;
+export function jsonEscape(s: string): string {
+  return escapeString(s, 0x22, '\\"');
 }
 
 function splitTemplate(url: string): [string, string | null] {
