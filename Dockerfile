@@ -32,6 +32,8 @@ COPY --from=builder /app/src/shared/suggest-cookie.ts src/shared/suggest-cookie.
 COPY --from=builder /app/src/shared/template.ts src/shared/template.ts
 COPY --from=builder /app/src/generated/bangs-trie.js src/generated/bangs-trie.js
 
+USER bun
+
 ENV PORT=3000
 EXPOSE 3000
 HEALTHCHECK --interval=2s --timeout=2s --start-period=2s --retries=5 CMD bun -e "fetch('http://127.0.0.1:' + process.env.PORT + '/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
