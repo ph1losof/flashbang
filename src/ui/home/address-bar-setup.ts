@@ -131,6 +131,7 @@ export function setupAddressBarSheet(): void {
   const searchUrl = $<HTMLInputElement>("#setup-search-url");
   const suggestUrl = $<HTMLInputElement>("#setup-suggest-url");
   const browserTabs = $("#setup-browser-tabs");
+  const browserPanel = $("#setup-browser-panel");
   const browserName = $("#setup-browser-name");
   const browserSteps = $("#setup-browser-steps");
   const browserDocs = $<HTMLAnchorElement>("#setup-browser-docs");
@@ -145,6 +146,9 @@ export function setupAddressBarSheet(): void {
       const selected = button.dataset.browser === browser;
       button.setAttribute("aria-selected", String(selected));
       button.tabIndex = selected ? 0 : -1;
+      if (selected) {
+        browserPanel.setAttribute("aria-labelledby", button.id);
+      }
       button.classList.remove(...ACTIVE_TAB_CLASSES, ...INACTIVE_TAB_CLASSES);
       button.classList.add(
         ...(selected ? ACTIVE_TAB_CLASSES : INACTIVE_TAB_CLASSES)
@@ -264,6 +268,7 @@ export function setupAddressBarSheet(): void {
           label
         );
         button.type = "button";
+        button.id = `setup-browser-tab-${id}`;
         button.role = "tab";
         button.dataset.browser = id;
         button.setAttribute("aria-controls", "setup-browser-panel");

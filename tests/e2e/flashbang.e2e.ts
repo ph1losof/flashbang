@@ -513,16 +513,19 @@ test("compact address-bar setup exposes browser instructions and copyable URLs",
   );
   const expectedBrowser = {
     chromium: {
+      id: "chrome",
       tab: "Chrome",
       docsHost: "support.google.com",
       settingsUrl: "chrome://settings/searchEngines",
     },
     firefox: {
+      id: "firefox",
       tab: "Firefox",
       docsHost: "support.mozilla.org",
       settingsUrl: "about:preferences#search",
     },
     webkit: {
+      id: "safari",
       tab: "Safari",
       docsHost: "support.apple.com",
       settingsUrl: null,
@@ -531,6 +534,11 @@ test("compact address-bar setup exposes browser instructions and copyable URLs",
   await expect(
     page.getByRole("tab", { name: expectedBrowser.tab, exact: true })
   ).toHaveAttribute("aria-selected", "true");
+  const browserPanel = page.getByRole("tabpanel");
+  await expect(browserPanel).toHaveAttribute(
+    "aria-labelledby",
+    `setup-browser-tab-${expectedBrowser.id}`
+  );
   await expect(page.locator("#setup-browser-steps li")).not.toHaveCount(0);
   await expect(page.locator("#setup-browser-docs")).toHaveAttribute(
     "href",
@@ -553,6 +561,10 @@ test("compact address-bar setup exposes browser instructions and copyable URLs",
     "aria-selected",
     "true"
   );
+  await expect(browserPanel).toHaveAttribute(
+    "aria-labelledby",
+    "setup-browser-tab-edge"
+  );
   await expect(page.locator("#setup-browser-steps a")).toHaveAttribute(
     "href",
     "edge://settings/searchEngines"
@@ -566,6 +578,10 @@ test("compact address-bar setup exposes browser instructions and copyable URLs",
   await expect(page.getByRole("tab", { name: "Firefox" })).toHaveAttribute(
     "aria-selected",
     "true"
+  );
+  await expect(browserPanel).toHaveAttribute(
+    "aria-labelledby",
+    "setup-browser-tab-firefox"
   );
 
   const cardBox = await page.locator("#setup-card").boundingBox();
