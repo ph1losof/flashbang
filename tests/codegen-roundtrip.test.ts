@@ -79,11 +79,35 @@ describe("codegen round-trip", () => {
 
   test("emits the binary lookup artifact", async () => {
     const binary = await Bun.file("src/generated/bangs.bin").arrayBuffer();
-    const header = new Uint32Array(binary, 0, 12);
+    const header = new Uint32Array(binary, 0, 13);
     expect(header[0]).toBe(0x31424246);
-    expect(header[1]).toBe(1);
+    expect(header[1]).toBe(2);
     expect(header[2]).toBe(bangs.filter((bang) => !bang.regex).length);
     expect(header[11]).toBe(binary.byteLength);
+    expect(header[3] & (header[3] - 1)).toBe(0);
+    expect([2, 4]).toContain(header[12]);
+  });
+
+  test("resolves every regular bang through the perfect hash", () => {
+    for (const bang of bangs) {
+      if (bang.regex) {
+        continue;
+      }
+      const generated = lookupBang(bang.trigger, hashFNV1a(bang.trigger));
+      expect(generated).not.toBeNull();
+      expect(
+        generated![1] === null
+          ? generated![0]
+          : `${generated![0]}{}${generated![1]}`
+      ).toBe(bang.url);
+    }
+  });
+
+  test("rejects unknown triggers after perfect-hash indexing", () => {
+    for (let i = 0; i < bangs.length; i += 100) {
+      const trigger = `${bangs[i].trigger}~missing`;
+      expect(lookupBang(trigger, hashFNV1a(trigger))).toBeNull();
+    }
   });
 
   test("preserves metadata records and sparse captures in source order", async () => {
@@ -131,15 +155,29 @@ describe("codegen round-trip", () => {
   test("rejects invalid binary lookup metadata", async () => {
     const binary = await Bun.file("src/generated/bangs.bin").arrayBuffer();
     for (const [word, value, message] of [
-      [3, 0, "Invalid binary bang hash table size"],
-      [3, 3, "Invalid binary bang hash table size"],
+      [2, 0, "Invalid binary bang entry count"],
+      [3, 0, "Invalid binary bang MPHF bucket count"],
+      [3, 3, "Invalid binary bang MPHF bucket count"],
       [4, 0, "Invalid binary bang trigger length width"],
       [4, 3, "Invalid binary bang trigger length width"],
+      [12, 0, "Invalid binary bang MPHF displacement width"],
+      [12, 3, "Invalid binary bang MPHF displacement width"],
     ] as const) {
       const invalid = binary.slice(0);
-      new Uint32Array(invalid, 0, 12)[word] = value;
+      new Uint32Array(invalid, 0, 13)[word] = value;
       expect(() => initializeBangData(invalid)).toThrow(message);
     }
+
+    const invalidDisplacement = binary.slice(0);
+    const header = new Uint32Array(invalidDisplacement, 0, 13);
+    const displacements =
+      header[12] === 2
+        ? new Int16Array(invalidDisplacement, 13 * 4, header[3])
+        : new Int32Array(invalidDisplacement, 13 * 4, header[3]);
+    displacements[0] = -(header[2] + 1);
+    expect(() => initializeBangData(invalidDisplacement)).toThrow(
+      "Invalid binary bang MPHF displacement"
+    );
   });
 
   test("regex bangs are emitted only through the sparse advanced lookup", () => {

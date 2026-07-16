@@ -388,6 +388,116 @@ function nextPow2(n: number): number {
   return p;
 }
 
+const MPH_SLOT_MULTIPLIER = 0x85ebca6b;
+const MPH_MAX_DISPLACEMENT = 1_000_000;
+
+function mphBucket(hash: number, mask: number): number {
+  return hash & mask;
+}
+
+function mphSlot(hash: number, displacement: number, size: number): number {
+  return (
+    (Math.imul(hash ^ (displacement + 1), MPH_SLOT_MULTIPLIER) >>> 0) % size
+  );
+}
+
+interface MinimalPerfectHash {
+  displacements: Int16Array | Int32Array;
+  slotToEntry: Uint16Array;
+}
+
+function buildMinimalPerfectHash(
+  triggers: readonly string[]
+): MinimalPerfectHash {
+  const entryCount = triggers.length;
+  if (entryCount === 0) {
+    throw new Error("Binary bang format requires at least one regular entry");
+  }
+  const bucketCount = nextPow2(Math.max(2, Math.ceil(entryCount / 4)));
+  const bucketMask = bucketCount - 1;
+  const hashes = Uint32Array.from(triggers, hashFNV1a);
+  const knownHashes = new Map<number, string>();
+  const buckets = Array.from({ length: bucketCount }, () => [] as number[]);
+  for (let i = 0; i < entryCount; i++) {
+    const hash = hashes[i];
+    const collision = knownHashes.get(hash);
+    if (collision !== undefined) {
+      throw new Error(
+        `Binary bang MPHF requires collision-free hashes: ${collision}, ${triggers[i]}`
+      );
+    }
+    knownHashes.set(hash, triggers[i]);
+    buckets[mphBucket(hash, bucketMask)].push(i);
+  }
+
+  const orderedBuckets = buckets
+    .map((entries, id) => ({ entries, id }))
+    .filter((bucket) => bucket.entries.length > 1)
+    .sort((a, b) => b.entries.length - a.entries.length || a.id - b.id);
+  const occupied = new Uint8Array(entryCount);
+  const seen = new Uint32Array(entryCount);
+  const slotToEntry = new Uint16Array(entryCount);
+  const wideDisplacements = new Int32Array(bucketCount);
+  wideDisplacements.fill(-1);
+  let stamp = 0;
+  let maxDisplacement = 0;
+
+  for (const bucket of orderedBuckets) {
+    let displacement = 0;
+    for (; displacement <= MPH_MAX_DISPLACEMENT; displacement++) {
+      stamp++;
+      let available = true;
+      for (const entry of bucket.entries) {
+        const slot = mphSlot(hashes[entry], displacement, entryCount);
+        if (occupied[slot] || seen[slot] === stamp) {
+          available = false;
+          break;
+        }
+        seen[slot] = stamp;
+      }
+      if (available) {
+        break;
+      }
+    }
+    if (displacement > MPH_MAX_DISPLACEMENT) {
+      throw new Error(`Unable to build binary bang MPHF bucket ${bucket.id}`);
+    }
+    wideDisplacements[bucket.id] = displacement;
+    maxDisplacement = Math.max(maxDisplacement, displacement);
+    for (const entry of bucket.entries) {
+      const slot = mphSlot(hashes[entry], displacement, entryCount);
+      occupied[slot] = 1;
+      slotToEntry[slot] = entry;
+    }
+  }
+
+  const freeSlots: number[] = [];
+  for (let slot = 0; slot < entryCount; slot++) {
+    if (!occupied[slot]) {
+      freeSlots.push(slot);
+    }
+  }
+  let freeOffset = 0;
+  for (let bucketId = 0; bucketId < buckets.length; bucketId++) {
+    const entries = buckets[bucketId];
+    if (entries.length !== 1) {
+      continue;
+    }
+    const slot = freeSlots[freeOffset++];
+    wideDisplacements[bucketId] = -(slot + 1);
+    slotToEntry[slot] = entries[0];
+  }
+  if (freeOffset !== freeSlots.length) {
+    throw new Error("Binary bang MPHF did not assign every slot");
+  }
+
+  const displacements =
+    entryCount <= 0x7fff && maxDisplacement <= 0x7fff
+      ? Int16Array.from(wideDisplacements)
+      : wideDisplacements;
+  return { displacements, slotToEntry };
+}
+
 function align2(value: number): number {
   return (value + 1) & ~1;
 }
@@ -511,7 +621,7 @@ function packBangData(bangs: Bang[]): PackedBangData {
 function copyTypedArray(
   output: Uint8Array,
   offset: number,
-  values: Uint8Array | Uint16Array
+  values: Uint8Array | Uint16Array | Int16Array | Int32Array
 ): number {
   output.set(
     new Uint8Array(values.buffer, values.byteOffset, values.byteLength),
@@ -522,33 +632,36 @@ function copyTypedArray(
 
 function generateBinary(bangs: readonly Bang[]): Uint8Array {
   const packed = packBangData(bangs.filter((bang) => !bang.regex));
+  const mph = buildMinimalPerfectHash(packed.triggers);
+  const triggers = Array.from(
+    mph.slotToEntry,
+    (entry) => packed.triggers[entry]
+  );
+  const reorderedPrefixIds = Array.from(
+    mph.slotToEntry,
+    (entry) => packed.prefixIds[entry]
+  );
+  const reorderedSuffixIds = Array.from(
+    mph.slotToEntry,
+    (entry) => packed.suffixIdsPlusOne[entry]
+  );
+  const triggerBlob = packBlob(triggers);
   const encoder = new TextEncoder();
-  const triggerBytes = encoder.encode(packed.triggerBlob.blob);
+  const triggerBytes = encoder.encode(triggerBlob.blob);
   const prefixBytes = encoder.encode(packed.prefixBlob.blob);
   const suffixBytes = encoder.encode(packed.suffixBlob.blob);
   const triggerLengths =
     packed.triggerLensKind === "u8"
-      ? Uint8Array.from(packed.triggerBlob.lengths)
-      : Uint16Array.from(packed.triggerBlob.lengths);
+      ? Uint8Array.from(triggerBlob.lengths)
+      : Uint16Array.from(triggerBlob.lengths);
   const prefixLengths = Uint16Array.from(packed.prefixBlob.lengths);
   const suffixLengths = Uint16Array.from(packed.suffixBlob.lengths);
-  const prefixIds = Uint16Array.from(packed.prefixIds);
-  const suffixIds = Uint16Array.from(packed.suffixIdsPlusOne);
+  const prefixIds = Uint16Array.from(reorderedPrefixIds);
+  const suffixIds = Uint16Array.from(reorderedSuffixIds);
 
-  const hashSize = nextPow2(Math.max(2, Math.ceil(packed.entryCount / 0.55)));
-  const hashTable = new Uint16Array(hashSize);
-  const hashMask = hashSize - 1;
-  for (let i = 0; i < packed.triggers.length; i++) {
-    let slot = hashFNV1a(packed.triggers[i]) & hashMask;
-    while (hashTable[slot] !== 0) {
-      slot = (slot + 1) & hashMask;
-    }
-    hashTable[slot] = i + 1;
-  }
-
-  const headerWords = 12;
+  const headerWords = 13;
   const headerBytes = headerWords * Uint32Array.BYTES_PER_ELEMENT;
-  let numericEnd = headerBytes + hashTable.byteLength;
+  let numericEnd = headerBytes + mph.displacements.byteLength;
   numericEnd += triggerLengths.byteLength;
   numericEnd = align2(numericEnd);
   numericEnd +=
@@ -564,9 +677,9 @@ function generateBinary(bangs: readonly Bang[]): Uint8Array {
   const output = new Uint8Array(new ArrayBuffer(totalBytes));
   new Uint32Array(output.buffer, 0, headerWords).set([
     0x31424246,
-    1,
+    2,
     packed.entryCount,
-    hashSize,
+    mph.displacements.length,
     packed.triggerLensKind === "u8" ? 1 : 2,
     packed.uniquePrefixes.length,
     packed.uniqueSuffixes.length,
@@ -575,10 +688,11 @@ function generateBinary(bangs: readonly Bang[]): Uint8Array {
     suffixBytes.byteLength,
     numericEnd,
     totalBytes,
+    mph.displacements.BYTES_PER_ELEMENT,
   ]);
 
   let offset = headerBytes;
-  offset = copyTypedArray(output, offset, hashTable);
+  offset = copyTypedArray(output, offset, mph.displacements);
   offset = copyTypedArray(output, offset, triggerLengths);
   offset = align2(offset);
   offset = copyTypedArray(output, offset, prefixLengths);

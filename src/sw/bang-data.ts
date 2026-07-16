@@ -1,9 +1,10 @@
 export type BuiltinUrlParts = readonly [string, string | null];
 
 const MAGIC = 0x31424246;
-const VERSION = 1;
-const HEADER_WORDS = 12;
+const VERSION = 2;
+const HEADER_WORDS = 13;
 const HEADER_BYTES = HEADER_WORDS * Uint32Array.BYTES_PER_ELEMENT;
+const MPH_SLOT_MULTIPLIER = 0x85ebca6b;
 
 let lookup: ((trigger: string, hash: number) => BuiltinUrlParts | null) | null =
   null;
@@ -29,20 +30,35 @@ export function initializeBangData(buffer: ArrayBuffer): void {
   }
 
   const entryCount = header[2];
-  const hashSize = header[3];
+  const bucketCount = header[3];
   const triggerLengthWidth = header[4];
   const prefixCount = header[5];
   const suffixCount = header[6];
-  if (hashSize === 0 || (hashSize & (hashSize - 1)) !== 0) {
-    throw new Error("Invalid binary bang hash table size");
+  const displacementWidth = header[12];
+  if (entryCount === 0) {
+    throw new Error("Invalid binary bang entry count");
+  }
+  if (bucketCount === 0 || (bucketCount & (bucketCount - 1)) !== 0) {
+    throw new Error("Invalid binary bang MPHF bucket count");
   }
   if (triggerLengthWidth !== 1 && triggerLengthWidth !== 2) {
     throw new Error("Invalid binary bang trigger length width");
   }
+  if (displacementWidth !== 2 && displacementWidth !== 4) {
+    throw new Error("Invalid binary bang MPHF displacement width");
+  }
   let offset = HEADER_BYTES;
 
-  const hashTable = new Uint16Array(buffer, offset, hashSize);
-  offset += hashTable.byteLength;
+  const displacements =
+    displacementWidth === 2
+      ? new Int16Array(buffer, offset, bucketCount)
+      : new Int32Array(buffer, offset, bucketCount);
+  offset += displacements.byteLength;
+  for (const displacement of displacements) {
+    if (displacement < -entryCount) {
+      throw new Error("Invalid binary bang MPHF displacement");
+    }
+  }
   const triggerLengths =
     triggerLengthWidth === 1
       ? new Uint8Array(buffer, offset, entryCount)
@@ -74,7 +90,7 @@ export function initializeBangData(buffer: ArrayBuffer): void {
   const prefixCache: string[] = [];
   const suffixCache: string[] = [];
   const tupleCache: BuiltinUrlParts[] = [];
-  const hashMask = hashSize - 1;
+  const bucketMask = bucketCount - 1;
 
   function prefix(id: number): string {
     let value = prefixCache[id];
@@ -108,21 +124,19 @@ export function initializeBangData(buffer: ArrayBuffer): void {
   }
 
   lookup = (trigger, hash) => {
-    let slot = (hash >>> 0) & hashMask;
-    for (;;) {
-      const entry = hashTable[slot];
-      if (entry === 0) {
-        return null;
-      }
-      const index = entry - 1;
-      if (
-        triggerLengths[index] === trigger.length &&
-        triggerBlob.startsWith(trigger, triggerOffsets[index])
-      ) {
-        return tuple(index);
-      }
-      slot = (slot + 1) & hashMask;
-    }
+    const unsignedHash = hash >>> 0;
+    const bucket = unsignedHash & bucketMask;
+    const displacement = displacements[bucket];
+    const index =
+      displacement < 0
+        ? -displacement - 1
+        : (Math.imul(unsignedHash ^ (displacement + 1), MPH_SLOT_MULTIPLIER) >>>
+            0) %
+          entryCount;
+    return triggerLengths[index] === trigger.length &&
+      triggerBlob.startsWith(trigger, triggerOffsets[index])
+      ? tuple(index)
+      : null;
   };
 }
 
