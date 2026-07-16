@@ -74,8 +74,15 @@ jobs:
           gh auth setup-git
           git push --force-with-lease origin "HEAD:refs/heads/$branch"
 
-          if gh pr view "$branch" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh pr edit "$branch" --repo "$GITHUB_REPOSITORY" \
+          pr="$(gh pr list --repo "$GITHUB_REPOSITORY" \
+            --base master \
+            --head "$branch" \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')"
+
+          if [ -n "$pr" ]; then
+            gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" \
               --base master \
               --title "chore: update bangs" \
               --body "Automated daily update of the merged DuckDuckGo and Kagi bang data."
