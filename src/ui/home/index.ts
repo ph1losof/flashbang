@@ -39,7 +39,7 @@ export function initHome(db: DB): HomeController {
     firefoxSuggestProvider = provider;
     addressBar.refreshSuggestionUrl();
   };
-  setupHomeShortcuts(input);
+  setupHomeShortcuts(input, () => [bangPrefix, snapPrefix]);
   void db.getMultipleSettings(["bang-prefix", "snap-prefix"]).then((values) => {
     const [bang, snap] = resolveTriggerPrefixes(values[0], values[1]);
     setPrefixes(bang, snap);

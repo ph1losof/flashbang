@@ -791,6 +791,17 @@ test("distinct configured prefixes replace bang, snap, lucky, and suggestion syn
   await expect(page.locator("#lucky-leading-syntax")).toHaveText("$ query");
   await expect(page.locator("#lucky-trailing-syntax")).toHaveText("query $");
 
+  await page.click("#modal-close");
+  const commandInput = page.locator("#bang-command-input");
+  await page.keyboard.press("$");
+  await expect(commandInput).toBeFocused();
+  await expect(commandInput).toHaveValue("$");
+  await commandInput.fill("");
+  await commandInput.evaluate((element) => element.blur());
+  await page.keyboard.press("~");
+  await expect(commandInput).toBeFocused();
+  await expect(commandInput).toHaveValue("~");
+
   const bang = new URL(await resolveRedirectViaWorker(page, "$g hello", true));
   expect(bang.hostname).toBe("www.google.com");
   expect(bang.searchParams.get("q")).toBe("hello");

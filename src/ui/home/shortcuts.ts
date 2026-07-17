@@ -1,4 +1,9 @@
-export function setupHomeShortcuts(input: HTMLInputElement): void {
+import type { TriggerPrefix } from "../../shared/trigger-prefix";
+
+export function setupHomeShortcuts(
+  input: HTMLInputElement,
+  getPrefixes: () => readonly [TriggerPrefix, TriggerPrefix]
+): void {
   let awaitingInputKey = false;
   let inputKeyTimer = 0;
 
@@ -19,6 +24,20 @@ export function setupHomeShortcuts(input: HTMLInputElement): void {
     }
     awaitingInputKey = false;
     window.clearTimeout(inputKeyTimer);
+    const [bangPrefix, snapPrefix] = getPrefixes();
+    if (
+      !typing &&
+      unmodified &&
+      (event.key === bangPrefix || event.key === snapPrefix)
+    ) {
+      event.preventDefault();
+      input.focus();
+      const start = input.selectionStart ?? input.value.length;
+      const end = input.selectionEnd ?? input.value.length;
+      input.setRangeText(event.key, start, end, "end");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      return;
+    }
     if (!typing && unmodified && key === "g" && !event.repeat) {
       awaitingInputKey = true;
       inputKeyTimer = window.setTimeout(() => {
