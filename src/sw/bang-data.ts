@@ -1,7 +1,8 @@
 export type BuiltinUrlParts = readonly [string, string | null];
 
 const MAGIC = 0x31424246;
-const VERSION = 2;
+// Version 3 stores prefix/suffix lengths as UTF-8 bytes for lazy decoding.
+const VERSION = 3;
 const HEADER_WORDS = 13;
 const HEADER_BYTES = HEADER_WORDS * Uint32Array.BYTES_PER_ELEMENT;
 const MPH_SLOT_MULTIPLIER = 0x85ebca6b;
@@ -80,9 +81,9 @@ export function initializeBangData(buffer: ArrayBuffer): void {
   const decoder = new TextDecoder();
   const triggerBlob = decoder.decode(new Uint8Array(buffer, offset, header[7]));
   offset += header[7];
-  const prefixBlob = decoder.decode(new Uint8Array(buffer, offset, header[8]));
+  const prefixBlob = new Uint8Array(buffer, offset, header[8]);
   offset += header[8];
-  const suffixBlob = decoder.decode(new Uint8Array(buffer, offset, header[9]));
+  const suffixBlob = new Uint8Array(buffer, offset, header[9]);
 
   const triggerOffsets = offsets(triggerLengths);
   const prefixOffsets = offsets(prefixLengths);
@@ -95,7 +96,9 @@ export function initializeBangData(buffer: ArrayBuffer): void {
   function prefix(id: number): string {
     let value = prefixCache[id];
     if (value === undefined) {
-      value = prefixBlob.substring(prefixOffsets[id], prefixOffsets[id + 1]);
+      value = decoder.decode(
+        prefixBlob.subarray(prefixOffsets[id], prefixOffsets[id + 1])
+      );
       prefixCache[id] = value;
     }
     return value;
@@ -104,7 +107,10 @@ export function initializeBangData(buffer: ArrayBuffer): void {
   function suffix(id: number): string {
     let value = suffixCache[id];
     if (value === undefined) {
-      value = suffixBlob.substring(suffixOffsets[id], suffixOffsets[id + 1]);
+      const start = suffixOffsets[id];
+      const end = suffixOffsets[id + 1];
+      value =
+        start === end ? "" : decoder.decode(suffixBlob.subarray(start, end));
       suffixCache[id] = value;
     }
     return value;
