@@ -35,7 +35,7 @@ All three support bangs natively — but every query still round-trips through t
 - **Search suggestions** — The only bang tool with bang-aware autocomplete in your browser's native address bar. Type `!y` and the browser itself suggests `!yt` (YouTube), `!ya` (Yandex), `!yf` (Yahoo Finance) — ranked by a combination of global popularity and your personal usage frequency. Regular queries can use Google, DuckDuckGo, Bing, Brave, Yahoo, Ecosia, Kagi, Qwant, Startpage, Yandex, or Baidu. Self-hosted deployments can explicitly opt into custom providers. Both are unified through a single `/suggest` endpoint that plugs into your browser's built-in suggestion UI. Firefox-based browsers also render bang descriptions, site names, and favicons inline in the dropdown via `google:suggestdetail`. See [Browser quirks](#browser-quirks) for rendering and cookie differences across browsers
 - **Frecency** — The Service Worker tracks which bangs and snaps you use and how often, entirely in-memory on the redirect path. Your most-used triggers are promoted in autocomplete suggestions so they surface first. Compact snapshots are persisted to IndexedDB across Service Worker restarts. Suggestion personalization is available in Chromium-based browsers; it is not available in Firefox-based browsers — see [Browser quirks](#browser-quirks)
 - **Snaps** — Type `@trigger query` to search your default engine with results restricted to that trigger's domain via `site:`. For example, `@w quantum` searches Google for `quantum site:en.wikipedia.org`. Works in prefix (`@w quantum`) and suffix (`quantum @w`) positions. A bare snap (`@w`) redirects to the trigger's homepage. Snaps reuse bang triggers; entries without a resolvable web domain, such as the internal `settings` shortcut, fall back to a normal search
-- **Feeling Lucky** — Prefix a query with `\`, or add a bare `!` before or after it, to skip the results page and jump straight to the first result. The default mode matches Google, DuckDuckGo, or Kagi when one of those is your default engine, and falls back to DuckDuckGo for other engines. You can also select a provider, use a custom URL, or disable it entirely
+- **Feeling Lucky** — Prefix a query with `\`, or add the selected bang prefix before or after it, to skip the results page and jump straight to the first result. The bang prefix defaults to `!`; selecting another prefix replaces those bare `!` forms, while `\` remains available. The default mode matches Google, DuckDuckGo, or Kagi when one of those is your default engine, and falls back to DuckDuckGo for other engines. You can also select a provider, use a custom URL, or disable it entirely
 - **OpenSearch** — Browsers auto-discover Flashbang as a search engine via `/opensearch.xml`, including the suggestions endpoint. The XML is dynamically generated at request time using the current origin, so it works out of the box on any self-hosted domain or `localhost` — no hardcoded URLs to change
 
 ## Configurable syntax
@@ -98,13 +98,13 @@ The suggestion endpoint accepts cookie-independent query parameters for the sugg
 
 `bp` and `np` must be supplied together, must differ, and each accepts `!`, `@`, `$`, `:`, `;`, or `~`. Invalid pairs safely fall back to cookie or default settings. Provider values are:
 
-```
+```text
 google, ddg, bing, brave, yahoo, ecosia, kagi, qwant, startpage, yandex, baidu, none
 ```
 
 Example Firefox suggestion URL with provider and syntax overrides:
 
-```
+```text
 https://flashbang-dyr.pages.dev/suggest?q=%s&sp=ddg&bp=%24&np=~
 ```
 

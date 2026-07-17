@@ -267,7 +267,7 @@ The Service Worker tracks bang usage to personalize suggestion ordering. The flo
 
 The in-memory state (`frecencyCounts` plus `topFrecency` in `idb.ts`) is loaded from IndexedDB once and kept for the Service Worker lifetime. `invalidateCache()` clears only redirect settings and the shared database connection; loaded frecency and pending persistence remain intact. Browser benchmark mode suppresses these side effects only for the requesting benchmark client.
 
-**Browser cookie behavior**: Chromium-based browsers (Chrome, Edge, Arc) send cookies with suggest requests when the site is the default search engine. Firefox-based browsers (Firefox, Zen, LibreWolf) intentionally withhold cookies from OpenSearch suggest requests as a privacy decision ([bug 1624457](https://bugzilla.mozilla.org/show_bug.cgi?id=1624457)). The settings UI therefore provides a copyable Firefox suggestion URL with an explicit provider and bang/snap prefixes. Cookie-backed custom trigger suggestions and frecency are unavailable on those requests; redirect behavior is unaffected.
+**Browser cookie behavior**: Chromium-based browsers (Chrome, Edge, Arc) send cookies with suggest requests when the site is the default search engine. Firefox-based browsers (Firefox, Zen, LibreWolf) intentionally withhold cookies from OpenSearch suggest requests as a privacy decision ([bug 1624457](https://bugzilla.mozilla.org/show_bug.cgi?id=1624457)). The settings UI therefore provides a copyable Firefox suggestion URL with an explicit provider; it adds `bp` and `np` only for non-default syntax and omits the default `!`/`@` pair. Cookie-backed custom trigger suggestions and frecency are unavailable on those requests; redirect behavior is unaffected.
 
 ## Dev server
 
