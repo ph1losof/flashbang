@@ -18,13 +18,19 @@ import {
 import { hashFNV1a } from "../shared/hash";
 import { idbWrap, openDB, resetDB } from "../shared/idb";
 import { compileSnapTarget, type SnapTargetParts } from "../shared/snap-target";
+import { resolveTriggerPrefixes } from "../shared/trigger-prefix";
 import { lookupBang } from "./bang-data";
 import {
   buildTopFrecency,
   type TopFrecencyEntry,
   updateTopFrecencyOnIncrement,
 } from "./frecency";
-import type { CustomUrlParts, RedirectSettings, UrlParts } from "./redirect";
+import {
+  type CustomUrlParts,
+  compileTriggerSyntax,
+  type RedirectSettings,
+  type UrlParts,
+} from "./redirect";
 
 function splitUrl(url: string): UrlParts {
   const idx = url.indexOf("{}");
@@ -105,6 +111,10 @@ export function readRedirectSettings(): Promise<RedirectSettings> {
         }
         const defaultUrl = defaultEntry || splitUrl(DEFAULT_URL);
         const effectiveDefaultBang = defaultEntry ? defaultBang : "g";
+        const [bangPrefix, snapPrefix] = resolveTriggerPrefixes(
+          settingsMap["bang-prefix"],
+          settingsMap["snap-prefix"]
+        );
 
         const luckyProvider = settingsMap["lucky-provider"] ?? "default";
         let luckyUrl: UrlParts | null;
@@ -134,7 +144,13 @@ export function readRedirectSettings(): Promise<RedirectSettings> {
             break;
         }
 
-        cachedRedirect = { defaultUrl, custom, luckyUrl };
+        const syntax = compileTriggerSyntax(bangPrefix, snapPrefix);
+        cachedRedirect = {
+          defaultUrl,
+          custom,
+          luckyUrl,
+          ...(syntax ? { syntax } : {}),
+        };
       } catch {
         cachedRedirect = {
           defaultUrl: splitUrl(DEFAULT_URL),

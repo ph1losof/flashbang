@@ -27,6 +27,9 @@ describe("custom trigger validation", () => {
       "two\twords",
       "foo!bar",
       "foo@bar",
+      "foo$bar",
+      "foo;bar",
+      "foo~bar",
       "foo+bar",
       "foo,bar",
       "foo:bar",
@@ -40,9 +43,13 @@ describe("custom trigger validation", () => {
       "foo%20bar",
       "foo%21bar",
       "foo%40bar",
+      "foo%24bar",
+      "foo%3Abar",
+      "foo%3bbar",
+      "foo%7Ebar",
       "foo%2fBAR%40baz",
     ]) {
-      expect(validateCustomTrigger(trigger)).toContain("encoded separators");
+      expect(validateCustomTrigger(trigger)).toContain("encoded spaces");
     }
   });
 

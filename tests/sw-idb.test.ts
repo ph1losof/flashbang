@@ -84,6 +84,41 @@ describe("sw/idb redirect settings", () => {
     ]);
   });
 
+  test("precompiles distinct bang and snap prefixes while loading settings", async () => {
+    await seedDb({
+      settings: [
+        { key: "bang-prefix", value: "$" },
+        { key: "snap-prefix", value: "~" },
+      ],
+    });
+
+    const settings = await (await loadSwIdb()).readRedirectSettings();
+    expect(settings.syntax).toBeDefined();
+    expect(redirectUrl("$g cats", settings)).toContain(
+      "google.com/search?q=cats"
+    );
+    expect(redirectUrl("~g cats", settings)).toContain(
+      "google.com/search?q=cats+site:google.com"
+    );
+    expect(redirectUrl("!g cats", settings)).toContain("q=!g+cats");
+    expect(redirectUrl("@g cats", settings)).toContain("q=@g+cats");
+  });
+
+  test("falls back to default syntax for equal persisted prefixes", async () => {
+    await seedDb({
+      settings: [
+        { key: "bang-prefix", value: "$" },
+        { key: "snap-prefix", value: "$" },
+      ],
+    });
+
+    const settings = await (await loadSwIdb()).readRedirectSettings();
+    expect(settings.syntax).toBeUndefined();
+    expect(redirectUrl("!g cats", settings)).toContain(
+      "google.com/search?q=cats"
+    );
+  });
+
   test("resolves a user custom bang as the default", async () => {
     await seedDb({
       settings: [{ key: "default-bang", value: "mydocs" }],
