@@ -663,8 +663,10 @@
           if (!sw) {
             return;
           }
+          const reloadOnActivation =
+            navigator.serviceWorker.controller !== null;
           sw.addEventListener("statechange", () => {
-            if (sw.state === "activated") {
+            if (sw.state === "activated" && reloadOnActivation) {
               location.reload();
             }
           });

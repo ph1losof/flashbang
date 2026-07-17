@@ -283,7 +283,11 @@ export function setupBangCommand(db: DB): BangCommandController {
       clearSelectedCommand();
     } else {
       input.placeholder = defaultPlaceholder;
-      closeResults();
+      if (entries && input.value.trim()) {
+        renderResults();
+      } else {
+        closeResults();
+      }
     }
   }
 
