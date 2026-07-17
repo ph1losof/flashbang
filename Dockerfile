@@ -30,6 +30,7 @@ COPY --from=builder /app/src/shared/raw-query.ts src/shared/raw-query.ts
 COPY --from=builder /app/src/shared/raw-url.ts src/shared/raw-url.ts
 COPY --from=builder /app/src/shared/suggest-cookie.ts src/shared/suggest-cookie.ts
 COPY --from=builder /app/src/shared/template.ts src/shared/template.ts
+COPY --from=builder /app/src/shared/trigger-prefix.ts src/shared/trigger-prefix.ts
 COPY --from=builder /app/src/generated/bangs-trie.js src/generated/bangs-trie.js
 
 USER bun
