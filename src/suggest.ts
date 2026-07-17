@@ -20,6 +20,8 @@ import {
 } from "./shared/trigger-prefix";
 import { bangSuggestions } from "./suggest-bang";
 
+const JSON_HEADERS_INIT = { headers: JSON_HEADERS };
+
 export interface SuggestCoreSettings {
   bangPrefix: TriggerPrefix;
   customUrl: string | null;
@@ -64,7 +66,7 @@ function fillTemplate(url: string, encodedQuery: string): string {
 }
 
 function empty(query: string): Response {
-  return new Response(JSON.stringify([query, []]), { headers: JSON_HEADERS });
+  return new Response(`[${JSON.stringify(query)},[]]`, JSON_HEADERS_INIT);
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -434,7 +436,7 @@ export async function suggest(
     if (!isSuggestionPayload(payload)) {
       return empty(query);
     }
-    return new Response(body, { headers: JSON_HEADERS });
+    return new Response(body, JSON_HEADERS_INIT);
   } catch {
     return empty(query);
   }

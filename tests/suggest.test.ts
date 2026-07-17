@@ -920,10 +920,11 @@ describe("provider proxying — via suggest()", () => {
   });
 
   test("provider=none → empty response, no fetch", async () => {
-    const r = await suggest("cats", { ...defaultSettings, provider: "none" });
+    const query = 'cats "and" \\ dogs';
+    const r = await suggest(query, { ...defaultSettings, provider: "none" });
     expect(fetchSpy).not.toHaveBeenCalled();
-    const [query, completions] = await r.json();
-    expect(query).toBe("cats");
+    const [responseQuery, completions] = await r.json();
+    expect(responseQuery).toBe(query);
     expect(completions).toEqual([]);
     expect(r.headers.get("Cache-Control")).toBe("no-store");
   });
