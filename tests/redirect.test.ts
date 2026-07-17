@@ -2,6 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { compileCaptureUrl } from "../src/shared/capture-template";
 import { compileSnapTarget } from "../src/shared/snap-target";
 import {
+  TRIGGER_PREFIXES,
+  type TriggerPrefix,
+} from "../src/shared/trigger-prefix";
+import {
+  compileTriggerSyntax,
   type RedirectSettings,
   redirect,
   redirectRaw as redirectRawTuple,
@@ -129,6 +134,88 @@ describe("parse — bang syntax patterns", () => {
     const r = redirect("cats", settings());
     expect(r.status).toBe(302);
     expect(loc(r)).toBe("https://www.google.com/search?q=cats");
+  });
+});
+
+describe("parse — configurable bang and snap prefixes", () => {
+  function syntaxSettings(
+    bangPrefix: TriggerPrefix,
+    snapPrefix: TriggerPrefix
+  ): RedirectSettings {
+    return settings({
+      syntax: compileTriggerSyntax(bangPrefix, snapPrefix),
+    });
+  }
+
+  for (const bangPrefix of TRIGGER_PREFIXES) {
+    for (const snapPrefix of TRIGGER_PREFIXES) {
+      if (bangPrefix === snapPrefix) {
+        continue;
+      }
+      test(`${bangPrefix} bangs and ${snapPrefix} snaps match default syntax`, () => {
+        const customSyntax = syntaxSettings(bangPrefix, snapPrefix);
+        expect(loc(redirect(`${bangPrefix}g cats`, customSyntax))).toBe(
+          "https://www.google.com/search?q=cats"
+        );
+        expect(loc(redirect(`g${bangPrefix} cats`, customSyntax))).toBe(
+          "https://www.google.com/search?q=cats"
+        );
+        expect(loc(redirect(`cats ${bangPrefix}g`, customSyntax))).toBe(
+          "https://www.google.com/search?q=cats"
+        );
+        expect(loc(redirect(`cats g${bangPrefix}`, customSyntax))).toBe(
+          "https://www.google.com/search?q=cats"
+        );
+        expect(loc(redirect(`${snapPrefix}g cats`, customSyntax))).toBe(
+          "https://www.google.com/search?q=cats+site:google.com"
+        );
+        expect(loc(redirect(`cats ${snapPrefix}g`, customSyntax))).toBe(
+          "https://www.google.com/search?q=cats+site:google.com"
+        );
+      });
+    }
+  }
+
+  test("selected bang prefix controls bare lucky syntax", () => {
+    const customSyntax = syntaxSettings("$", "~");
+    expect(loc(redirect("$ cats", customSyntax))).toBe(
+      "https://www.google.com/search?btnI&q=cats"
+    );
+    expect(loc(redirect("cats $", customSyntax))).toBe(
+      "https://www.google.com/search?btnI&q=cats"
+    );
+    expect(loc(redirect("\\cats", customSyntax))).toBe(
+      "https://www.google.com/search?btnI&q=cats"
+    );
+    expect(loc(redirect("! cats", customSyntax))).toBe(
+      "https://www.google.com/search?q=!+cats"
+    );
+  });
+
+  test("replaced default prefixes remain ordinary query text", () => {
+    const customSyntax = syntaxSettings("$", "~");
+    expect(loc(redirect("!g cats", customSyntax))).toBe(
+      "https://www.google.com/search?q=!g+cats"
+    );
+    expect(loc(redirect("@g cats", customSyntax))).toBe(
+      "https://www.google.com/search?q=@g+cats"
+    );
+  });
+
+  test("percent-encoded configured prefixes resolve without decoding", () => {
+    const customSyntax = syntaxSettings("$", ";");
+    expect(loc(redirectRaw("%24g+cats", customSyntax))).toBe(
+      "https://www.google.com/search?q=cats"
+    );
+    expect(loc(redirectRaw("%3Bg+cats", customSyntax))).toBe(
+      "https://www.google.com/search?q=cats+site:google.com"
+    );
+    expect(loc(redirectRaw("cats+%24g", customSyntax))).toBe(
+      "https://www.google.com/search?q=cats"
+    );
+    expect(loc(redirectRaw("cats+%3bg", customSyntax))).toBe(
+      "https://www.google.com/search?q=cats+site:google.com"
+    );
   });
 });
 

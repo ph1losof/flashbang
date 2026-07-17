@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { compileCaptureUrl } from "../src/shared/capture-template";
 import { readPathname } from "../src/shared/raw-url";
 import { compileSnapTarget } from "../src/shared/snap-target";
+import { TRIGGER_PREFIXES } from "../src/shared/trigger-prefix";
 import {
   EDGE_CHILD_INDEX,
   EDGE_STRIDE,
@@ -716,7 +717,9 @@ console.log(
 
 separator("5. FULL REDIRECT PIPELINE");
 
-const { redirectRaw, redirectUrl } = await import("../src/sw/redirect");
+const { compileTriggerSyntax, redirectRaw, redirectUrl } = await import(
+  "../src/sw/redirect"
+);
 
 const profileCaptureUrl = compileCaptureUrl(
   "https://translate.example/$1/$2",
@@ -733,6 +736,10 @@ const settings = {
     docs: ["https://search.example.com?q=", "", profileSnapTarget] as const,
   },
 } satisfies RedirectSettings;
+const configuredSyntaxSettings: RedirectSettings = {
+  ...settings,
+  syntax: compileTriggerSyntax("$", "~"),
+};
 
 const queries = [
   { label: "Prefix bang", raw: "!g+kittens" },
@@ -836,6 +843,79 @@ const messageStats = bench(
 
 console.log(
   `SW message redirect path (redirectUrl): ${fmt(messageStats.p50)} median, ${fmt(messageStats.p90)} p90`
+);
+
+console.log("\nConfigured syntax A/B ($ bangs, ~ snaps):");
+for (const sample of [
+  {
+    label: "Prefix bang",
+    defaultRaw: "%21g+kittens",
+    customRaw: "%24g+kittens",
+  },
+  {
+    label: "Suffix bang",
+    defaultRaw: "kittens+%21g",
+    customRaw: "kittens+%24g",
+  },
+  { label: "Prefix snap", defaultRaw: "%40g+kittens", customRaw: "~g+kittens" },
+  { label: "Suffix snap", defaultRaw: "kittens+%40g", customRaw: "kittens+~g" },
+  { label: "No trigger", defaultRaw: "kittens", customRaw: "kittens" },
+]) {
+  const defaultStats = bench(REDIRECT_ITERS, () => {
+    redirectRaw(sample.defaultRaw, settings);
+  });
+  const customStats = bench(REDIRECT_ITERS, () => {
+    redirectRaw(sample.customRaw, configuredSyntaxSettings);
+  });
+  const ratio = customStats.p50 / defaultStats.p50;
+  console.log(
+    `  ${sample.label.padEnd(14)} default ${fmt(defaultStats.p50).padStart(8)}  configured ${fmt(customStats.p50).padStart(8)}  ${ratio.toFixed(2)}×`
+  );
+}
+
+const encodedTriggerPrefixes = [
+  "%21",
+  "%40",
+  "%24",
+  "%3A",
+  "%3B",
+  "%7E",
+] as const;
+const PAIR_ITERS = iterations(100_000);
+const baselinePairStats = bench(PAIR_ITERS, (i) => {
+  redirectRaw(i & 1 ? "%40g+kittens" : "%21g+kittens", settings);
+});
+let fastestPair = Number.POSITIVE_INFINITY;
+let slowestPair = 0;
+let slowestPairLabel = "";
+let pairCount = 0;
+for (let bangIndex = 0; bangIndex < TRIGGER_PREFIXES.length; bangIndex++) {
+  for (let snapIndex = 0; snapIndex < TRIGGER_PREFIXES.length; snapIndex++) {
+    if (bangIndex === snapIndex) {
+      continue;
+    }
+    const pairSettings: RedirectSettings = {
+      ...settings,
+      syntax: compileTriggerSyntax(
+        TRIGGER_PREFIXES[bangIndex],
+        TRIGGER_PREFIXES[snapIndex]
+      ),
+    };
+    const bangRaw = `${encodedTriggerPrefixes[bangIndex]}g+kittens`;
+    const snapRaw = `${encodedTriggerPrefixes[snapIndex]}g+kittens`;
+    const pairStats = bench(PAIR_ITERS, (i) => {
+      redirectRaw(i & 1 ? snapRaw : bangRaw, pairSettings);
+    });
+    fastestPair = Math.min(fastestPair, pairStats.p50);
+    if (pairStats.p50 > slowestPair) {
+      slowestPair = pairStats.p50;
+      slowestPairLabel = `${TRIGGER_PREFIXES[bangIndex]}/${TRIGGER_PREFIXES[snapIndex]}`;
+    }
+    pairCount++;
+  }
+}
+console.log(
+  `  All ${pairCount} pairs   default ${fmt(baselinePairStats.p50).padStart(8)}  range ${fmt(fastestPair)}..${fmt(slowestPair)}  worst ${slowestPairLabel} ${(slowestPair / baselinePairStats.p50).toFixed(2)}×`
 );
 
 separator("5b. REDIRECT FIXUP ISOLATION");

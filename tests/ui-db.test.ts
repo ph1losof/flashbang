@@ -105,7 +105,7 @@ describe("custom bang import and export", () => {
     expect(await db.getSetting("frecency")).toBe("123|g:5,ddg:2");
   });
 
-  test("round-trips schema-v1 exports with custom provider URLs", async () => {
+  test("round-trips current-schema exports with custom provider URLs", async () => {
     const db = new DB();
     await db.setSetting("default-bang", "ddg");
     await db.setSetting("suggest-provider", "custom");
@@ -136,6 +136,41 @@ describe("custom bang import and export", () => {
     ]);
   });
 
+  test("round-trips distinct bang and snap prefixes", async () => {
+    const db = new DB();
+    await db.setSetting("bang-prefix", "$");
+    await db.setSetting("snap-prefix", "~");
+
+    const exported = await db.exportAll();
+    await db.setSetting("bang-prefix", "!");
+    await db.setSetting("snap-prefix", "@");
+    await db.importAll(exported);
+
+    expect(
+      await db.getMultipleSettings(["bang-prefix", "snap-prefix"])
+    ).toEqual(["$", "~"]);
+  });
+
+  test("rejects invalid or equal imported prefixes before replacing data", async () => {
+    const db = new DB();
+    await db.setSetting("default-bang", "ddg");
+
+    for (const settings of [
+      { bangPrefix: "#", snapPrefix: "@" },
+      { bangPrefix: "$", snapPrefix: "$" },
+    ]) {
+      await expect(
+        db.importAll({
+          schemaVersion: SETTINGS_SCHEMA_VERSION,
+          settings,
+          customBangs: [],
+        })
+      ).rejects.toThrow();
+    }
+
+    expect(await db.getSetting("default-bang")).toBe("ddg");
+  });
+
   test("round-trips legacy exports with custom provider URLs", async () => {
     const db = new DB();
     const legacy = {
@@ -154,7 +189,11 @@ describe("custom bang import and export", () => {
     const exported = await db.exportAll();
 
     expect(result.replaced).toBe(true);
-    expect(exported.settings).toEqual(legacy.settings);
+    expect(exported.settings).toEqual({
+      ...legacy.settings,
+      bangPrefix: null,
+      snapPrefix: null,
+    });
   });
 
   test("refuses to export malformed legacy custom settings", async () => {

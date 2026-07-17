@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { expect, type Page, test } from "@playwright/test";
 import { DB_VERSION } from "../../src/shared/constants";
 import { encodeSuggestCookieValue } from "../../src/shared/suggest-cookie";
+import { SETTINGS_SCHEMA_VERSION } from "../../src/ui/db";
 
 const GOOGLE_REDIRECT = /google\.com\/search\?q=hello/;
 const GOOGLE_HOST = "https://www.google.com";
@@ -313,13 +314,23 @@ test("Firefox locks cookie-backed suggestion settings", async ({ page }) => {
   await page
     .locator('#suggest-firefox-provider-menu [data-provider="startpage"]')
     .click();
-  const expectedUrl = `${origin}/suggest?q=%s&sp=startpage`;
+  let expectedUrl = `${origin}/suggest?q=%s&sp=startpage`;
   await expect(page.locator("#suggest-provider")).toHaveValue("google");
   await expect(page.locator("#suggest-firefox-url")).toHaveText(expectedUrl);
   await expect(page.locator("#suggest-firefox-url span")).toHaveText(
     "startpage"
   );
   await expect(providerPicker).toContainText("startpage");
+
+  let writeCount = await settingsWriteCount(page);
+  await page.selectOption("#bang-prefix", "$");
+  await waitForSettingsWrite(page, writeCount);
+  writeCount = await settingsWriteCount(page);
+  await page.selectOption("#snap-prefix", "~");
+  await waitForSettingsWrite(page, writeCount);
+  expectedUrl = `${origin}/suggest?q=%s&sp=startpage&bp=%24&np=~`;
+  await expect(page.locator("#suggest-firefox-url")).toHaveText(expectedUrl);
+
   await providerPicker.click();
   await expect(page.locator("#suggest-firefox-provider-menu")).toBeVisible();
   await providerPicker.click();
@@ -334,6 +345,10 @@ test("Firefox locks cookie-backed suggestion settings", async ({ page }) => {
       )
     )
     .toBe(expectedUrl);
+
+  await page.click("#modal-close");
+  await page.click("#open-setup");
+  await expect(page.locator("#setup-suggest-url")).toHaveValue(expectedUrl);
 });
 
 test("suggest endpoint rewrites malformed suggest cookie context", async ({
@@ -508,8 +523,9 @@ test("compact address-bar setup exposes browser instructions and copyable URLs",
   await expect(page.locator("#setup-search-url")).toHaveValue(
     `${new URL(page.url()).origin}?q=%s`
   );
+  const baseSuggestUrl = `${new URL(page.url()).origin}/suggest?q=%s`;
   await expect(page.locator("#setup-suggest-url")).toHaveValue(
-    `${new URL(page.url()).origin}/suggest?q=%s`
+    browserName === "firefox" ? `${baseSuggestUrl}&sp=google` : baseSuggestUrl
   );
   const expectedBrowser = {
     chromium: {
@@ -557,6 +573,7 @@ test("compact address-bar setup exposes browser instructions and copyable URLs",
   }
 
   await page.getByRole("tab", { name: "Edge" }).click();
+  await expect(page.locator("#setup-suggest-url")).toHaveValue(baseSuggestUrl);
   await expect(page.getByRole("tab", { name: "Edge" })).toHaveAttribute(
     "aria-selected",
     "true"
@@ -582,6 +599,9 @@ test("compact address-bar setup exposes browser instructions and copyable URLs",
   await expect(browserPanel).toHaveAttribute(
     "aria-labelledby",
     "setup-browser-tab-firefox"
+  );
+  await expect(page.locator("#setup-suggest-url")).toHaveValue(
+    `${baseSuggestUrl}&sp=google`
   );
 
   const cardBox = await page.locator("#setup-card").boundingBox();
@@ -741,6 +761,65 @@ test("settings invalidation applies a new default bang to redirects", async ({
   );
   expect(redirected.hostname).toBe("duckduckgo.com");
   expect(redirected.searchParams.get("q")).toBe("hello");
+});
+
+test("distinct configured prefixes replace bang, snap, lucky, and suggestion syntax", async ({
+  page,
+}) => {
+  await ensureWarmController(page);
+  await openSettingsModal(page);
+
+  await expect(page.locator("#bang-prefix")).toHaveValue("!");
+  await expect(page.locator("#snap-prefix")).toHaveValue("@");
+
+  let writeCount = await settingsWriteCount(page);
+  await page.selectOption("#bang-prefix", "$");
+  await waitForSettingsWrite(page, writeCount);
+  await expect(page.locator('#snap-prefix option[value="$"]')).toHaveAttribute(
+    "disabled",
+    ""
+  );
+
+  writeCount = await settingsWriteCount(page);
+  await page.selectOption("#snap-prefix", "~");
+  await waitForSettingsWrite(page, writeCount);
+  await expect(page.locator('#bang-prefix option[value="~"]')).toHaveAttribute(
+    "disabled",
+    ""
+  );
+  await expect(page.locator("#default-bang-prefix")).toHaveText("$");
+  await expect(page.locator("#lucky-leading-syntax")).toHaveText("$ query");
+  await expect(page.locator("#lucky-trailing-syntax")).toHaveText("query $");
+
+  const bang = new URL(await resolveRedirectViaWorker(page, "$g hello", true));
+  expect(bang.hostname).toBe("www.google.com");
+  expect(bang.searchParams.get("q")).toBe("hello");
+
+  const snap = new URL(await resolveRedirectViaWorker(page, "~g hello"));
+  expect(snap.searchParams.get("q")).toBe("hello site:google.com");
+
+  const replaced = new URL(await resolveRedirectViaWorker(page, "!g hello"));
+  expect(replaced.searchParams.get("q")).toBe("!g hello");
+
+  const lucky = new URL(await resolveRedirectViaWorker(page, "$ hello"));
+  expect(lucky.searchParams.get("q")).toBe("hello");
+  expect(lucky.searchParams.get("btnI")).toBe("1");
+
+  const suggestCookie = (await page.context().cookies()).find(
+    (cookie) => cookie.name === "suggest"
+  );
+  expect(suggestCookie?.value).toContain(",25");
+  const suggestionResponse = await page.request.get(
+    "/suggest?q=%24gh&bp=%24&np=~"
+  );
+  const suggestions = await suggestionResponse.json();
+  expect(suggestions[1].length).toBeGreaterThan(0);
+  expect(suggestions[1][0]).toMatch(/^\$g/);
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.click("#gear-btn");
+  await expect(page.locator("#bang-prefix")).toHaveValue("$");
+  await expect(page.locator("#snap-prefix")).toHaveValue("~");
 });
 
 test("default provider labels follow the selected bang", async ({
@@ -966,7 +1045,7 @@ test("settings export includes its schema version", async ({ page }) => {
   expect(path).not.toBeNull();
   const exported = JSON.parse(await readFile(path as string, "utf8"));
 
-  expect(exported.schemaVersion).toBe(1);
+  expect(exported.schemaVersion).toBe(SETTINGS_SCHEMA_VERSION);
   expect(exported.settings).toBeTruthy();
   expect(exported.customBangs).toEqual([]);
 });

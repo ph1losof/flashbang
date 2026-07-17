@@ -148,3 +148,76 @@ export function readTwoQueryParams(
 
   return [a, b];
 }
+
+export function readSuggestQueryParams(
+  rawUrl: string
+): readonly [
+  q: string | null,
+  sp: string | null,
+  bp: string | null,
+  np: string | null,
+] {
+  const qPos = rawUrl.indexOf("?");
+  if (qPos === -1) {
+    return [null, null, null, null];
+  }
+  const hPos = rawUrl.indexOf("#", qPos + 1);
+  const end = hPos === -1 ? rawUrl.length : hPos;
+  let q: string | null = null;
+  let sp: string | null = null;
+  let bp: string | null = null;
+  let np: string | null = null;
+  let i = qPos + 1;
+
+  while (i < end) {
+    let amp = rawUrl.indexOf("&", i);
+    if (amp === -1 || amp > end) {
+      amp = end;
+    }
+    const eq = rawUrl.indexOf("=", i);
+    const keyEnd = eq === -1 || eq > amp ? amp : eq;
+    const keyLength = keyEnd - i;
+    let slot = -1;
+    if (keyLength === 1 && rawUrl.charCodeAt(i) === 113) {
+      slot = 0;
+    } else if (keyLength === 2 && rawUrl.charCodeAt(i + 1) === 112) {
+      const first = rawUrl.charCodeAt(i);
+      if (first === 115) {
+        slot = 1;
+      } else if (first === 98) {
+        slot = 2;
+      } else if (first === 110) {
+        slot = 3;
+      }
+    }
+
+    let current: string | null = null;
+    if (slot === 0) {
+      current = q;
+    } else if (slot === 1) {
+      current = sp;
+    } else if (slot === 2) {
+      current = bp;
+    } else if (slot === 3) {
+      current = np;
+    }
+    if (slot !== -1 && current === null) {
+      const value =
+        eq === -1 || eq > amp
+          ? ""
+          : decodeQueryComponent(rawUrl.substring(eq + 1, amp));
+      if (slot === 0) {
+        q = value;
+      } else if (slot === 1) {
+        sp = value;
+      } else if (slot === 2) {
+        bp = value;
+      } else {
+        np = value;
+      }
+    }
+    i = amp + 1;
+  }
+
+  return [q, sp, bp, np];
+}

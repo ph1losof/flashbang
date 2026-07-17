@@ -6,6 +6,10 @@ import {
 } from "../../shared/capture-template";
 import { validateCustomTrigger } from "../../shared/custom-trigger";
 import { validateSnapTarget } from "../../shared/snap-target";
+import {
+  DEFAULT_BANG_PREFIX,
+  type TriggerPrefix,
+} from "../../shared/trigger-prefix";
 import type { DB } from "../db";
 import { $, el } from "../dom";
 import { notifySW } from "../sw-bridge";
@@ -18,7 +22,8 @@ async function renderCustom(
   onEdit: (bang: CustomBangRecord) => void,
   onRemove: (trigger: string) => void,
   runWrite?: RunWrite,
-  isCurrent: () => boolean = () => true
+  isCurrent: () => boolean = () => true,
+  getBangPrefix: () => TriggerPrefix = () => DEFAULT_BANG_PREFIX
 ) {
   const custom = await db.getAllCustomBangs();
   if (!isCurrent()) {
@@ -52,13 +57,21 @@ async function renderCustom(
         }
         onRemove(b.trigger);
         notifySW("invalidate");
-        await renderCustom(db, onChange, onEdit, onRemove, runWrite, isCurrent);
+        await renderCustom(
+          db,
+          onChange,
+          onEdit,
+          onRemove,
+          runWrite,
+          isCurrent,
+          getBangPrefix
+        );
       });
       row.append(
         el(
           "code",
           "px-1.5 py-0.5 rounded bg-bg-active text-xs min-w-15 text-center font-mono",
-          `!${b.trigger}`
+          `${getBangPrefix()}${b.trigger}`
         ),
         el("span", "flex-1 text-[13px] font-medium", b.name),
         ...(b.regex
@@ -90,7 +103,8 @@ async function renderCustom(
 export function setupCustomBangs(
   db: DB,
   onChange?: (customBangs: CustomBangRecord[]) => void,
-  runWrite?: RunWrite
+  runWrite?: RunWrite,
+  getBangPrefix: () => TriggerPrefix = () => DEFAULT_BANG_PREFIX
 ) {
   const form = $<HTMLFormElement>("#add-bang-form");
   const shortcutInput = form.elements.namedItem("shortcut") as HTMLInputElement;
@@ -149,7 +163,8 @@ export function setupCustomBangs(
       editBang,
       removedBang,
       runWrite,
-      () => version === refreshVersion
+      () => version === refreshVersion,
+      getBangPrefix
     );
   };
 
@@ -159,8 +174,12 @@ export function setupCustomBangs(
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const fd = new FormData(form);
-    const trigger = (fd.get("shortcut") as string)
-      .replace(/^!+/, "")
+    const rawTrigger = (fd.get("shortcut") as string).trim();
+    const trigger = (
+      rawTrigger.startsWith(getBangPrefix())
+        ? rawTrigger.substring(1)
+        : rawTrigger
+    )
       .toLowerCase()
       .trim();
     const name = (fd.get("name") as string).trim();

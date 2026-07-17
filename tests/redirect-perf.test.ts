@@ -3,7 +3,11 @@ import { describe, expect, test } from "bun:test";
 import { compileCaptureUrl } from "../src/shared/capture-template";
 import { compileSnapTarget } from "../src/shared/snap-target";
 import type { UrlParts } from "../src/sw/redirect";
-import { type RedirectSettings, redirectRaw } from "../src/sw/redirect";
+import {
+  compileTriggerSyntax,
+  type RedirectSettings,
+  redirectRaw,
+} from "../src/sw/redirect";
 import { loadTestBangData } from "./helpers/bang-data";
 
 await loadTestBangData();
@@ -33,8 +37,7 @@ function settings(): RedirectSettings {
 const WARMUP = 10_000;
 const ITERS = 100_000;
 
-function benchRedirectRaw(raw: string): number {
-  const s = settings();
+function benchRedirectRaw(raw: string, s = settings()): number {
   for (let i = 0; i < WARMUP; i++) {
     redirectRaw(raw, s);
   }
@@ -90,6 +93,24 @@ describe("redirect performance regression", () => {
 
   test("custom snap target redirect stays under 0.005ms", () => {
     const ms = benchRedirectRaw("@docs+kittens");
+    expect(ms).toBeLessThan(0.005);
+  });
+
+  test("configured prefix bang redirect stays under 0.005ms", () => {
+    const s = {
+      ...settings(),
+      syntax: compileTriggerSyntax("$", "~"),
+    };
+    const ms = benchRedirectRaw("%24g+kittens+are+cute", s);
+    expect(ms).toBeLessThan(0.005);
+  });
+
+  test("configured prefix snap redirect stays under 0.005ms", () => {
+    const s = {
+      ...settings(),
+      syntax: compileTriggerSyntax("$", "~"),
+    };
+    const ms = benchRedirectRaw("~g+kittens", s);
     expect(ms).toBeLessThan(0.005);
   });
 });

@@ -10,18 +10,19 @@ import {
 } from "../shared/capture-template";
 import {
   CH_0,
-  CH_1,
   CH_2,
-  CH_4,
-  CH_AT,
   CH_BSLASH,
-  CH_EXCL,
   CH_F,
   CH_f,
   CH_PERCENT,
   CH_PLUS,
 } from "../shared/chars";
 import type { SnapTargetParts } from "../shared/snap-target";
+import {
+  DEFAULT_BANG_PREFIX,
+  DEFAULT_SNAP_PREFIX,
+  type TriggerPrefix,
+} from "../shared/trigger-prefix";
 import { lookupBang } from "./bang-data";
 
 // NOTE: pos + char-width packed into one int to skip tuple alloc:
@@ -35,54 +36,85 @@ type CaptureUrlPartsWithSnap = readonly [...CaptureUrlParts, SnapTargetParts];
 type SimpleEntry = UrlParts | UrlPartsWithSnap;
 type CaptureEntry = CaptureUrlParts | CaptureUrlPartsWithSnap;
 export type CustomUrlParts = SimpleEntry | CaptureEntry;
+export type TriggerSyntax = readonly [bangMarker: number, snapMarker: number];
 
 export interface RedirectSettings {
   custom: Record<string, CustomUrlParts>;
   defaultUrl: UrlParts;
   luckyUrl: UrlParts | null;
+  syntax?: TriggerSyntax;
 }
 
-function isEncodedExclAt(s: string, i: number): boolean {
+function hexCode(nibble: number): number {
+  return nibble < 10 ? 48 + nibble : 87 + nibble;
+}
+
+function compileMarker(code: number): number {
+  return code | (hexCode(code >> 4) << 8) | (hexCode(code & 0xf) << 16);
+}
+
+const DEFAULT_BANG_MARKER = compileMarker(33);
+const DEFAULT_SNAP_MARKER = compileMarker(64);
+
+export function compileTriggerSyntax(
+  bangPrefix: TriggerPrefix,
+  snapPrefix: TriggerPrefix
+): TriggerSyntax | undefined {
+  if (
+    bangPrefix === DEFAULT_BANG_PREFIX &&
+    snapPrefix === DEFAULT_SNAP_PREFIX
+  ) {
+    return undefined;
+  }
+  return [
+    compileMarker(bangPrefix.charCodeAt(0)),
+    compileMarker(snapPrefix.charCodeAt(0)),
+  ];
+}
+
+function isEncodedMarkerAt(s: string, i: number, marker: number): boolean {
   return (
     s.charCodeAt(i) === CH_PERCENT &&
-    s.charCodeAt(i + 1) === CH_2 &&
-    s.charCodeAt(i + 2) === CH_1
+    (s.charCodeAt(i + 1) | ((s.charCodeAt(i + 2) | 32) << 8)) === marker >> 8
   );
 }
 
-function isEncodedAtAt(s: string, i: number): boolean {
-  return (
-    s.charCodeAt(i) === CH_PERCENT &&
-    s.charCodeAt(i + 1) === CH_4 &&
-    s.charCodeAt(i + 2) === CH_0
-  );
-}
+let _sawSnap = false;
 
-let _sawAt = false;
-
-function findExcl(s: string, start: number, end: number): number {
-  let sawAt = false;
+function findBangMarker(
+  s: string,
+  start: number,
+  end: number,
+  bangMarker: number,
+  snapMarker: number
+): number {
+  const bangCode = bangMarker & 0xff;
+  const snapCode = snapMarker & 0xff;
+  const bangEncoded = bangMarker >> 8;
+  const snapEncoded = snapMarker >> 8;
+  let sawSnap = false;
   for (let i = start; i < end; i++) {
     const c = s.charCodeAt(i);
-    if (c === CH_EXCL) {
-      _sawAt = sawAt;
+    if (c === bangCode) {
+      _sawSnap = sawSnap;
       return (i << 2) | 1;
     }
-    if (c === CH_AT) {
-      sawAt = true;
+    if (c === snapCode) {
+      sawSnap = true;
     } else if (c === CH_PERCENT && i + 2 < end) {
       const c1 = s.charCodeAt(i + 1);
-      const c2 = s.charCodeAt(i + 2);
-      if (c1 === CH_2 && c2 === CH_1) {
-        _sawAt = sawAt;
+      const c2 = s.charCodeAt(i + 2) | 32;
+      const encoded = c1 | (c2 << 8);
+      if (encoded === bangEncoded) {
+        _sawSnap = sawSnap;
         return (i << 2) | 3;
       }
-      if (c1 === CH_4 && c2 === CH_0) {
-        sawAt = true;
+      if (encoded === snapEncoded) {
+        sawSnap = true;
       }
     }
   }
-  _sawAt = sawAt;
+  _sawSnap = sawSnap;
   return -1;
 }
 
@@ -103,25 +135,32 @@ function findSpace(s: string, from: number, end: number): number {
   return -1;
 }
 
-function findLastSpaceExcl(s: string, start: number, end: number): number {
+function findLastSpaceMarker(
+  s: string,
+  start: number,
+  end: number,
+  marker: number
+): number {
+  const markerCode = marker & 0xff;
+  const markerEncoded = marker >> 8;
   for (let i = end - 1; i >= start; i--) {
     const c = s.charCodeAt(i);
-    let exclWidth = 0;
-    if (c === CH_EXCL) {
-      exclWidth = 1;
+    let markerWidth = 0;
+    if (c === markerCode) {
+      markerWidth = 1;
     } else if (
       c === CH_PERCENT &&
       i + 2 < end &&
-      s.charCodeAt(i + 1) === CH_2 &&
-      s.charCodeAt(i + 2) === CH_1
+      (s.charCodeAt(i + 1) | ((s.charCodeAt(i + 2) | 32) << 8)) ===
+        markerEncoded
     ) {
-      exclWidth = 3;
+      markerWidth = 3;
     }
-    if (!exclWidth) {
+    if (!markerWidth) {
       continue;
     }
     if (i >= start + 1 && s.charCodeAt(i - 1) === CH_PLUS) {
-      return ((i - 1) << 4) | (1 << 2) | exclWidth;
+      return ((i - 1) << 4) | (1 << 2) | markerWidth;
     }
     if (
       i >= start + 3 &&
@@ -129,39 +168,7 @@ function findLastSpaceExcl(s: string, start: number, end: number): number {
       s.charCodeAt(i - 2) === CH_2 &&
       s.charCodeAt(i - 1) === CH_0
     ) {
-      return ((i - 3) << 4) | (3 << 2) | exclWidth;
-    }
-  }
-  return -1;
-}
-
-function findLastSpaceAt(s: string, start: number, end: number): number {
-  for (let i = end - 1; i >= start; i--) {
-    const c = s.charCodeAt(i);
-    let atWidth = 0;
-    if (c === CH_AT) {
-      atWidth = 1;
-    } else if (
-      c === CH_PERCENT &&
-      i + 2 < end &&
-      s.charCodeAt(i + 1) === CH_4 &&
-      s.charCodeAt(i + 2) === CH_0
-    ) {
-      atWidth = 3;
-    }
-    if (!atWidth) {
-      continue;
-    }
-    if (i >= start + 1 && s.charCodeAt(i - 1) === CH_PLUS) {
-      return ((i - 1) << 4) | (1 << 2) | atWidth;
-    }
-    if (
-      i >= start + 3 &&
-      s.charCodeAt(i - 3) === CH_PERCENT &&
-      s.charCodeAt(i - 2) === CH_2 &&
-      s.charCodeAt(i - 1) === CH_0
-    ) {
-      return ((i - 3) << 4) | (3 << 2) | atWidth;
+      return ((i - 3) << 4) | (3 << 2) | markerWidth;
     }
   }
   return -1;
@@ -615,9 +622,11 @@ function findTrailingBareBang(
   s: string,
   start: number,
   end: number,
-  lastChar: number
+  lastChar: number,
+  bangMarker: number
 ): number {
-  if (lastChar === CH_EXCL) {
+  const bangCode = bangMarker & 0xff;
+  if (lastChar === bangCode) {
     // "query+!"
     if (s.charCodeAt(end - 2) === CH_PLUS) {
       return end - 2;
@@ -633,7 +642,7 @@ function findTrailingBareBang(
     }
   }
   // "query+%21" / "query%20%21"
-  if (end - start >= 3 && isEncodedExclAt(s, end - 3)) {
+  if (end - start >= 3 && isEncodedMarkerAt(s, end - 3, bangMarker)) {
     const beforeExcl = end - 3;
     if (s.charCodeAt(beforeExcl - 1) === CH_PLUS) {
       return beforeExcl - 1;
@@ -672,10 +681,63 @@ function extractTrigger(s: string, from: number, to: number): string {
   return from === 0 && to === s.length ? s : s.substring(from, to);
 }
 
+function resolvePrefixSnap(
+  rawQuery: string,
+  start: number,
+  end: number,
+  afterAt: number,
+  defaultUrl: UrlParts,
+  custom: Record<string, CustomUrlParts>
+): [string, string | null] {
+  if (afterAt >= end) {
+    return ["/", null];
+  }
+
+  const cAfterAt = rawQuery.charCodeAt(afterAt);
+  let atSpaceWidth = 0;
+  if (cAfterAt === CH_PLUS) {
+    atSpaceWidth = 1;
+  } else if (
+    cAfterAt === CH_PERCENT &&
+    rawQuery.charCodeAt(afterAt + 1) === CH_2 &&
+    rawQuery.charCodeAt(afterAt + 2) === CH_0
+  ) {
+    atSpaceWidth = 3;
+  }
+  if (atSpaceWidth) {
+    return [buildUrl(defaultUrl, rawQuery, start, end), null];
+  }
+
+  const spPacked = findSpace(rawQuery, afterAt, end);
+  const sp = spPacked === -1 ? -1 : spPacked >> 2;
+  const spLen = spPacked === -1 ? 0 : spPacked & 0b11;
+  const triggerEnd = sp === -1 ? end : sp;
+  const trigger = extractTrigger(rawQuery, afterAt, triggerEnd);
+
+  if (sp === -1 || sp + spLen >= end) {
+    const origin = resolveSnapOrigin(trigger, custom, _lastHash);
+    if (!origin) {
+      return [buildUrl(defaultUrl, rawQuery, start, end), null];
+    }
+    return [origin, trigger];
+  }
+
+  const siteFilter = resolveSnapSiteFilter(trigger, custom, _lastHash);
+  if (!siteFilter) {
+    return [buildUrl(defaultUrl, rawQuery, start, end), null];
+  }
+  return [
+    buildSnapUrl(defaultUrl, siteFilter, rawQuery, sp + spLen, end),
+    trigger,
+  ];
+}
+
 function resolveRaw(
   rawQuery: string,
-  { defaultUrl, custom, luckyUrl }: RedirectSettings
+  settings: RedirectSettings
 ): [string, string | null] {
+  const { defaultUrl, custom, luckyUrl } = settings;
+  const syntax = settings.syntax;
   const len = rawQuery.length;
 
   let start = 0;
@@ -729,23 +791,29 @@ function resolveRaw(
     ];
   }
 
+  const bangMarker = syntax ? syntax[0] : DEFAULT_BANG_MARKER;
+  const snapMarker = syntax ? syntax[1] : DEFAULT_SNAP_MARKER;
+  const bangCode = bangMarker & 0xff;
+  const snapCode = snapMarker & 0xff;
+
   let exclStart = -1;
   let exclWidth = 0;
-  if (c0 === CH_EXCL) {
-    exclStart = start;
-    exclWidth = 1;
-  } else if (end - start >= 3 && isEncodedExclAt(rawQuery, start)) {
-    exclStart = start;
-    exclWidth = 3;
-  }
-
   let atStart = -1;
   let atWidth = 0;
-  if (exclStart === -1) {
-    if (c0 === CH_AT) {
-      atStart = start;
-      atWidth = 1;
-    } else if (end - start >= 3 && isEncodedAtAt(rawQuery, start)) {
+  if (c0 === bangCode) {
+    exclStart = start;
+    exclWidth = 1;
+  } else if (c0 === snapCode) {
+    atStart = start;
+    atWidth = 1;
+  } else if (end - start >= 3 && c0 === CH_PERCENT) {
+    const encoded =
+      rawQuery.charCodeAt(start + 1) |
+      ((rawQuery.charCodeAt(start + 2) | 32) << 8);
+    if (encoded === bangMarker >> 8) {
+      exclStart = start;
+      exclWidth = 3;
+    } else if (encoded === snapMarker >> 8) {
       atStart = start;
       atWidth = 3;
     }
@@ -812,53 +880,25 @@ function resolveRaw(
 
   // "@trigger+query" or "@trigger" — prefix snap
   if (atStart !== -1) {
-    const afterAt = atStart + atWidth;
-    if (afterAt >= end) {
-      return ["/", null];
-    }
-
-    const cAfterAt = rawQuery.charCodeAt(afterAt);
-    let atSpaceWidth = 0;
-    if (cAfterAt === CH_PLUS) {
-      atSpaceWidth = 1;
-    } else if (
-      cAfterAt === CH_PERCENT &&
-      rawQuery.charCodeAt(afterAt + 1) === CH_2 &&
-      rawQuery.charCodeAt(afterAt + 2) === CH_0
-    ) {
-      atSpaceWidth = 3;
-    }
-    if (atSpaceWidth) {
-      return [buildUrl(defaultUrl, rawQuery, start, end), null];
-    }
-
-    const spPacked = findSpace(rawQuery, afterAt, end);
-    const sp = spPacked === -1 ? -1 : spPacked >> 2;
-    const spLen = spPacked === -1 ? 0 : spPacked & 0b11;
-    const triggerEnd = sp === -1 ? end : sp;
-    const trigger = extractTrigger(rawQuery, afterAt, triggerEnd);
-
-    if (sp === -1 || sp + spLen >= end) {
-      const origin = resolveSnapOrigin(trigger, custom, _lastHash);
-      if (!origin) {
-        return [buildUrl(defaultUrl, rawQuery, start, end), null];
-      }
-      return [origin, trigger];
-    }
-
-    const siteFilter = resolveSnapSiteFilter(trigger, custom, _lastHash);
-    if (!siteFilter) {
-      return [buildUrl(defaultUrl, rawQuery, start, end), null];
-    }
-    return [
-      buildSnapUrl(defaultUrl, siteFilter, rawQuery, sp + spLen, end),
-      trigger,
-    ];
+    return resolvePrefixSnap(
+      rawQuery,
+      start,
+      end,
+      atStart + atWidth,
+      defaultUrl,
+      custom
+    );
   }
 
   // "query+!" / "query%20!" / "query+%21" / "query%20%21" — trailing bare bang lucky
   const lastChar = rawQuery.charCodeAt(end - 1);
-  const trailingTermEnd = findTrailingBareBang(rawQuery, start, end, lastChar);
+  const trailingTermEnd = findTrailingBareBang(
+    rawQuery,
+    start,
+    end,
+    lastChar,
+    bangMarker
+  );
   if (trailingTermEnd !== -1) {
     if (trailingTermEnd <= start) {
       return ["/", null];
@@ -869,10 +909,16 @@ function resolveRaw(
     ];
   }
 
-  const exclPacked = findExcl(rawQuery, start, end);
+  const exclPacked = findBangMarker(
+    rawQuery,
+    start,
+    end,
+    bangMarker,
+    snapMarker
+  );
   if (exclPacked === -1) {
-    if (_sawAt) {
-      const snapPacked = findLastSpaceAt(rawQuery, start, end);
+    if (_sawSnap) {
+      const snapPacked = findLastSpaceMarker(rawQuery, start, end, snapMarker);
       if (snapPacked !== -1) {
         const spaceBeforeAtPos = snapPacked >> 4;
         const spaceBeforeAtWidth = (snapPacked >> 2) & 0b11;
@@ -957,7 +1003,7 @@ function resolveRaw(
   }
 
   // "cats+!g"
-  const suffixPacked = findLastSpaceExcl(rawQuery, start, end);
+  const suffixPacked = findLastSpaceMarker(rawQuery, start, end, bangMarker);
   if (suffixPacked !== -1) {
     const spaceBeforeBangPos = suffixPacked >> 4;
     const spaceBeforeBangWidth = (suffixPacked >> 2) & 0b11;
@@ -985,10 +1031,10 @@ function resolveRaw(
 
   // "cats+g!"
   if (
-    lastChar === CH_EXCL ||
-    (end >= 3 && isEncodedExclAt(rawQuery, end - exclCharWidth))
+    lastChar === bangCode ||
+    (end >= 3 && isEncodedMarkerAt(rawQuery, end - exclCharWidth, bangMarker))
   ) {
-    const bangExclEnd = lastChar === CH_EXCL ? end - 1 : end - 3;
+    const bangExclEnd = lastChar === bangCode ? end - 1 : end - 3;
     const lastSpPacked = findLastSpace(rawQuery, start, bangExclEnd - 1);
     if (lastSpPacked !== -1) {
       const lastSpPos = lastSpPacked >> 2;

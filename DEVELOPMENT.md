@@ -75,6 +75,7 @@ flashbang/
 │   │   ├── raw-url.ts         # Raw URL pathname and origin parsing
 │   │   ├── snap-target.ts     # Alternate snap target validation and compilation
 │   │   ├── suggest-cookie.ts  # Unified suggestion cookie codec
+│   │   ├── trigger-prefix.ts  # Configurable bang/snap prefix codec
 │   │   ├── template.ts        # Bang URL template expansion
 │   │   └── trie.ts            # Radix trie lookup
 │   ├── generated/             # Output of codegen (gitignored, generated from data/bangs.json)
@@ -94,6 +95,7 @@ flashbang/
 │       ├── app.ts             # Initialization & orchestration
 │       ├── bang-catalog.ts    # Shared normalized bang metadata and bounded search
 │       ├── bang-meta.ts       # Packed metadata validation and cursor decoder
+│       ├── firefox-suggest.ts # Shared Firefox detection and suggestion URL builder
 │       ├── suggest-provider.ts # Suggestion provider feature availability
 │       ├── bench/
 │       │   ├── index.html     # Benchmark page
@@ -109,6 +111,7 @@ flashbang/
 │       │   ├── default-bang.ts # Default bang preview and persistence
 │       │   ├── firefox.ts     # Firefox suggestion-provider picker
 │       │   ├── providers.ts   # Suggestion and lucky provider controls
+│       │   ├── syntax.ts      # Bang/snap prefix selection and persistence
 │       │   ├── transfer.ts    # Settings import and export
 │       │   ├── write.ts       # Serialized writes, validation, and save status
 │       │   └── custom-bangs.ts # Custom bang list and add/edit form
@@ -213,7 +216,7 @@ The generated data is split by consumer. The Service Worker loads the regular lo
 
 User-created simple bangs use a URL containing `{}`. Capture bangs instead pair a regular expression with `$1`, `$2`, and later placeholders in the URL template. `src/shared/capture-template.ts` validates pattern and template bounds, rejects unsafe constructs, prevents captures from changing the URL origin, and compiles accepted records once when Service Worker settings load. Capture substitutions support percent, plus-space, and raw encoding.
 
-Kagi `ad` metadata and the custom-bang **Snap target** field provide an alternate domain or path for `@trigger` searches without changing normal `!trigger` behavior. `src/shared/snap-target.ts` validates and compiles targets into a site filter plus bare-snap origin. Codegen emits only non-redundant built-in overrides; custom targets are attached to their precompiled IndexedDB entries.
+Kagi `ad` metadata and the custom-bang **Snap target** field provide an alternate domain or path for snap searches without changing normal bang behavior. Bang and snap prefixes are distinct user settings selected from `!`, `@`, `$`, `:`, `;`, and `~`; defaults are `!` and `@`. `src/shared/trigger-prefix.ts` validates and compactly serializes those settings, while `src/shared/snap-target.ts` validates and compiles targets into a site filter plus bare-snap origin. Codegen emits only non-redundant built-in overrides; custom targets are attached to their precompiled IndexedDB entries.
 
 Custom bangs are stored in the `custom-bangs` IndexedDB object store. The UI supports add, edit, atomic trigger rename, remove, import, and export. After a mutation, `notifySW("invalidate")` clears the Service Worker's cached settings so regex and snap metadata are recompiled on the next read. The suggestion cookie contains custom trigger names for autocomplete, not full custom definitions.
 
@@ -264,7 +267,7 @@ The Service Worker tracks bang usage to personalize suggestion ordering. The flo
 
 The in-memory state (`frecencyCounts` plus `topFrecency` in `idb.ts`) is loaded from IndexedDB once and kept for the Service Worker lifetime. `invalidateCache()` clears only redirect settings and the shared database connection; loaded frecency and pending persistence remain intact. Browser benchmark mode suppresses these side effects only for the requesting benchmark client.
 
-**Browser cookie behavior**: Chromium-based browsers (Chrome, Edge, Arc) send cookies with suggest requests when the site is the default search engine. Firefox-based browsers (Firefox, Zen, LibreWolf) intentionally withhold cookies from OpenSearch suggest requests as a privacy decision ([bug 1624457](https://bugzilla.mozilla.org/show_bug.cgi?id=1624457)). The settings UI therefore provides a copyable Firefox suggestion URL with an explicit provider. Cookie-backed custom trigger suggestions and frecency are unavailable on those requests; redirect behavior is unaffected.
+**Browser cookie behavior**: Chromium-based browsers (Chrome, Edge, Arc) send cookies with suggest requests when the site is the default search engine. Firefox-based browsers (Firefox, Zen, LibreWolf) intentionally withhold cookies from OpenSearch suggest requests as a privacy decision ([bug 1624457](https://bugzilla.mozilla.org/show_bug.cgi?id=1624457)). The settings UI therefore provides a copyable Firefox suggestion URL with an explicit provider; it adds `bp` and `np` only for non-default syntax and omits the default `!`/`@` pair. Cookie-backed custom trigger suggestions and frecency are unavailable on those requests; redirect behavior is unaffected.
 
 ## Dev server
 

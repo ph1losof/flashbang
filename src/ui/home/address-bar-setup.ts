@@ -1,5 +1,10 @@
 import { copyText } from "../clipboard";
 import { $, el } from "../dom";
+import {
+  type FirefoxSuggestionConfig,
+  firefoxSuggestionUrl,
+  isFirefoxUserAgent,
+} from "../firefox-suggest";
 import { setupDialog } from "../modal";
 
 type AddressBarBrowser = "brave" | "chrome" | "edge" | "firefox" | "safari";
@@ -104,7 +109,7 @@ export function detectAddressBarBrowser(
   isBrave = false
 ): AddressBarBrowser {
   const ua = userAgent.toLowerCase();
-  if (ua.includes("firefox") || ua.includes("fxios")) {
+  if (isFirefoxUserAgent(ua)) {
     return "firefox";
   }
   if (ua.includes("edg/") || ua.includes("edga/") || ua.includes("edgios/")) {
@@ -123,7 +128,9 @@ export function detectAddressBarBrowser(
   return "chrome";
 }
 
-export function setupAddressBarSheet(): void {
+export function setupAddressBarSheet(
+  getFirefoxSuggestionConfig: () => FirefoxSuggestionConfig
+): { refreshSuggestionUrl: () => void } {
   const modal = $("#setup-modal");
   const openButton = $<HTMLButtonElement>("#open-setup");
   const closeButton = $<HTMLButtonElement>("#setup-close");
@@ -136,11 +143,21 @@ export function setupAddressBarSheet(): void {
   const browserSteps = $("#setup-browser-steps");
   const browserDocs = $<HTMLAnchorElement>("#setup-browser-docs");
   let tabButtons: HTMLButtonElement[] = [];
+  let activeBrowser: AddressBarBrowser | null = null;
 
   searchUrl.value = `${location.origin}?q=%s`;
   suggestUrl.value = `${location.origin}/suggest?q=%s`;
 
+  function refreshSuggestionUrl(): void {
+    suggestUrl.value =
+      activeBrowser === "firefox"
+        ? firefoxSuggestionUrl(location.origin, getFirefoxSuggestionConfig())
+        : `${location.origin}/suggest?q=%s`;
+  }
+
   function showBrowserGuide(browser: AddressBarBrowser): void {
+    activeBrowser = browser;
+    refreshSuggestionUrl();
     const guide = BROWSER_GUIDES[browser];
     for (const button of tabButtons) {
       const selected = button.dataset.browser === browser;
@@ -312,4 +329,6 @@ export function setupAddressBarSheet(): void {
     button.addEventListener("click", () => void copy(input, button));
     input.addEventListener("click", () => input.select());
   }
+
+  return { refreshSuggestionUrl };
 }

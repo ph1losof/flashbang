@@ -6,6 +6,7 @@ import {
 } from "../../shared/constants";
 import type { DB } from "../db";
 import { $ } from "../dom";
+import { isFirefoxUserAgent } from "../firefox-suggest";
 import { notifySW } from "../sw-bridge";
 import { setupFirefoxSuggestions } from "./firefox";
 import type { SettingsWriter } from "./write";
@@ -18,9 +19,11 @@ export interface ProviderControls {
 }
 
 export interface ProviderSettingsState {
+  bangPrefix: import("../../shared/trigger-prefix").TriggerPrefix;
   defaultBang: string;
   luckyProvider: string;
   luckyUrl: string;
+  snapPrefix: import("../../shared/trigger-prefix").TriggerPrefix;
   suggestProvider: string;
   suggestUrl: string;
 }
@@ -28,6 +31,7 @@ export interface ProviderSettingsState {
 interface ProviderSettingsOptions {
   controls: ProviderControls;
   db: DB;
+  onFirefoxSuggestProviderChange: (provider: string) => void;
   onSuggestChange: () => void;
   state: ProviderSettingsState;
   writer: SettingsWriter;
@@ -184,6 +188,7 @@ function setupProviderControl({
 export function setupProviderSettings({
   controls,
   db,
+  onFirefoxSuggestProviderChange,
   onSuggestChange,
   state,
   writer,
@@ -196,7 +201,8 @@ export function setupProviderSettings({
   const suggestDefaultDisplay = $("#suggest-default-display");
   const suggestDefaultPrefix = $("#suggest-default-prefix");
   const suggestDefaultProvider = $("#suggest-default-provider");
-  const isFirefox = /Firefox\//.test(navigator.userAgent);
+  const isFirefox = isFirefoxUserAgent(navigator.userAgent);
+  let refreshFirefoxSuggestions: (() => void) | null = null;
 
   function updateDefaultDisplays(): void {
     setDefaultDisplay(
@@ -242,11 +248,19 @@ export function setupProviderSettings({
     suggestControl.refresh(!isFirefox);
     luckyControl.refresh();
     updateDefaultDisplays();
+    refreshFirefoxSuggestions?.();
   }
 
   if (isFirefox) {
     state.suggestProvider = "google";
-    setupFirefoxSuggestions(controls, writer);
+    refreshFirefoxSuggestions = setupFirefoxSuggestions(
+      {
+        ...controls,
+        getPrefixes: () => [state.bangPrefix, state.snapPrefix],
+        onProviderChange: onFirefoxSuggestProviderChange,
+      },
+      writer
+    ).refresh;
   }
   refresh();
 

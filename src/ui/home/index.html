@@ -358,7 +358,11 @@
           <h3 class="section-title">Default Search Engine</h3>
           <div class="relative">
             <div class="flex gap-2 items-center">
-              <span class="text-text-secondary font-mono text-sm">!</span>
+              <span
+                id="default-bang-prefix"
+                class="text-text-secondary font-mono text-sm"
+                >!</span
+              >
               <input
                 type="text"
                 id="default-bang"
@@ -381,12 +385,37 @@
           </div>
         </section>
 
+        <!-- Shortcut Syntax -->
+        <section class="card mb-5">
+          <h3 class="section-title">Shortcut Syntax</h3>
+          <p class="label-text mb-2">
+            Choose different prefixes for bangs and snaps
+          </p>
+          <div class="grid grid-cols-2 gap-2">
+            <label class="label-text">
+              Bang prefix
+              <select
+                id="bang-prefix"
+                class="input-field mt-1 font-mono text-sm"
+              ></select>
+            </label>
+            <label class="label-text">
+              Snap prefix
+              <select
+                id="snap-prefix"
+                class="input-field mt-1 font-mono text-sm"
+              ></select>
+            </label>
+          </div>
+        </section>
+
         <!-- Feeling Lucky -->
         <section class="card mb-5">
           <h3 class="section-title">Feeling Lucky</h3>
           <p class="label-text mb-2">
-            Use <code>\query</code>, <code>query !</code>, or
-            <code>! query</code>
+            Use <code>\query</code>,
+            <code id="lucky-trailing-syntax">query !</code>, or
+            <code id="lucky-leading-syntax">! query</code>
             to jump to the first search result
           </p>
           <div class="relative">
@@ -499,8 +528,10 @@
                 aria-label="Suggestion providers"
               ></span>
             </span>
-            menu to see supported providers and choose another. Click the URL
-            below to copy it into Firefox's search engine settings.
+            menu to see supported providers and choose another. When the bang or
+            snap prefix differs from its default, the URL embeds both selected
+            prefixes. Click it to copy the complete configuration into Firefox's
+            search engine settings.
             <button
               type="button"
               id="suggest-firefox-url"
@@ -632,8 +663,10 @@
           if (!sw) {
             return;
           }
+          const reloadOnActivation =
+            navigator.serviceWorker.controller !== null;
           sw.addEventListener("statechange", () => {
-            if (sw.state === "activated") {
+            if (sw.state === "activated" && reloadOnActivation) {
               location.reload();
             }
           });

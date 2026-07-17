@@ -20,7 +20,7 @@ All three support bangs natively — but every query still round-trips through t
 
 ### Privacy
 
-> Core redirects never leave your machine — the Service Worker handles them offline with no server involved. Search suggestions are completely optional and go through our server when enabled on the hosted version. One same-site cookie (`suggest`) stores your configured suggestion provider, default bang, optional custom suggestion URL, custom bang trigger names, and compact top bang usage counts so the server can proxy and personalize suggestions. The frecency section contains only bang triggers and hit counts (e.g. `g:50.yt:30`), never query content. No accounts, no sessions, no personal data. There is no tracking or analytics — we don't know what you search or what bangs you use. Cloudflare Pages exposes basic request counts in its dashboard as a platform feature we did not opt into and cannot disable. It contains no query content or personally identifiable information.
+> Core redirects never leave your machine — the Service Worker handles them offline with no server involved. Search suggestions are completely optional and go through our server when enabled on the hosted version. One same-site cookie (`suggest`) stores your configured suggestion provider, default bang, selected bang/snap prefixes, optional custom suggestion URL, custom bang trigger names, and compact top bang usage counts so the server can proxy and personalize suggestions. The frecency section contains only bang triggers and hit counts (e.g. `g:50.yt:30`), never query content. No accounts, no sessions, no personal data. There is no tracking or analytics — we don't know what you search or what bangs you use. Cloudflare Pages exposes basic request counts in its dashboard as a platform feature we did not opt into and cannot disable. It contains no query content or personally identifiable information.
 >
 > If you'd rather not trust our server at all, Flashbang is fully self-hostable. Deploy to Cloudflare Pages/Railway in minutes or `docker run` it on any VPS — a single command gets you a fully private instance. See [Setup](#setup-as-search-engine) for details.
 
@@ -31,11 +31,16 @@ All three support bangs natively — but every query still round-trips through t
 - **Private** — No analytics, no tracking. All data stays on your device for the core feature - redirects
 - **14,000+ bangs** — Merged from DuckDuckGo, Kagi, and custom sources. Updated daily via automated CI
 - **Custom bangs** — Add your own bangs through the settings UI. They take priority over built-ins
+- **Configurable syntax** — Choose distinct bang and snap prefixes from `!`, `@`, `$`, `:`, `;`, and `~`. Defaults are `!` for bangs and `@` for snaps. The selected bang prefix also controls bare Feeling Lucky forms; leading `\query` always remains available
 - **Search suggestions** — The only bang tool with bang-aware autocomplete in your browser's native address bar. Type `!y` and the browser itself suggests `!yt` (YouTube), `!ya` (Yandex), `!yf` (Yahoo Finance) — ranked by a combination of global popularity and your personal usage frequency. Regular queries can use Google, DuckDuckGo, Bing, Brave, Yahoo, Ecosia, Kagi, Qwant, Startpage, Yandex, or Baidu. Self-hosted deployments can explicitly opt into custom providers. Both are unified through a single `/suggest` endpoint that plugs into your browser's built-in suggestion UI. Firefox-based browsers also render bang descriptions, site names, and favicons inline in the dropdown via `google:suggestdetail`. See [Browser quirks](#browser-quirks) for rendering and cookie differences across browsers
 - **Frecency** — The Service Worker tracks which bangs and snaps you use and how often, entirely in-memory on the redirect path. Your most-used triggers are promoted in autocomplete suggestions so they surface first. Compact snapshots are persisted to IndexedDB across Service Worker restarts. Suggestion personalization is available in Chromium-based browsers; it is not available in Firefox-based browsers — see [Browser quirks](#browser-quirks)
 - **Snaps** — Type `@trigger query` to search your default engine with results restricted to that trigger's domain via `site:`. For example, `@w quantum` searches Google for `quantum site:en.wikipedia.org`. Works in prefix (`@w quantum`) and suffix (`quantum @w`) positions. A bare snap (`@w`) redirects to the trigger's homepage. Snaps reuse bang triggers; entries without a resolvable web domain, such as the internal `settings` shortcut, fall back to a normal search
-- **Feeling Lucky** — Prefix a query with `\`, or add a bare `!` before or after it, to skip the results page and jump straight to the first result. The default mode matches Google, DuckDuckGo, or Kagi when one of those is your default engine, and falls back to DuckDuckGo for other engines. You can also select a provider, use a custom URL, or disable it entirely
+- **Feeling Lucky** — Prefix a query with `\`, or add the selected bang prefix before or after it, to skip the results page and jump straight to the first result. The bang prefix defaults to `!`; selecting another prefix replaces those bare `!` forms, while `\` remains available. The default mode matches Google, DuckDuckGo, or Kagi when one of those is your default engine, and falls back to DuckDuckGo for other engines. You can also select a provider, use a custom URL, or disable it entirely
 - **OpenSearch** — Browsers auto-discover Flashbang as a search engine via `/opensearch.xml`, including the suggestions endpoint. The XML is dynamically generated at request time using the current origin, so it works out of the box on any self-hosted domain or `localhost` — no hardcoded URLs to change
+
+## Configurable syntax
+
+Settings lets you select different prefixes for bangs and snaps from `!`, `@`, `$`, `:`, `;`, and `~`. Changing a prefix replaces that syntax rather than adding an alias. For example, with `$` for bangs and `~` for snaps, use `$gh react`, `react $gh`, `~w quantum`, and `quantum ~w`; `!gh` and `@w` become ordinary search text. The examples below use the default `!` and `@` prefixes.
 
 ## Bang syntax
 
@@ -52,7 +57,7 @@ If the query is just a bang with no search term (e.g. `!g`), Flashbang redirects
 
 ## Snap syntax
 
-Snaps use `@` instead of `!` to perform a **site-restricted search** — your query goes to your default search engine with `site:domain` appended. Any bang trigger with a resolvable web domain works as a snap. All snaps are case-insensitive.
+By default, snaps use `@` instead of `!` to perform a **site-restricted search** — your query goes to your default search engine with `site:domain` appended. Any bang trigger with a resolvable web domain works as a snap. All snaps are case-insensitive.
 
 | Format      | Example      | Result                                                    |
 | ----------- | ------------ | --------------------------------------------------------- |
@@ -64,7 +69,7 @@ If a query contains both a bang (`!`) and a snap (`@`), the bang takes precedenc
 
 ### Feeling Lucky
 
-Skip the search results page and go directly to the first result. Three syntax options:
+Skip the search results page and go directly to the first result. The table uses the default bang prefix; if you change it, the leading/trailing bare marker changes with it. Leading backslash remains fixed.
 
 | Format       | Example     | Result                     |
 | ------------ | ----------- | -------------------------- |
@@ -85,19 +90,25 @@ The redirect destination depends on your lucky provider (configurable in setting
 
 ### Suggestion URL parameters
 
-The suggestion endpoint accepts an optional `sp` (suggestion provider) query parameter to choose which search engine provides autocomplete results, without relying on cookies:
+The suggestion endpoint accepts cookie-independent query parameters for the suggestion provider and shortcut syntax:
 
-```
+- `sp` selects the suggestion provider
+- `bp` selects the bang prefix
+- `np` selects the snap prefix
+
+`bp` and `np` must be supplied together, must differ, and each accepts `!`, `@`, `$`, `:`, `;`, or `~`. Invalid pairs safely fall back to cookie or default settings. Provider values are:
+
+```text
 google, ddg, bing, brave, yahoo, ecosia, kagi, qwant, startpage, yandex, baidu, none
 ```
 
-Example suggestion URL with a provider override:
+Example Firefox suggestion URL with provider and syntax overrides:
 
-```
-https://flashbang-dyr.pages.dev/suggest?q=%s&sp=ddg
+```text
+https://flashbang-dyr.pages.dev/suggest?q=%s&sp=ddg&bp=%24&np=~
 ```
 
-**Why this exists:** in Chromium-based browsers, cookies are sent with suggest requests and settings configured in the UI are picked up automatically — `sp` is rarely needed. In Firefox-based browsers, cookies are withheld and `sp` is the only way to pick a provider. See [Browser quirks](#browser-quirks) for details.
+**Why this exists:** in Chromium-based browsers, cookies are sent with suggest requests and settings configured in the UI are picked up automatically, so these overrides are rarely needed. Firefox-based browsers withhold cookies; the settings UI therefore generates a copyable URL containing `sp`, and adds `bp` plus `np` when the selected syntax differs from the default `!`/`@` pair. See [Browser quirks](#browser-quirks) for details.
 
 ### Use the hosted version
 
@@ -124,7 +135,7 @@ These apply equally to the hosted version and any self-hosted instance — worth
 
   **Important:** _editing_ the auto-discovered entry's Shortcut doesn't persist — Edge re-derives it from `/opensearch.xml` on restart and reverts to the host. The delete-and-readd step is what makes the fix stick, because a manually-added entry is independent of the discovery XML.
 
-- **Firefox / Zen / LibreWolf — no frecency, no custom bangs in suggestions.** Firefox-based browsers intentionally [withhold cookies from OpenSearch suggest requests](https://bugzilla.mozilla.org/show_bug.cgi?id=1624457) as a privacy measure. Flashbang's suggestion context (configured provider, custom bang trigger names, and frecency data) is carried by the unified `suggest` cookie, so those features are unavailable on these requests — suggestions fall back to Google with default popularity ranking. To pick a different suggestion provider, register the suggestion URL with the `sp` parameter (e.g. `…/suggest?q=%s&sp=ddg`) — see [Suggestion URL parameters](#suggestion-url-parameters).
+- **Firefox / Zen / LibreWolf — no frecency, no custom bangs in suggestions.** Firefox-based browsers intentionally [withhold cookies from OpenSearch suggest requests](https://bugzilla.mozilla.org/show_bug.cgi?id=1624457) as a privacy measure. Flashbang's custom bang trigger names and frecency data are carried by the unified `suggest` cookie, so those features remain unavailable on these requests. Provider and bang/snap prefix settings can be embedded directly with `sp`, `bp`, and `np`; the settings UI generates the complete URL — see [Suggestion URL parameters](#suggestion-url-parameters).
 
 - **Chromium — plain-text suggestions only.** Chrome, Edge, Arc, and other Chromium-based browsers don't render rich suggestion details (descriptions, favicons, entity images) for search-type suggestions from custom search engines; they're shown as plain text. Firefox-based browsers render the rich data passed through `google:suggestdetail`. This is a Chromium limitation, not flashbang's.
 
@@ -195,7 +206,8 @@ The settings page has a copy button that gives you the exact search URL template
 
 Open the settings modal from the gear icon on the home page, or type **`!settings`** in the address bar to jump there directly. Type **`!`** on its own to quickly access the home page.
 
-- **Default bang** — The built-in bang used when no `!` is in the query. Defaults to `g` (Google). Change it to `ddg`, `b`, or any other built-in trigger
+- **Shortcut syntax** — Choose distinct bang and snap prefixes from `!`, `@`, `$`, `:`, `;`, and `~`. Defaults are `!` and `@`
+- **Default bang** — The built-in bang used when no selected bang prefix is in the query. Defaults to `g` (Google). Change it to `ddg`, `b`, or any other built-in trigger
 - **Feeling Lucky** — Choose how lucky redirects resolve: Default (match Google, DuckDuckGo, or Kagi when selected as the default bang, otherwise fall back to DuckDuckGo), Google, DuckDuckGo, Kagi, Custom (your own URL template with `{}` as query placeholder), or Disabled
 - **Search suggestions** — Choose the source for address bar autocomplete: Default (match a supported default bang, otherwise return no regular-query suggestions), Google, DuckDuckGo, Bing, Brave, Yahoo, Ecosia, Kagi, Qwant, Startpage, Yandex, Baidu, Custom (self-hosted deployments with `ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=true` only), or None
 - **Custom bangs** — Add bangs with a trigger, name, and URL template (use `{}` as the query placeholder). Advanced bangs can match the query with a regular expression, substitute `$1`, `$2`, etc., and set a separate domain or path for `@snap` searches. Custom bangs override built-in ones
@@ -210,7 +222,7 @@ An optional snap target such as `docs.example.com/api` makes `@mybang query` sea
 
 ## How it works
 
-When you type `!gh react` in the address bar, the Service Worker intercepts the request before it reaches the network. It parses the bang trigger, looks it up in the bang map (checking custom bangs first, then built-ins), and responds with a 302 redirect. Snaps (`@trigger`) work the same way — the Service Worker resolves the trigger's domain and redirects to your default search engine with `site:domain` appended. If no bang or snap is found, your default search engine is used.
+When you type `!gh react` (or the equivalent with your selected bang prefix) in the address bar, the Service Worker intercepts the request before it reaches the network. It parses the bang trigger, looks it up in the bang map (checking custom bangs first, then built-ins), and responds with a 302 redirect. Snaps work the same way with their separately selected prefix — the Service Worker resolves the trigger's domain and redirects to your default search engine with `site:domain` appended. If no bang or snap is found, your default search engine is used.
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for build pipeline and project structure details.
 

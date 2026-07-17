@@ -2,13 +2,22 @@ import {
   parseFrecencyCompact,
   serializeFrecencyCompact,
 } from "./frecency-serial";
+import {
+  DEFAULT_BANG_PREFIX,
+  DEFAULT_SNAP_PREFIX,
+  decodeTriggerPrefixes,
+  encodeTriggerPrefixes,
+  type TriggerPrefix,
+} from "./trigger-prefix";
 
 const SECTION_SEPARATOR = "|";
 const FREQUENCY_PREFIX = "f:";
 const CUSTOM_PREFIX = "c:";
 
 interface ParsedSuggestCookieCore {
+  bangPrefix: TriggerPrefix;
   provider: string;
+  snapPrefix: TriggerPrefix;
   trigger: string;
   customUrl: string | null;
 }
@@ -27,6 +36,11 @@ const DEFAULT_TRIGGER = "g";
 
 interface ParsedSuggestCookieWithValidation {
   settings: ParsedSuggestCookie;
+  hasInvalidContext: boolean;
+}
+
+export interface ParsedSuggestCookieContextWithValidation
+  extends ParsedSuggestCookieContext {
   hasInvalidContext: boolean;
 }
 
@@ -82,6 +96,75 @@ function parseCustom(
   }
 }
 
+function parseSuggestCookieContext(
+  raw: string,
+  firstPipe: number,
+  forCleanup: boolean,
+  target: ParsedSuggestCookieContext
+): boolean {
+  let hasInvalidContext = false;
+
+  if (firstPipe !== -1) {
+    let sectionStart = firstPipe + 1;
+
+    while (sectionStart <= raw.length) {
+      let sectionEnd = raw.indexOf(SECTION_SEPARATOR, sectionStart);
+      if (sectionEnd === -1) {
+        sectionEnd = raw.length;
+      }
+
+      if (sectionEnd > sectionStart) {
+        const section = raw.substring(sectionStart, sectionEnd);
+        if (section.startsWith(FREQUENCY_PREFIX)) {
+          const sectionVal = section.substring(2);
+          const result = parseFrecencyCompactSection(sectionVal, forCleanup);
+          target.frecent = result.value;
+          if (forCleanup && !result.valid) {
+            hasInvalidContext = true;
+            break;
+          }
+        } else if (section.startsWith(CUSTOM_PREFIX)) {
+          const result = parseCustom(section.substring(2), forCleanup);
+          target.custom = result.value;
+          if (forCleanup && !result.valid) {
+            hasInvalidContext = true;
+            break;
+          }
+        } else if (forCleanup) {
+          hasInvalidContext = true;
+          break;
+        }
+      }
+
+      if (sectionEnd === raw.length) {
+        break;
+      }
+
+      sectionStart = sectionEnd + 1;
+    }
+  }
+
+  return hasInvalidContext;
+}
+
+export function parseSuggestCookieContextValueWithValidation(
+  raw: string,
+  forCleanup: boolean
+): ParsedSuggestCookieContextWithValidation {
+  const context: ParsedSuggestCookieContextWithValidation = {
+    custom: [],
+    frecent: {},
+    hasInvalidContext: false,
+  };
+  context.hasInvalidContext = parseSuggestCookieContext(
+    raw,
+    raw.indexOf(SECTION_SEPARATOR),
+    forCleanup,
+    context
+  );
+  return context;
+}
+
 export function parseSuggestCookieValue(
   raw: string,
   includeBangContext: boolean
@@ -101,6 +184,7 @@ export function parseSuggestCookieValueWithValidation(
   let provider = "";
   let trigger = "";
   let customUrl = "";
+  let syntax = "";
 
   const comma1 = firstSection.indexOf(",");
   if (comma1 === -1) {
@@ -112,61 +196,41 @@ export function parseSuggestCookieValueWithValidation(
       trigger = firstSection.substring(comma1 + 1);
     } else {
       trigger = firstSection.substring(comma1 + 1, comma2);
-      customUrl = firstSection.substring(comma2 + 1);
-    }
-  }
-
-  let custom: string[] = [];
-  let frecent: Record<string, number> = {};
-  let hasInvalidContext = false;
-
-  if (includeBangContext && firstPipe !== -1) {
-    let sectionStart = firstPipe + 1;
-
-    while (sectionStart <= raw.length) {
-      let sectionEnd = raw.indexOf(SECTION_SEPARATOR, sectionStart);
-      if (sectionEnd === -1) {
-        sectionEnd = raw.length;
-      }
-
-      if (sectionEnd > sectionStart) {
-        const section = raw.substring(sectionStart, sectionEnd);
-        if (section.startsWith(FREQUENCY_PREFIX)) {
-          const sectionVal = section.substring(2);
-          const result = parseFrecencyCompactSection(sectionVal, forCleanup);
-          frecent = result.value;
-          if (forCleanup && !result.valid) {
-            hasInvalidContext = true;
-            break;
-          }
-        } else if (section.startsWith(CUSTOM_PREFIX)) {
-          const result = parseCustom(section.substring(2), forCleanup);
-          custom = result.value;
-          if (forCleanup && !result.valid) {
-            hasInvalidContext = true;
-            break;
-          }
-        } else if (forCleanup) {
-          hasInvalidContext = true;
-          break;
+      const customStart = comma2 + 1;
+      if (customStart < firstSection.length) {
+        const comma3 = firstSection.indexOf(",", customStart);
+        if (comma3 === -1) {
+          customUrl = firstSection.substring(customStart);
+        } else {
+          customUrl = firstSection.substring(customStart, comma3);
+          syntax = firstSection.substring(comma3 + 1);
         }
       }
-
-      if (sectionEnd === raw.length) {
-        break;
-      }
-
-      sectionStart = sectionEnd + 1;
     }
   }
 
+  const prefixes = syntax ? decodeTriggerPrefixes(syntax) : null;
+  const bangPrefix = prefixes?.[0] ?? DEFAULT_BANG_PREFIX;
+  const snapPrefix = prefixes?.[1] ?? DEFAULT_SNAP_PREFIX;
+
   const settings: ParsedSuggestCookie = {
+    bangPrefix,
     provider: provider || DEFAULT_PROVIDER,
+    snapPrefix,
     trigger: trigger || DEFAULT_TRIGGER,
     customUrl: customUrl ? safeDecodeURIComponent(customUrl) : null,
-    frecent,
-    custom,
+    frecent: {},
+    custom: [],
   };
+  let hasInvalidContext = false;
+  if (includeBangContext && firstPipe !== -1) {
+    hasInvalidContext = parseSuggestCookieContext(
+      raw,
+      firstPipe,
+      forCleanup,
+      settings
+    );
+  }
 
   return {
     settings,
@@ -179,9 +243,17 @@ export function encodeSuggestCookieValue(
   trigger: string,
   customUrl: string,
   custom: string[] = [],
-  frecent: Record<string, number> | null = null
+  frecent: Record<string, number> | null = null,
+  bangPrefix: TriggerPrefix = DEFAULT_BANG_PREFIX,
+  snapPrefix: TriggerPrefix = DEFAULT_SNAP_PREFIX
 ): string {
   let value = `${provider},${trigger},${encodeURIComponent(customUrl)}`;
+  if (
+    bangPrefix !== DEFAULT_BANG_PREFIX ||
+    snapPrefix !== DEFAULT_SNAP_PREFIX
+  ) {
+    value += `,${encodeTriggerPrefixes(bangPrefix, snapPrefix)}`;
+  }
 
   const compact = serializeFrecencyCompact(frecent);
   if (compact) {

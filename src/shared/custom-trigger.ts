@@ -6,7 +6,7 @@ const RESERVED_CUSTOM_TRIGGERS = new Set([
   "prototype",
   "settings",
 ]);
-const ENCODED_TRIGGER_SEPARATOR = /%(?:20|21|40)/i;
+const ENCODED_TRIGGER_SEPARATOR = /%(?:20|21|24|3a|3b|40|7e)/i;
 
 export function validateCustomTrigger(trigger: string): string | null {
   if (!trigger) {
@@ -18,14 +18,14 @@ export function validateCustomTrigger(trigger: string): string | null {
   if (/\s/u.test(trigger)) {
     return "Shortcut cannot contain whitespace";
   }
-  if (trigger.includes("!") || trigger.includes("@") || trigger.includes("+")) {
-    return "Shortcut cannot contain !, @, or +";
+  if (/[!@$:;~+]/u.test(trigger)) {
+    return "Shortcut cannot contain trigger prefixes (!, @, $, :, ;, ~) or +";
   }
-  if (trigger.includes(",") || trigger.includes(":")) {
-    return "Shortcut cannot contain comma or colon";
+  if (trigger.includes(",")) {
+    return "Shortcut cannot contain comma";
   }
   if (ENCODED_TRIGGER_SEPARATOR.test(trigger)) {
-    return "Shortcut cannot contain encoded separators (%20, %21, or %40)";
+    return "Shortcut cannot contain encoded spaces or trigger prefixes";
   }
   if (RESERVED_CUSTOM_TRIGGERS.has(trigger.toLowerCase())) {
     return `"${trigger}" is a reserved shortcut`;

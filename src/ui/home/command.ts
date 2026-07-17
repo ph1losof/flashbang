@@ -1,4 +1,9 @@
 import {
+  DEFAULT_BANG_PREFIX,
+  DEFAULT_SNAP_PREFIX,
+  type TriggerPrefix,
+} from "../../shared/trigger-prefix";
+import {
   type BangMeta,
   createBangMeta,
   loadBuiltinBangCatalog,
@@ -18,6 +23,7 @@ function customDomain(url: string): string {
 export interface BangCommandController {
   input: HTMLInputElement;
   refresh: () => Promise<void>;
+  setPrefixes: (bang: TriggerPrefix, snap: TriggerPrefix) => void;
 }
 
 export function setupBangCommand(db: DB): BangCommandController {
@@ -27,12 +33,14 @@ export function setupBangCommand(db: DB): BangCommandController {
   const selectedBadgeText = $("#bang-command-selected-text");
   const results = $("#bang-command-results");
   const count = $("#home-bang-count");
-  const defaultPlaceholder = input.placeholder;
+  let bangPrefix = DEFAULT_BANG_PREFIX;
+  let snapPrefix = DEFAULT_SNAP_PREFIX;
+  let defaultPlaceholder = input.placeholder;
   let entries: readonly BangMeta[] | null = null;
   let loading: Promise<void> | null = null;
   let visible: BangMeta[] = [];
   let optionElements: HTMLButtonElement[] = [];
-  let selectedCommand: { marker: "!" | "@"; trigger: string } | null = null;
+  let selectedCommand: { marker: TriggerPrefix; trigger: string } | null = null;
   let selected = -1;
   let catalogVersion = 0;
 
@@ -47,7 +55,7 @@ export function setupBangCommand(db: DB): BangCommandController {
   }
 
   function commandParts(): {
-    marker: "!" | "@";
+    marker: TriggerPrefix;
     search: string;
     terms: string;
   } | null {
@@ -56,18 +64,18 @@ export function setupBangCommand(db: DB): BangCommandController {
       return null;
     }
     const leadingMarker = value.charAt(0);
-    if (leadingMarker === "!" || leadingMarker === "@") {
+    if (leadingMarker === bangPrefix || leadingMarker === snapPrefix) {
       const search = value.substring(1);
       return /\s/.test(search)
         ? null
         : { marker: leadingMarker, search: search.toLowerCase(), terms: "" };
     }
 
-    const bangIndex = value.lastIndexOf(" !");
-    const snapIndex = value.lastIndexOf(" @");
+    const bangIndex = value.lastIndexOf(` ${bangPrefix}`);
+    const snapIndex = value.lastIndexOf(` ${snapPrefix}`);
     const markerIndex = Math.max(bangIndex, snapIndex);
     if (markerIndex !== -1) {
-      const marker = value.charAt(markerIndex + 1) as "!" | "@";
+      const marker = value.charAt(markerIndex + 1) as TriggerPrefix;
       const search = value.substring(markerIndex + 2);
       return /\s/.test(search)
         ? null
@@ -79,7 +87,7 @@ export function setupBangCommand(db: DB): BangCommandController {
     }
 
     const search = value.toLowerCase().trim();
-    return /\s/.test(search) ? null : { marker: "!", search, terms: "" };
+    return /\s/.test(search) ? null : { marker: bangPrefix, search, terms: "" };
   }
 
   function renderSelection(previous = -1, scroll = true): void {
@@ -110,7 +118,7 @@ export function setupBangCommand(db: DB): BangCommandController {
     renderSelection(previous);
   }
 
-  function select(entry: BangMeta, marker: "!" | "@", terms: string): void {
+  function select(entry: BangMeta, marker: TriggerPrefix, terms: string): void {
     selectedCommand = { marker, trigger: entry.trigger };
     selectedBadgeText.textContent = `${marker}${entry.trigger}`;
     selectedBadge.setAttribute(
@@ -267,6 +275,22 @@ export function setupBangCommand(db: DB): BangCommandController {
     return loadEntries();
   }
 
+  function setPrefixes(bang: TriggerPrefix, snap: TriggerPrefix): void {
+    bangPrefix = bang;
+    snapPrefix = snap;
+    defaultPlaceholder = `Search bangs or enter ${bangPrefix}gh react`;
+    if (selectedCommand) {
+      clearSelectedCommand();
+    } else {
+      input.placeholder = defaultPlaceholder;
+      if (entries && input.value.trim()) {
+        renderResults();
+      } else {
+        closeResults();
+      }
+    }
+  }
+
   input.addEventListener("focus", () => void loadEntries());
   input.addEventListener("blur", () => {
     setTimeout(() => {
@@ -350,5 +374,5 @@ export function setupBangCommand(db: DB): BangCommandController {
   } else {
     setTimeout(() => void loadEntries(), 800);
   }
-  return { input, refresh };
+  return { input, refresh, setPrefixes };
 }

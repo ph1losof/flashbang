@@ -1,13 +1,4 @@
-import {
-  CH_AT,
-  CH_CR,
-  CH_EXCL,
-  CH_FF,
-  CH_NL,
-  CH_SPACE,
-  CH_TAB,
-  CH_VTAB,
-} from "./shared/chars";
+import { CH_CR, CH_FF, CH_NL, CH_SPACE, CH_TAB, CH_VTAB } from "./shared/chars";
 import {
   JSON_HEADERS,
   SUGGEST_TRIGGER_PROVIDERS,
@@ -16,15 +7,24 @@ import {
 import { readQueryParam } from "./shared/raw-query";
 import {
   encodeSuggestCookieValue,
+  parseSuggestCookieContextValueWithValidation,
   parseSuggestCookieValue,
   parseSuggestCookieValueWithValidation,
 } from "./shared/suggest-cookie";
 import { resolveTemplateParts } from "./shared/template";
+import {
+  DEFAULT_BANG_PREFIX,
+  DEFAULT_SNAP_PREFIX,
+  isTriggerPrefix,
+  type TriggerPrefix,
+} from "./shared/trigger-prefix";
 import { bangSuggestions } from "./suggest-bang";
 
 export interface SuggestCoreSettings {
+  bangPrefix: TriggerPrefix;
   customUrl: string | null;
   provider: string;
+  snapPrefix: TriggerPrefix;
   trigger: string;
 }
 
@@ -41,6 +41,7 @@ export interface PartialBang {
   partial: string;
   prefix: string;
   isSnap?: boolean;
+  triggerPrefix: TriggerPrefix;
 }
 
 function isTrimWs(code: number): boolean {
@@ -97,7 +98,11 @@ function isSuggestionPayload(value: unknown): value is unknown[] {
   );
 }
 
-export function parsePartialBang(q: string): PartialBang | null {
+export function parsePartialBang(
+  q: string,
+  bangPrefix: TriggerPrefix = DEFAULT_BANG_PREFIX,
+  snapPrefix: TriggerPrefix = DEFAULT_SNAP_PREFIX
+): PartialBang | null {
   let start = 0;
   let end = q.length;
 
@@ -112,8 +117,10 @@ export function parsePartialBang(q: string): PartialBang | null {
   }
 
   const c0 = q.charCodeAt(start);
+  const bangCode = bangPrefix.charCodeAt(0);
+  const snapCode = snapPrefix.charCodeAt(0);
 
-  if (c0 === CH_EXCL || c0 === CH_AT) {
+  if (c0 === bangCode || c0 === snapCode) {
     for (let i = start + 1; i < end; i++) {
       if (q.charCodeAt(i) === CH_SPACE) {
         return null;
@@ -122,14 +129,15 @@ export function parsePartialBang(q: string): PartialBang | null {
     return {
       prefix: "",
       partial: q.substring(start + 1, end).toLowerCase(),
-      isSnap: c0 === CH_AT || undefined,
+      isSnap: c0 === snapCode || undefined,
+      triggerPrefix: c0 === snapCode ? snapPrefix : bangPrefix,
     };
   }
 
   for (let i = end - 2; i >= start; i--) {
     const ci = q.charCodeAt(i);
     const ci1 = q.charCodeAt(i + 1);
-    if (ci !== CH_SPACE || (ci1 !== CH_EXCL && ci1 !== CH_AT)) {
+    if (ci !== CH_SPACE || (ci1 !== bangCode && ci1 !== snapCode)) {
       continue;
     }
     const triggerStart = i + 2;
@@ -141,7 +149,8 @@ export function parsePartialBang(q: string): PartialBang | null {
     return {
       prefix: q.substring(start, i + 1),
       partial: q.substring(triggerStart, end).toLowerCase(),
-      isSnap: ci1 === CH_AT || undefined,
+      isSnap: ci1 === snapCode || undefined,
+      triggerPrefix: ci1 === snapCode ? snapPrefix : bangPrefix,
     };
   }
 
@@ -201,7 +210,9 @@ function parseCookieInternalWithRewrite(
     settings.trigger,
     settings.customUrl || "",
     [],
-    {}
+    {},
+    settings.bangPrefix,
+    settings.snapPrefix
   );
 
   return {
@@ -215,11 +226,50 @@ export interface SuggestSettingsWithCleanup {
   rewrittenSuggestCookie: string | null;
 }
 
+export function parseBangSettingsFromRequestWithCleanup(
+  request: Request,
+  settings: SuggestSettings
+): SuggestSettingsWithCleanup {
+  const suggestRaw = readCookieValue(
+    request.headers.get("Cookie") || "",
+    "suggest"
+  );
+  if (suggestRaw === null) {
+    return { settings, rewrittenSuggestCookie: null };
+  }
+
+  const { custom, frecent, hasInvalidContext } =
+    parseSuggestCookieContextValueWithValidation(suggestRaw, true);
+  settings.custom = custom;
+  settings.frecent = frecent;
+  if (!hasInvalidContext) {
+    return { settings, rewrittenSuggestCookie: null };
+  }
+
+  const cookieSettings = parseSuggestCookieValue(suggestRaw, false);
+  settings.custom = [];
+  settings.frecent = {};
+  return {
+    settings,
+    rewrittenSuggestCookie: encodeSuggestCookieValue(
+      cookieSettings.provider,
+      cookieSettings.trigger,
+      cookieSettings.customUrl || "",
+      [],
+      {},
+      cookieSettings.bangPrefix,
+      cookieSettings.snapPrefix
+    ),
+  };
+}
+
 export function parseSettingsFromRawUrlWithCleanup(
   rawUrl: string,
   request: Request,
   spOverride?: string | null,
-  includeBangContext = true
+  includeBangContext = true,
+  bangPrefixOverride?: string | null,
+  snapPrefixOverride?: string | null
 ): SuggestSettingsWithCleanup {
   const { settings, rewrittenSuggestCookie } = parseCookieInternalWithRewrite(
     request.headers.get("Cookie") || "",
@@ -227,10 +277,17 @@ export function parseSettingsFromRawUrlWithCleanup(
     true
   );
 
-  const sp = spOverride ?? readQueryParam(rawUrl, "sp");
+  const sp =
+    spOverride === undefined ? readQueryParam(rawUrl, "sp") : spOverride;
   if (sp) {
     settings.provider = sp;
   }
+  applyTriggerPrefixOverrides(
+    rawUrl,
+    settings,
+    bangPrefixOverride,
+    snapPrefixOverride
+  );
 
   return {
     settings,
@@ -242,7 +299,9 @@ export function parseSettingsFromRawUrl(
   rawUrl: string,
   request: Request,
   spOverride?: string | null,
-  includeBangContext = true
+  includeBangContext = true,
+  bangPrefixOverride?: string | null,
+  snapPrefixOverride?: string | null
 ): SuggestSettings {
   const settings = parseCookieInternalWithRewrite(
     request.headers.get("Cookie") || "",
@@ -250,10 +309,17 @@ export function parseSettingsFromRawUrl(
     false
   ).settings;
 
-  const sp = spOverride ?? readQueryParam(rawUrl, "sp");
+  const sp =
+    spOverride === undefined ? readQueryParam(rawUrl, "sp") : spOverride;
   if (sp) {
     settings.provider = sp;
   }
+  applyTriggerPrefixOverrides(
+    rawUrl,
+    settings,
+    bangPrefixOverride,
+    snapPrefixOverride
+  );
 
   return settings;
 }
@@ -264,12 +330,45 @@ export function parseSettings(url: URL, request: Request): SuggestSettings {
 
 function defaultSettings(): SuggestSettings {
   return {
+    bangPrefix: DEFAULT_BANG_PREFIX,
     provider: "default",
+    snapPrefix: DEFAULT_SNAP_PREFIX,
     trigger: "g",
     customUrl: null,
     frecent: {},
     custom: [],
   };
+}
+
+function applyTriggerPrefixOverrides(
+  rawUrl: string,
+  settings: SuggestSettings,
+  bangPrefixOverride?: string | null,
+  snapPrefixOverride?: string | null
+): void {
+  if (
+    bangPrefixOverride === undefined &&
+    snapPrefixOverride === undefined &&
+    !(rawUrl.includes("bp=") || rawUrl.includes("np="))
+  ) {
+    return;
+  }
+  const bangPrefix =
+    bangPrefixOverride === undefined
+      ? readQueryParam(rawUrl, "bp")
+      : bangPrefixOverride;
+  const snapPrefix =
+    snapPrefixOverride === undefined
+      ? readQueryParam(rawUrl, "np")
+      : snapPrefixOverride;
+  if (
+    isTriggerPrefix(bangPrefix) &&
+    isTriggerPrefix(snapPrefix) &&
+    bangPrefix !== snapPrefix
+  ) {
+    settings.bangPrefix = bangPrefix;
+    settings.snapPrefix = snapPrefix;
+  }
 }
 
 function readCookieValue(header: string, name: string): string | null {
@@ -298,7 +397,10 @@ export async function suggest(
   bangOverride?: PartialBang | null,
   allowUnsafeCustomUrls = false
 ): Promise<Response> {
-  const bang = bangOverride ?? parsePartialBang(query);
+  const bang =
+    bangOverride === undefined
+      ? parsePartialBang(query, settings.bangPrefix, settings.snapPrefix)
+      : bangOverride;
   if (bang) {
     return bangSuggestions(
       query,
@@ -306,7 +408,7 @@ export async function suggest(
       bang.partial,
       settings.frecent,
       settings.custom,
-      bang.isSnap
+      bang.triggerPrefix
     );
   }
 
