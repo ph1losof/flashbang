@@ -1,3 +1,7 @@
+import {
+  resolveTriggerPrefixes,
+  type TriggerPrefix,
+} from "../../shared/trigger-prefix";
 import { setSuggestCookie } from "../cookie";
 import type { DB } from "../db";
 import { $ } from "../dom";
@@ -6,6 +10,7 @@ import { notifySW } from "../sw-bridge";
 import { setupCustomBangs } from "./custom-bangs";
 import { setupDefaultBangSetting } from "./default-bang";
 import { getProviderControls, setupProviderSettings } from "./providers";
+import { setupSyntaxSettings } from "./syntax";
 import { setupSettingsTransfer } from "./transfer";
 import { createSettingsWriter, type SettingControl } from "./write";
 
@@ -15,22 +20,33 @@ const SETTINGS_KEYS = [
   "suggest-url",
   "lucky-provider",
   "lucky-url",
+  "bang-prefix",
+  "snap-prefix",
 ];
 
 export async function initSettings(
   db: DB,
   allowUnsafeCustomSuggestUrls = false,
-  onCatalogChange?: () => void
+  onCatalogChange?: () => void,
+  onSyntaxChange?: (bang: TriggerPrefix, snap: TriggerPrefix) => void,
+  onFirefoxSuggestProviderChange: (provider: string) => void = () => undefined
 ): Promise<void> {
   const defaultInput = $<HTMLInputElement>("#default-bang");
   const importFile = $<HTMLInputElement>("#import-file");
   const exportButton = $<HTMLButtonElement>("#export-btn");
+  const bangPrefixSelect = $<HTMLSelectElement>("#bang-prefix");
+  const snapPrefixSelect = $<HTMLSelectElement>("#snap-prefix");
   const providerControls = getProviderControls();
   const [rawSettings, initialCustom] = await Promise.all([
     db.getMultipleSettings(SETTINGS_KEYS),
     db.getAllCustomBangs(),
   ]);
+  const [bangPrefix, snapPrefix] = resolveTriggerPrefixes(
+    rawSettings[5],
+    rawSettings[6]
+  );
   const state = {
+    bangPrefix,
     custom: initialCustom.map((bang) => bang.trigger),
     defaultBang: rawSettings[0] || "g",
     suggestProvider: resolveSuggestProvider(
@@ -40,6 +56,7 @@ export async function initSettings(
     suggestUrl: rawSettings[2] || "",
     luckyProvider: rawSettings[3] || "default",
     luckyUrl: rawSettings[4] || "",
+    snapPrefix,
   };
 
   const customFormControls = Array.from(
@@ -58,6 +75,8 @@ export async function initSettings(
     providerControls.luckyUrlInput,
     importFile,
     exportButton,
+    bangPrefixSelect,
+    snapPrefixSelect,
     ...customFormControls,
   ]);
 
@@ -66,13 +85,28 @@ export async function initSettings(
       state.suggestProvider,
       state.defaultBang,
       state.suggestUrl,
-      state.custom
+      state.custom,
+      state.bangPrefix,
+      state.snapPrefix
     );
   };
   const providers = setupProviderSettings({
     controls: providerControls,
     db,
+    onFirefoxSuggestProviderChange,
     onSuggestChange: syncCookie,
+    state,
+    writer,
+  });
+  let refreshCustomBangs: () => Promise<void> = () => Promise.resolve();
+  const syntax = setupSyntaxSettings({
+    db,
+    onChange: () => {
+      syncCookie();
+      providers.refresh();
+      void refreshCustomBangs();
+      onSyntaxChange?.(state.bangPrefix, state.snapPrefix);
+    },
     state,
     writer,
   });
@@ -82,6 +116,7 @@ export async function initSettings(
     db,
     initialBang: state.defaultBang,
     initialCustom,
+    getBangPrefix: () => state.bangPrefix,
     onCommit: (trigger) => {
       state.defaultBang = trigger;
       syncCookie();
@@ -92,7 +127,7 @@ export async function initSettings(
   state.defaultBang = defaultBang.setCommitted(state.defaultBang);
   syncCookie();
   providers.updateDefaultDisplays();
-  const refreshCustomBangs = setupCustomBangs(
+  refreshCustomBangs = setupCustomBangs(
     db,
     (custom) => {
       state.custom = custom.map((bang) => bang.trigger);
@@ -100,7 +135,8 @@ export async function initSettings(
       syncCookie();
       onCatalogChange?.();
     },
-    writer.run
+    writer.run,
+    () => state.bangPrefix
   );
 
   setupSettingsTransfer({
@@ -117,12 +153,18 @@ export async function initSettings(
       state.suggestUrl = imported[2] || "";
       state.luckyProvider = imported[3] || "default";
       state.luckyUrl = imported[4] || "";
+      [state.bangPrefix, state.snapPrefix] = resolveTriggerPrefixes(
+        imported[5],
+        imported[6]
+      );
       await refreshCustomBangs();
       state.defaultBang = defaultBang.setCommitted(importedDefaultBang);
       providers.refresh();
+      syntax.refresh();
       writer.clearErrors();
       syncCookie();
       notifySW("invalidate");
+      onSyntaxChange?.(state.bangPrefix, state.snapPrefix);
     },
     runWrite: writer.run,
   });

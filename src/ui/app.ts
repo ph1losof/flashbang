@@ -1,3 +1,4 @@
+import { resolveTriggerPrefixes } from "../shared/trigger-prefix";
 import { setSuggestCookie } from "./cookie";
 import { DB, readCustomBangs } from "./db";
 import { $ } from "./dom";
@@ -14,15 +15,27 @@ const db = new DB();
 
 async function syncSuggestCookie() {
   const [settings, custom] = await Promise.all([
-    db.getMultipleSettings(["suggest-provider", "default-bang", "suggest-url"]),
+    db.getMultipleSettings([
+      "suggest-provider",
+      "default-bang",
+      "suggest-url",
+      "bang-prefix",
+      "snap-prefix",
+    ]),
     readCustomBangs(db),
   ]);
 
+  const [bangPrefix, snapPrefix] = resolveTriggerPrefixes(
+    settings[3],
+    settings[4]
+  );
   setSuggestCookie(
     resolveSuggestProvider(settings[0], __ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS__),
     settings[1] || "g",
     settings[2] || "",
-    custom
+    custom,
+    bangPrefix,
+    snapPrefix
   );
 }
 
@@ -31,7 +44,7 @@ function init() {
   syncSuggestCookie();
 
   initLiquidMetal($<HTMLCanvasElement>("#metal-canvas"), "flashbang");
-  const refreshHomeCatalog = initHome(db);
+  const home = initHome(db);
 
   const { openDialog } = setupDialog({
     closeButton: $("#modal-close"),
@@ -40,7 +53,9 @@ function init() {
       void initSettings(
         db,
         __ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS__,
-        refreshHomeCatalog
+        home.refreshCatalog,
+        home.setPrefixes,
+        home.setFirefoxSuggestProvider
       ),
     openButton: $("#gear-btn"),
   });

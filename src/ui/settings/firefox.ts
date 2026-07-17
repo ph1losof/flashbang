@@ -1,17 +1,26 @@
+import type { TriggerPrefix } from "../../shared/trigger-prefix";
 import { flashAnim } from "../animations";
 import { copyText } from "../clipboard";
 import { $, el } from "../dom";
+import { firefoxSuggestionUrl } from "../firefox-suggest";
 import type { SettingsWriter } from "./write";
 
 interface FirefoxSuggestionControls {
+  getPrefixes: () => readonly [TriggerPrefix, TriggerPrefix];
+  onProviderChange: (provider: string) => void;
   suggestSelect: HTMLSelectElement;
   suggestUrlInput: HTMLInputElement;
 }
 
 export function setupFirefoxSuggestions(
-  { suggestSelect, suggestUrlInput }: FirefoxSuggestionControls,
+  {
+    getPrefixes,
+    onProviderChange,
+    suggestSelect,
+    suggestUrlInput,
+  }: FirefoxSuggestionControls,
   writer: SettingsWriter
-): void {
+): { refresh: () => void } {
   const note = $("#suggest-firefox-note");
   const pickerWrap = $("#suggest-firefox-provider-picker-wrap");
   const picker = $<HTMLButtonElement>("#suggest-firefox-provider-picker");
@@ -22,7 +31,14 @@ export function setupFirefoxSuggestions(
   let menuHideTimer: ReturnType<typeof setTimeout>;
   let menuPinned = false;
 
-  const suggestionUrl = () => `${location.origin}/suggest?q=%s&sp=${provider}`;
+  const suggestionUrl = () => {
+    const [bangPrefix, snapPrefix] = getPrefixes();
+    return firefoxSuggestionUrl(location.origin, {
+      bangPrefix,
+      provider,
+      snapPrefix,
+    });
+  };
   const showMenu = () => {
     clearTimeout(menuHideTimer);
     menu.classList.remove("hidden");
@@ -39,7 +55,13 @@ export function setupFirefoxSuggestions(
       provider
     );
     label.textContent = provider;
-    url.replaceChildren(`${location.origin}/suggest?q=%s&sp=`, providerToken);
+    const value = suggestionUrl();
+    const providerStart = `${location.origin}/suggest?q=%s&sp=`.length;
+    url.replaceChildren(
+      value.substring(0, providerStart),
+      providerToken,
+      value.substring(providerStart + provider.length)
+    );
     for (const option of menu.children) {
       const selected = (option as HTMLElement).dataset.provider === provider;
       option.setAttribute("aria-selected", String(selected));
@@ -62,6 +84,7 @@ export function setupFirefoxSuggestions(
       button.setAttribute("role", "option");
       button.addEventListener("click", () => {
         provider = option.value;
+        onProviderChange(provider);
         menuPinned = false;
         renderUrl();
         hideMenu();
@@ -78,6 +101,7 @@ export function setupFirefoxSuggestions(
   note.classList.remove("hidden");
   writer.lock(suggestSelect);
   writer.lock(suggestUrlInput);
+  onProviderChange(provider);
   renderUrl();
 
   pickerWrap.addEventListener("pointerenter", () => {
@@ -135,4 +159,5 @@ export function setupFirefoxSuggestions(
     }
     setTimeout(renderUrl, 1500);
   });
+  return { refresh: renderUrl };
 }

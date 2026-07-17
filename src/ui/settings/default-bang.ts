@@ -1,4 +1,5 @@
 import type { CustomBangRecord } from "../../shared/capture-template";
+import type { TriggerPrefix } from "../../shared/trigger-prefix";
 import { flashAnim, shakeAnim } from "../animations";
 import {
   type BangMeta,
@@ -15,6 +16,7 @@ interface DefaultBangOptions {
   db: DB;
   initialCustom: readonly CustomBangRecord[];
   initialBang: string;
+  getBangPrefix: () => TriggerPrefix;
   onCommit: (trigger: string) => void;
   runWrite: RunWrite;
 }
@@ -26,6 +28,7 @@ export interface DefaultBangController {
 
 export async function setupDefaultBangSetting({
   db,
+  getBangPrefix,
   initialCustom,
   initialBang,
   onCommit,
@@ -136,7 +139,10 @@ export async function setupDefaultBangSetting({
 
   input.addEventListener("input", () => {
     clearTimeout(previewTimer);
-    const query = input.value.replace(/^!+/, "").trim().toLowerCase();
+    const raw = input.value.trim();
+    const query = (raw.startsWith(getBangPrefix()) ? raw.substring(1) : raw)
+      .trim()
+      .toLowerCase();
     if (!query) {
       closePreview();
       return;
@@ -169,7 +175,7 @@ export async function setupDefaultBangSetting({
             el(
               "code",
               "command-badge min-w-14 rounded-md px-2 py-0.5 text-center font-mono text-xs font-semibold",
-              `!${trigger}`
+              `${getBangPrefix()}${trigger}`
             ),
             el("span", "min-w-0 flex-1 truncate text-xs font-medium", name),
             el(
@@ -220,7 +226,10 @@ export async function setupDefaultBangSetting({
 
   input.addEventListener("change", () => {
     closePreview();
-    const value = input.value.replace(/^!+/, "").toLowerCase().trim();
+    const raw = input.value.trim();
+    const value = (raw.startsWith(getBangPrefix()) ? raw.substring(1) : raw)
+      .toLowerCase()
+      .trim();
     const bang = byTrigger.get(value);
     if (!bang) {
       shakeAnim(input);

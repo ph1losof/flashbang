@@ -8,8 +8,13 @@ import { LUCKY_URLS, SUGGEST_URLS } from "../shared/constants";
 import { validateCustomTrigger } from "../shared/custom-trigger";
 import { idbWrap, openDB } from "../shared/idb";
 import { validateSnapTarget } from "../shared/snap-target";
+import {
+  DEFAULT_BANG_PREFIX,
+  DEFAULT_SNAP_PREFIX,
+  isTriggerPrefix,
+} from "../shared/trigger-prefix";
 
-export const SETTINGS_SCHEMA_VERSION = 1;
+export const SETTINGS_SCHEMA_VERSION = 2;
 
 const VALID_SETTING_KEYS = new Map([
   ["defaultBang", "default-bang"],
@@ -17,6 +22,8 @@ const VALID_SETTING_KEYS = new Map([
   ["suggestUrl", "suggest-url"],
   ["luckyProvider", "lucky-provider"],
   ["luckyUrl", "lucky-url"],
+  ["bangPrefix", "bang-prefix"],
+  ["snapPrefix", "snap-prefix"],
 ]);
 const CONFIGURABLE_SETTING_KEYS = [...VALID_SETTING_KEYS.values()];
 
@@ -82,7 +89,11 @@ function prepareImport(data: unknown): PreparedImport {
   }
 
   const versioned = Object.hasOwn(data, "schemaVersion");
-  if (versioned && data.schemaVersion !== SETTINGS_SCHEMA_VERSION) {
+  if (
+    versioned &&
+    data.schemaVersion !== 1 &&
+    data.schemaVersion !== SETTINGS_SCHEMA_VERSION
+  ) {
     throw new Error("Unsupported settings schema version");
   }
   const hasSettings = Object.hasOwn(data, "settings");
@@ -100,6 +111,8 @@ function prepareImport(data: unknown): PreparedImport {
   let suggestUrl: string | null = null;
   let luckyProvider: string | null = null;
   let luckyUrl: string | null = null;
+  let bangPrefix = DEFAULT_BANG_PREFIX;
+  let snapPrefix = DEFAULT_SNAP_PREFIX;
   if (hasSettings) {
     if (!isRecord(data.settings)) {
       throw new Error("Invalid settings data");
@@ -149,6 +162,16 @@ function prepareImport(data: unknown): PreparedImport {
         if (error) {
           throw new Error(`Invalid lucky URL template: ${error}`);
         }
+      } else if (exportKey === "bangPrefix") {
+        if (!isTriggerPrefix(value)) {
+          throw new Error("Invalid bang prefix");
+        }
+        bangPrefix = value;
+      } else if (exportKey === "snapPrefix") {
+        if (!isTriggerPrefix(value)) {
+          throw new Error("Invalid snap prefix");
+        }
+        snapPrefix = value;
       }
       if (value) {
         settings.push({ key: idbKey, value });
@@ -160,6 +183,9 @@ function prepareImport(data: unknown): PreparedImport {
   }
   if (luckyProvider === "custom" && !luckyUrl) {
     throw new Error("Custom lucky provider requires a URL template");
+  }
+  if (bangPrefix === snapPrefix) {
+    throw new Error("Bang and snap prefixes must be different");
   }
 
   const customBangs: CustomBangRecord[] = [];
@@ -329,6 +355,8 @@ export class DB {
       suggestUrl,
       luckyProvider,
       luckyUrl,
+      bangPrefix,
+      snapPrefix,
       customBangs,
     ] = await Promise.all([
       idbWrap<{ key: string; value: string } | undefined>(
@@ -346,6 +374,12 @@ export class DB {
       idbWrap<{ key: string; value: string } | undefined>(
         settingsStore.get("lucky-url")
       ),
+      idbWrap<{ key: string; value: string } | undefined>(
+        settingsStore.get("bang-prefix")
+      ),
+      idbWrap<{ key: string; value: string } | undefined>(
+        settingsStore.get("snap-prefix")
+      ),
       idbWrap<CustomBangRecord[]>(tx.objectStore("custom-bangs").getAll()),
     ]);
     const result = {
@@ -356,6 +390,8 @@ export class DB {
         suggestUrl: suggestUrl?.value ?? null,
         luckyProvider: luckyProvider?.value ?? null,
         luckyUrl: luckyUrl?.value ?? null,
+        bangPrefix: bangPrefix?.value ?? null,
+        snapPrefix: snapPrefix?.value ?? null,
       },
       customBangs,
       exported: new Date().toISOString(),
