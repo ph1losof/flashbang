@@ -53,6 +53,27 @@ describe("handleSuggestRequest", () => {
     expect(payload[1]).toHaveLength(TOP_K);
   });
 
+  test("uses URL-backed Firefox syntax without cookies", async () => {
+    const bangResponse = await handleSuggestRequest(
+      req("http://localhost/suggest?q=%24gh&sp=google&bp=%24&np=~")
+    );
+    const [, bangCompletions] = await bangResponse.json();
+    expect(bangCompletions.length).toBeGreaterThan(0);
+    expect(
+      bangCompletions.every((value: string) => value.startsWith("$"))
+    ).toBe(true);
+
+    const snapResponse = await handleSuggestRequest(
+      req("http://localhost/suggest?q=~gh&sp=google&bp=%24&np=~")
+    );
+    const [, snapCompletions] = await snapResponse.json();
+    expect(snapCompletions.length).toBeGreaterThan(0);
+    expect(
+      snapCompletions.every((value: string) => value.startsWith("~"))
+    ).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   test("blocks custom suggest provider request by default", async () => {
     const custom = "https://example.com/suggest?q={}";
     const response = await handleSuggestRequest(

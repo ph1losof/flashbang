@@ -174,7 +174,9 @@ function queueBangSideEffects(e: FetchEvent, trigger: string): void {
               parsed.trigger,
               parsed.customUrl || "",
               parsed.custom,
-              frecency
+              frecency,
+              parsed.bangPrefix,
+              parsed.snapPrefix
             ),
             path: "/",
             expires: Date.now() + COOKIE_MAX_AGE_S * 1000,

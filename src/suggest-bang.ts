@@ -387,10 +387,9 @@ export function bangSuggestions(
   partial: string,
   frecent: Record<string, number>,
   custom: string[],
-  isSnap?: boolean
+  triggerChar = "!"
 ): Response {
   const result = walkPrefix(partial);
-  const triggerChar = isSnap ? "@" : "!";
   let hasFrecent = false;
   for (const _ in frecent) {
     hasFrecent = true;

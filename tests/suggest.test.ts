@@ -8,7 +8,11 @@ import {
   test,
 } from "bun:test";
 import { TOP_K } from "../src/shared/constants";
-import { readQueryParam, readTwoQueryParams } from "../src/shared/raw-query";
+import {
+  readQueryParam,
+  readSuggestQueryParams,
+  readTwoQueryParams,
+} from "../src/shared/raw-query";
 import { type BuildNode, buildRadixTrie } from "../src/shared/trie";
 
 interface TestBang {
@@ -196,7 +200,9 @@ function req(cookie?: string): Request {
 }
 
 const defaultSettings = {
+  bangPrefix: "!" as const,
   provider: "default",
+  snapPrefix: "@" as const,
   trigger: "g",
   customUrl: null,
   frecent: {},
@@ -207,7 +213,9 @@ describe("parseCookie", () => {
   test("no cookie → defaults", () => {
     const s = parseCookie(req());
     expect(s).toEqual({
+      bangPrefix: "!",
       provider: "default",
+      snapPrefix: "@",
       trigger: "g",
       customUrl: null,
       frecent: {},
@@ -218,7 +226,9 @@ describe("parseCookie", () => {
   test("all three fields parsed", () => {
     const s = parseCookie(req("suggest=google,ddg,https%3A%2F%2Fexample.com"));
     expect(s).toEqual({
+      bangPrefix: "!",
       provider: "google",
+      snapPrefix: "@",
       trigger: "ddg",
       customUrl: "https://example.com",
       frecent: {},
@@ -229,7 +239,9 @@ describe("parseCookie", () => {
   test("only provider and trigger, no customUrl", () => {
     const s = parseCookie(req("suggest=brave,g"));
     expect(s).toEqual({
+      bangPrefix: "!",
       provider: "brave",
+      snapPrefix: "@",
       trigger: "g",
       customUrl: null,
       frecent: {},
@@ -256,7 +268,9 @@ describe("parseCookie", () => {
   test("suggest cookie extracted among other cookies", () => {
     const s = parseCookie(req("theme=dark; suggest=bing,b; lang=en"));
     expect(s).toEqual({
+      bangPrefix: "!",
       provider: "bing",
+      snapPrefix: "@",
       trigger: "b",
       customUrl: null,
       frecent: {},
@@ -267,7 +281,9 @@ describe("parseCookie", () => {
   test("empty cookie value → defaults for missing fields", () => {
     const s = parseCookie(req("suggest="));
     expect(s).toEqual({
+      bangPrefix: "!",
       provider: "default",
+      snapPrefix: "@",
       trigger: "g",
       customUrl: null,
       frecent: {},
@@ -297,6 +313,20 @@ describe("parseCookie", () => {
     expect(s.customUrl).toBe("https://api.example.com/suggest?q={}");
     expect(s.frecent).toEqual({ mdn: 20, gh: 3 });
     expect(s.custom).toEqual(["my.site", "repo"]);
+  });
+
+  test("unified suggest format parses configured prefixes", () => {
+    const s = parseCookie(req("suggest=google,g,,45"));
+    expect(s.bangPrefix).toBe(";");
+    expect(s.snapPrefix).toBe("~");
+  });
+
+  test("invalid or equal configured prefixes fall back safely", () => {
+    for (const syntax of ["44", "99", "x", ""]) {
+      const s = parseCookie(req(`suggest=google,g,,${syntax}`));
+      expect(s.bangPrefix).toBe("!");
+      expect(s.snapPrefix).toBe("@");
+    }
   });
 
   test("backward compat: old cookie format without | parses identically", () => {
@@ -398,6 +428,15 @@ describe("parseSettings", () => {
     expect(s.provider).toBe("bing");
     expect(s.frecent).toEqual({});
     expect(s.trigger).toBe("ddg");
+  });
+
+  test("prefix query params override cookie syntax together", () => {
+    const s = parseSettings(
+      new URL("http://localhost/suggest?q=%24g&bp=%24&np=~"),
+      req("suggest=google,g,,01")
+    );
+    expect(s.bangPrefix).toBe("$");
+    expect(s.snapPrefix).toBe("~");
   });
 });
 
@@ -541,6 +580,24 @@ describe("readTwoQueryParams", () => {
         "sp"
       )
     ).toEqual(["first", "ddg"]);
+  });
+});
+
+describe("readSuggestQueryParams", () => {
+  test("reads provider and Firefox syntax overrides in one scan", () => {
+    expect(
+      readSuggestQueryParams(
+        "http://localhost/suggest?np=~&q=%24gh&x=1&bp=%24&sp=ddg"
+      )
+    ).toEqual(["$gh", "ddg", "$", "~"]);
+  });
+
+  test("returns first values and preserves missing overrides", () => {
+    expect(
+      readSuggestQueryParams(
+        "http://localhost/suggest?q=first&q=second&sp=ddg&sp=bing"
+      )
+    ).toEqual(["first", "ddg", null, null]);
   });
 });
 
@@ -1096,22 +1153,42 @@ describe("provider proxying — via suggest()", () => {
 describe("parsePartialBang — snap detection", () => {
   test('"@g" → prefix snap', () => {
     const result = parsePartialBang("@g");
-    expect(result).toEqual({ prefix: "", partial: "g", isSnap: true });
+    expect(result).toEqual({
+      prefix: "",
+      partial: "g",
+      isSnap: true,
+      triggerPrefix: "@",
+    });
   });
 
   test('"@gh" → prefix snap', () => {
     const result = parsePartialBang("@gh");
-    expect(result).toEqual({ prefix: "", partial: "gh", isSnap: true });
+    expect(result).toEqual({
+      prefix: "",
+      partial: "gh",
+      isSnap: true,
+      triggerPrefix: "@",
+    });
   });
 
   test('"cats @g" → suffix snap', () => {
     const result = parsePartialBang("cats @g");
-    expect(result).toEqual({ prefix: "cats ", partial: "g", isSnap: true });
+    expect(result).toEqual({
+      prefix: "cats ",
+      partial: "g",
+      isSnap: true,
+      triggerPrefix: "@",
+    });
   });
 
   test('"!g" → prefix bang, not snap', () => {
     const result = parsePartialBang("!g");
-    expect(result).toEqual({ prefix: "", partial: "g", isSnap: undefined });
+    expect(result).toEqual({
+      prefix: "",
+      partial: "g",
+      isSnap: undefined,
+      triggerPrefix: "!",
+    });
   });
 
   test('"cats !g" → suffix bang, not snap', () => {
@@ -1120,12 +1197,18 @@ describe("parsePartialBang — snap detection", () => {
       prefix: "cats ",
       partial: "g",
       isSnap: undefined,
+      triggerPrefix: "!",
     });
   });
 
   test('"@" → prefix snap with empty partial', () => {
     const result = parsePartialBang("@");
-    expect(result).toEqual({ prefix: "", partial: "", isSnap: true });
+    expect(result).toEqual({
+      prefix: "",
+      partial: "",
+      isSnap: true,
+      triggerPrefix: "@",
+    });
   });
 
   test('"@g cats" → has space after trigger, returns null', () => {
@@ -1134,6 +1217,23 @@ describe("parsePartialBang — snap detection", () => {
 
   test('"cats" → no trigger, returns null', () => {
     expect(parsePartialBang("cats")).toBeNull();
+  });
+
+  test("configured prefixes replace default bang and snap detection", () => {
+    expect(parsePartialBang("$gh", "$", "~")).toEqual({
+      prefix: "",
+      partial: "gh",
+      isSnap: undefined,
+      triggerPrefix: "$",
+    });
+    expect(parsePartialBang("cats ~gh", "$", "~")).toEqual({
+      prefix: "cats ",
+      partial: "gh",
+      isSnap: true,
+      triggerPrefix: "~",
+    });
+    expect(parsePartialBang("!gh", "$", "~")).toBeNull();
+    expect(parsePartialBang("@gh", "$", "~")).toBeNull();
   });
 });
 
@@ -1155,6 +1255,30 @@ describe("snap suggestions — via suggest()", () => {
       expect(completion.startsWith("@")).toBe(true);
       expect(completion.startsWith("!")).toBe(false);
     }
+  });
+
+  test("configured prefixes replace completion syntax", async () => {
+    const bangResponse = await suggest("$gh", {
+      ...defaultSettings,
+      bangPrefix: "$",
+      snapPrefix: "~",
+    });
+    const [, bangCompletions] = await bangResponse.json();
+    expect(bangCompletions.length).toBeGreaterThan(0);
+    expect(
+      bangCompletions.every((value: string) => value.startsWith("$"))
+    ).toBe(true);
+
+    const snapResponse = await suggest("~gh", {
+      ...defaultSettings,
+      bangPrefix: "$",
+      snapPrefix: "~",
+    });
+    const [, snapCompletions] = await snapResponse.json();
+    expect(snapCompletions.length).toBeGreaterThan(0);
+    expect(
+      snapCompletions.every((value: string) => value.startsWith("~"))
+    ).toBe(true);
   });
 
   test('"cats @gh" keeps the leading query prefix with @ completions', async () => {

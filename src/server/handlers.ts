@@ -1,10 +1,18 @@
 import { canonicalizePublicOrigin, opensearch } from "../opensearch";
 import { COOKIE_MAX_AGE_S } from "../shared/constants";
-import { readTwoQueryParams } from "../shared/raw-query";
+import { readSuggestQueryParams } from "../shared/raw-query";
 import { readOrigin } from "../shared/raw-url";
 import {
+  DEFAULT_BANG_PREFIX,
+  DEFAULT_SNAP_PREFIX,
+} from "../shared/trigger-prefix";
+import {
+  type PartialBang,
+  parseBangSettingsFromRequestWithCleanup,
   parsePartialBang,
+  parseSettingsFromRawUrl,
   parseSettingsFromRawUrlWithCleanup,
+  type SuggestSettings,
   suggest,
 } from "../suggest";
 
@@ -37,7 +45,7 @@ export function handleSuggestRequest(
   environment: SuggestEnvironment = runtimeEnvironment()
 ): Promise<Response> {
   const rawUrl = request.url;
-  const [q, sp] = readTwoQueryParams(rawUrl, "q", "sp");
+  const [q, sp, bp, np] = readSuggestQueryParams(rawUrl);
   if (!q) {
     return Promise.resolve(
       new Response(MISSING_Q, {
@@ -46,9 +54,42 @@ export function handleSuggestRequest(
       })
     );
   }
-  const bang = parsePartialBang(q);
-  const { settings, rewrittenSuggestCookie } =
-    parseSettingsFromRawUrlWithCleanup(rawUrl, request, sp, bang !== null);
+  const defaultBang = parsePartialBang(q);
+  let settings: SuggestSettings;
+  let rewrittenSuggestCookie: string | null;
+  let bang: PartialBang | null;
+  if (defaultBang) {
+    ({ settings, rewrittenSuggestCookie } = parseSettingsFromRawUrlWithCleanup(
+      rawUrl,
+      request,
+      sp,
+      true,
+      bp,
+      np
+    ));
+    bang =
+      settings.bangPrefix === DEFAULT_BANG_PREFIX &&
+      settings.snapPrefix === DEFAULT_SNAP_PREFIX
+        ? defaultBang
+        : parsePartialBang(q, settings.bangPrefix, settings.snapPrefix);
+  } else {
+    const coreSettings = parseSettingsFromRawUrl(
+      rawUrl,
+      request,
+      sp,
+      false,
+      bp,
+      np
+    );
+    bang =
+      coreSettings.bangPrefix === DEFAULT_BANG_PREFIX &&
+      coreSettings.snapPrefix === DEFAULT_SNAP_PREFIX
+        ? defaultBang
+        : parsePartialBang(q, coreSettings.bangPrefix, coreSettings.snapPrefix);
+    ({ settings, rewrittenSuggestCookie } = bang
+      ? parseBangSettingsFromRequestWithCleanup(request, coreSettings)
+      : { settings: coreSettings, rewrittenSuggestCookie: null });
+  }
   const allowUnsafeCustomUrls =
     environment.ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS === "true";
   return suggest(q, settings, bang, allowUnsafeCustomUrls).then((response) => {
