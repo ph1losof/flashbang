@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { expect, type Page, test } from "@playwright/test";
 import { DB_VERSION } from "../../src/shared/constants";
 import { encodeSuggestCookieValue } from "../../src/shared/suggest-cookie";
+import { SETTINGS_SCHEMA_VERSION } from "../../src/ui/db";
 
 const GOOGLE_REDIRECT = /google\.com\/search\?q=hello/;
 const GOOGLE_HOST = "https://www.google.com";
@@ -1044,7 +1045,7 @@ test("settings export includes its schema version", async ({ page }) => {
   expect(path).not.toBeNull();
   const exported = JSON.parse(await readFile(path as string, "utf8"));
 
-  expect(exported.schemaVersion).toBe(1);
+  expect(exported.schemaVersion).toBe(SETTINGS_SCHEMA_VERSION);
   expect(exported.settings).toBeTruthy();
   expect(exported.customBangs).toEqual([]);
 });
