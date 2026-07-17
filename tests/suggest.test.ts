@@ -28,11 +28,13 @@ interface FlatTrieFixture {
   NODES: Int32Array;
   ROOT: number;
   TERM_D_BLOB: string;
+  TERM_D_ID: Uint8Array;
   TERM_D_OFF: Int32Array;
   TERM_K_BLOB: string;
   TERM_K_OFF: Int32Array;
   TERM_R: Int32Array;
   TERM_S_BLOB: string;
+  TERM_S_ID: Uint8Array;
   TERM_S_OFF: Int32Array;
 }
 
@@ -132,8 +134,10 @@ function buildTestTrie(bangs: TestBang[]): FlatTrieFixture {
     TERM_K_BLOB: packedK.blob,
     TERM_K_OFF: packedK.offsets,
     TERM_S_BLOB: packedS.blob,
+    TERM_S_ID: Uint8Array.from(termS, (_, index) => index),
     TERM_S_OFF: packedS.offsets,
     TERM_D_BLOB: packedD.blob,
+    TERM_D_ID: Uint8Array.from(termD, (_, index) => index),
     TERM_D_OFF: packedD.offsets,
     TERM_R: Int32Array.from(termR),
     ROOT: rootIdx,

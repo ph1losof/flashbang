@@ -906,6 +906,10 @@ interface PackedStringData {
   lengths: number[];
 }
 
+interface PackedStringDictionary extends PackedStringData {
+  ids: number[];
+}
+
 interface PackedUnsignedSection {
   length: number;
   offset: number;
@@ -1039,6 +1043,23 @@ function packStrings(items: string[]): PackedStringData {
   return { blob: items.join(""), lengths };
 }
 
+function packStringDictionary(items: string[]): PackedStringDictionary {
+  const dictionary = new Map<string, number>();
+  const unique: string[] = [];
+  const ids = new Array<number>(items.length);
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    let id = dictionary.get(item);
+    if (id === undefined) {
+      id = unique.length;
+      dictionary.set(item, id);
+      unique.push(item);
+    }
+    ids[i] = id;
+  }
+  return { ...packStrings(unique), ids };
+}
+
 function narrowUnsigned(values: readonly number[]): {
   data: Uint8Array | Uint16Array | Uint32Array;
   reader: PackedUnsignedSection["reader"];
@@ -1108,8 +1129,8 @@ function buildMinifiedTrieRuntimeHelpers(): string {
 
 function generateTrie(data: FlatTrieData, trieRuntimeHelpers: string): string {
   const termK = packStrings(data.termK);
-  const termS = packStrings(data.termS);
-  const termD = packStrings(data.termD);
+  const termS = packStringDictionary(data.termS);
+  const termD = packStringDictionary(data.termD);
   const nodeCount = data.nodes.length / NODE_STRIDE;
   const edgeCount = data.edges.length / EDGE_STRIDE;
   const nodeEdgeStarts = new Array<number>(nodeCount);
@@ -1145,7 +1166,9 @@ function generateTrie(data: FlatTrieData, trieRuntimeHelpers: string): string {
     data.termR,
     termK.lengths,
     termS.lengths,
+    termS.ids,
     termD.lengths,
+    termD.ids,
   ]);
   const views = packed.sections.map(
     (section, index) =>
@@ -1166,8 +1189,10 @@ function generateTrie(data: FlatTrieData, trieRuntimeHelpers: string): string {
     "export const TERM_K_OFF=_offsets(_V8);" +
     `export const TERM_S_BLOB='${jsEscape(termS.blob)}';` +
     "export const TERM_S_OFF=_offsets(_V9);" +
+    "export const TERM_S_ID=_V10;" +
     `export const TERM_D_BLOB='${jsEscape(termD.blob)}';` +
-    "export const TERM_D_OFF=_offsets(_V10);" +
+    "export const TERM_D_OFF=_offsets(_V11);" +
+    "export const TERM_D_ID=_V12;" +
     "export const ROOT=0;"
   );
 }
@@ -1309,8 +1334,10 @@ async function writeGeneratedDeclarations(outDir: string): Promise<void> {
         "export declare const TERM_K_OFF: Int32Array;",
         "export declare const TERM_S_BLOB: string;",
         "export declare const TERM_S_OFF: Int32Array;",
+        "export declare const TERM_S_ID: Uint8Array | Uint16Array | Uint32Array;",
         "export declare const TERM_D_BLOB: string;",
         "export declare const TERM_D_OFF: Int32Array;",
+        "export declare const TERM_D_ID: Uint8Array | Uint16Array | Uint32Array;",
         "export declare const ROOT: number;",
         "",
       ].join("\n")

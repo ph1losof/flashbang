@@ -4,11 +4,13 @@ import {
   NODES,
   ROOT,
   TERM_D_BLOB,
+  TERM_D_ID,
   TERM_D_OFF,
   TERM_K_BLOB,
   TERM_K_OFF,
   TERM_R,
   TERM_S_BLOB,
+  TERM_S_ID,
   TERM_S_OFF,
 } from "./generated/bangs-trie.js";
 import {
@@ -71,8 +73,13 @@ function readTerminalMeta(index: number): TerminalMeta {
   if (cached !== undefined) {
     return cached;
   }
-  const domain = TERM_D_BLOB.slice(TERM_D_OFF[index], TERM_D_OFF[index + 1]);
-  const name = TERM_S_BLOB.slice(TERM_S_OFF[index], TERM_S_OFF[index + 1]);
+  const domainId = TERM_D_ID[index];
+  const nameId = TERM_S_ID[index];
+  const domain = TERM_D_BLOB.slice(
+    TERM_D_OFF[domainId],
+    TERM_D_OFF[domainId + 1]
+  );
+  const name = TERM_S_BLOB.slice(TERM_S_OFF[nameId], TERM_S_OFF[nameId + 1]);
   const label = `${name} \u2014 ${domain}`;
   const url = `https://${domain}`;
   const meta = {
