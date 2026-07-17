@@ -654,8 +654,25 @@ function generateBinary(bangs: readonly Bang[]): Uint8Array {
     packed.triggerLensKind === "u8"
       ? Uint8Array.from(triggerBlob.lengths)
       : Uint16Array.from(triggerBlob.lengths);
-  const prefixLengths = Uint16Array.from(packed.prefixBlob.lengths);
-  const suffixLengths = Uint16Array.from(packed.suffixBlob.lengths);
+  // URL blobs stay byte-backed in the worker and are decoded one entry at a time.
+  const prefixLengths = Uint16Array.from(packed.uniquePrefixes, (value) => {
+    const length = encoder.encode(value).byteLength;
+    if (length > 0xffff) {
+      throw new Error(
+        `Binary bang format requires encoded prefix length <= 65535, got ${length}`
+      );
+    }
+    return length;
+  });
+  const suffixLengths = Uint16Array.from(packed.uniqueSuffixes, (value) => {
+    const length = encoder.encode(value).byteLength;
+    if (length > 0xffff) {
+      throw new Error(
+        `Binary bang format requires encoded suffix length <= 65535, got ${length}`
+      );
+    }
+    return length;
+  });
   const prefixIds = Uint16Array.from(reorderedPrefixIds);
   const suffixIds = Uint16Array.from(reorderedSuffixIds);
 
@@ -677,7 +694,7 @@ function generateBinary(bangs: readonly Bang[]): Uint8Array {
   const output = new Uint8Array(new ArrayBuffer(totalBytes));
   new Uint32Array(output.buffer, 0, headerWords).set([
     0x31424246,
-    2,
+    3,
     packed.entryCount,
     mph.displacements.length,
     packed.triggerLensKind === "u8" ? 1 : 2,
