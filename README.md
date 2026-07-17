@@ -42,6 +42,8 @@ All three support bangs natively — but every query still round-trips through t
 
 Settings lets you select different prefixes for bangs and snaps from `!`, `@`, `$`, `:`, `;`, and `~`. Changing a prefix replaces that syntax rather than adding an alias. For example, with `$` for bangs and `~` for snaps, use `$gh react`, `react $gh`, `~w quantum`, and `quantum ~w`; `!gh` and `@w` become ordinary search text. The examples below use the default `!` and `@` prefixes.
 
+Firefox-based browsers do not reliably show remote suggestions when address-bar input begins with `:`. A prefix snap such as `:gh` may have no suggestion dropdown even though a query-first snap such as `test :gh` does. Prefer `@` or `~` for snaps if you want prefix autocomplete in Firefox, Zen, or LibreWolf.
+
 ## Bang syntax
 
 Flashbang supports 4 formats. All bangs are case-insensitive.
