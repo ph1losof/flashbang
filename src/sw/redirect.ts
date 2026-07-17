@@ -660,6 +660,12 @@ function findTrailingBareBang(
 }
 
 let _lastHash = 0;
+let _resolvedTrigger: string | null = null;
+
+function resolveWithTrigger(url: string, trigger: string): string {
+  _resolvedTrigger = trigger;
+  return url;
+}
 
 function extractTrigger(s: string, from: number, to: number): string {
   let h = 2166136261 >>> 0;
@@ -688,9 +694,9 @@ function resolvePrefixSnap(
   afterAt: number,
   defaultUrl: UrlParts,
   custom: Record<string, CustomUrlParts>
-): [string, string | null] {
+): string {
   if (afterAt >= end) {
-    return ["/", null];
+    return "/";
   }
 
   const cAfterAt = rawQuery.charCodeAt(afterAt);
@@ -705,7 +711,7 @@ function resolvePrefixSnap(
     atSpaceWidth = 3;
   }
   if (atSpaceWidth) {
-    return [buildUrl(defaultUrl, rawQuery, start, end), null];
+    return buildUrl(defaultUrl, rawQuery, start, end);
   }
 
   const spPacked = findSpace(rawQuery, afterAt, end);
@@ -717,25 +723,23 @@ function resolvePrefixSnap(
   if (sp === -1 || sp + spLen >= end) {
     const origin = resolveSnapOrigin(trigger, custom, _lastHash);
     if (!origin) {
-      return [buildUrl(defaultUrl, rawQuery, start, end), null];
+      return buildUrl(defaultUrl, rawQuery, start, end);
     }
-    return [origin, trigger];
+    return resolveWithTrigger(origin, trigger);
   }
 
   const siteFilter = resolveSnapSiteFilter(trigger, custom, _lastHash);
   if (!siteFilter) {
-    return [buildUrl(defaultUrl, rawQuery, start, end), null];
+    return buildUrl(defaultUrl, rawQuery, start, end);
   }
-  return [
+  return resolveWithTrigger(
     buildSnapUrl(defaultUrl, siteFilter, rawQuery, sp + spLen, end),
-    trigger,
-  ];
+    trigger
+  );
 }
 
-function resolveRaw(
-  rawQuery: string,
-  settings: RedirectSettings
-): [string, string | null] {
+function resolveRaw(rawQuery: string, settings: RedirectSettings): string {
+  _resolvedTrigger = null;
   const { defaultUrl, custom, luckyUrl } = settings;
   const syntax = settings.syntax;
   const len = rawQuery.length;
@@ -778,17 +782,14 @@ function resolveRaw(
   }
 
   if (start >= end) {
-    return ["/", null];
+    return "/";
   }
 
   const c0 = rawQuery.charCodeAt(start);
 
   // "\" — feeling lucky
   if (c0 === CH_BSLASH && end - start > 1) {
-    return [
-      luckyOrDefault(luckyUrl, defaultUrl, rawQuery, start + 1, end),
-      null,
-    ];
+    return luckyOrDefault(luckyUrl, defaultUrl, rawQuery, start + 1, end);
   }
 
   const bangMarker = syntax ? syntax[0] : DEFAULT_BANG_MARKER;
@@ -823,7 +824,7 @@ function resolveRaw(
     const afterExcl = exclStart + exclWidth;
 
     if (afterExcl >= end) {
-      return ["/", null];
+      return "/";
     }
 
     // "!+query" / "!%20query" — bare bang lucky
@@ -841,12 +842,9 @@ function resolveRaw(
     if (spaceWidth) {
       const termStart = afterExcl + spaceWidth;
       if (termStart >= end) {
-        return ["/", null];
+        return "/";
       }
-      return [
-        luckyOrDefault(luckyUrl, defaultUrl, rawQuery, termStart, end),
-        null,
-      ];
+      return luckyOrDefault(luckyUrl, defaultUrl, rawQuery, termStart, end);
     }
 
     // "!g+cats" or "!g" — prefix bang
@@ -859,9 +857,9 @@ function resolveRaw(
     if (sp === -1 || sp + spLen >= end) {
       const origin = resolveBangOrigin(bang, custom, _lastHash);
       if (!origin) {
-        return [buildUrl(defaultUrl, rawQuery, start, end), null];
+        return buildUrl(defaultUrl, rawQuery, start, end);
       }
-      return [origin, bang];
+      return resolveWithTrigger(origin, bang);
     }
 
     const filled = resolveBangFill(
@@ -873,9 +871,9 @@ function resolveRaw(
       _lastHash
     );
     if (filled === null) {
-      return [buildUrl(defaultUrl, rawQuery, start, end), null];
+      return buildUrl(defaultUrl, rawQuery, start, end);
     }
-    return [filled, bang];
+    return resolveWithTrigger(filled, bang);
   }
 
   // "@trigger+query" or "@trigger" — prefix snap
@@ -901,12 +899,15 @@ function resolveRaw(
   );
   if (trailingTermEnd !== -1) {
     if (trailingTermEnd <= start) {
-      return ["/", null];
+      return "/";
     }
-    return [
-      luckyOrDefault(luckyUrl, defaultUrl, rawQuery, start, trailingTermEnd),
-      null,
-    ];
+    return luckyOrDefault(
+      luckyUrl,
+      defaultUrl,
+      rawQuery,
+      start,
+      trailingTermEnd
+    );
   }
 
   const exclPacked = findBangMarker(
@@ -932,7 +933,7 @@ function resolveRaw(
           const trigger = extractTrigger(rawQuery, triggerStart, end);
           const siteFilter = resolveSnapSiteFilter(trigger, custom, _lastHash);
           if (siteFilter) {
-            return [
+            return resolveWithTrigger(
               buildSnapUrl(
                 defaultUrl,
                 siteFilter,
@@ -940,13 +941,13 @@ function resolveRaw(
                 start,
                 spaceBeforeAtPos
               ),
-              trigger,
-            ];
+              trigger
+            );
           }
         }
       }
     }
-    return [buildUrl(defaultUrl, rawQuery, start, end), null];
+    return buildUrl(defaultUrl, rawQuery, start, end);
   }
   const exclPos = exclPacked >> 2;
   const exclCharWidth = exclPacked & 0b11;
@@ -971,7 +972,7 @@ function resolveRaw(
       if (termStart >= end) {
         const origin = resolveBangOrigin(bang, custom, _lastHash);
         if (origin) {
-          return [origin, bang];
+          return resolveWithTrigger(origin, bang);
         }
       } else {
         const filled = resolveBangFill(
@@ -983,10 +984,10 @@ function resolveRaw(
           _lastHash
         );
         if (filled !== null) {
-          return [filled, bang];
+          return resolveWithTrigger(filled, bang);
         }
       }
-      return [buildUrl(defaultUrl, rawQuery, start, end), null];
+      return buildUrl(defaultUrl, rawQuery, start, end);
     }
   }
 
@@ -996,9 +997,9 @@ function resolveRaw(
       const bang = extractTrigger(rawQuery, start, exclPos);
       const origin = resolveBangOrigin(bang, custom, _lastHash);
       if (origin) {
-        return [origin, bang];
+        return resolveWithTrigger(origin, bang);
       }
-      return [buildUrl(defaultUrl, rawQuery, start, end), null];
+      return buildUrl(defaultUrl, rawQuery, start, end);
     }
   }
 
@@ -1022,9 +1023,9 @@ function resolveRaw(
           _lastHash
         );
         if (filled !== null) {
-          return [filled, bang];
+          return resolveWithTrigger(filled, bang);
         }
-        return [buildUrl(defaultUrl, rawQuery, start, end), null];
+        return buildUrl(defaultUrl, rawQuery, start, end);
       }
     }
   }
@@ -1051,22 +1052,22 @@ function resolveRaw(
           _lastHash
         );
         if (filled !== null) {
-          return [filled, bang];
+          return resolveWithTrigger(filled, bang);
         }
-        return [buildUrl(defaultUrl, rawQuery, start, end), null];
+        return buildUrl(defaultUrl, rawQuery, start, end);
       }
     }
   }
 
-  return [buildUrl(defaultUrl, rawQuery, start, end), null];
+  return buildUrl(defaultUrl, rawQuery, start, end);
 }
 
 export function redirectRaw(
   rawQuery: string,
   settings: RedirectSettings
 ): [Response, string | null] {
-  const [url, trigger] = resolveRaw(rawQuery, settings);
-  return [redir(url), trigger];
+  const url = resolveRaw(rawQuery, settings);
+  return [redir(url), _resolvedTrigger];
 }
 
 function encodeForRedirect(query: string): string {
@@ -1099,7 +1100,7 @@ function encodeForRedirect(query: string): string {
 }
 
 export function redirectUrl(query: string, settings: RedirectSettings): string {
-  return resolveRaw(encodeForRedirect(query), settings)[0];
+  return resolveRaw(encodeForRedirect(query), settings);
 }
 
 export function redirect(query: string, settings: RedirectSettings): Response {

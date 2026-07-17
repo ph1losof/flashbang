@@ -4,11 +4,13 @@ import {
   NODES,
   ROOT,
   TERM_D_BLOB,
+  TERM_D_ID,
   TERM_D_OFF,
   TERM_K_BLOB,
   TERM_K_OFF,
   TERM_R,
   TERM_S_BLOB,
+  TERM_S_ID,
   TERM_S_OFF,
 } from "./generated/bangs-trie.js";
 import {
@@ -25,6 +27,7 @@ interface Candidate {
 }
 
 const JSON_HEADERS_INIT = { headers: JSON_HEADERS };
+const EMPTY_CANDIDATES: Candidate[] = [];
 
 export const NODE_EDGE_START = 0;
 export const NODE_EDGE_COUNT = 1;
@@ -38,8 +41,6 @@ export const EDGE_CHILD_INDEX = 2;
 export const EDGE_STRIDE = 3;
 
 const TERM_K_CACHE = new Array<string | undefined>(TERM_R.length);
-const TERM_S_CACHE = new Array<string | undefined>(TERM_R.length);
-const TERM_D_CACHE = new Array<string | undefined>(TERM_R.length);
 const EMPTY_DETAIL: Record<string, string> = {};
 interface TerminalMeta {
   detail: Record<string, string>;
@@ -67,21 +68,19 @@ function readTerminalTrigger(index: number): string {
   return readPackedStringCached(TERM_K_BLOB, TERM_K_OFF, TERM_K_CACHE, index);
 }
 
-function readTerminalName(index: number): string {
-  return readPackedStringCached(TERM_S_BLOB, TERM_S_OFF, TERM_S_CACHE, index);
-}
-
-function readTerminalDomain(index: number): string {
-  return readPackedStringCached(TERM_D_BLOB, TERM_D_OFF, TERM_D_CACHE, index);
-}
-
 function readTerminalMeta(index: number): TerminalMeta {
   const cached = TERM_META_CACHE[index];
   if (cached !== undefined) {
     return cached;
   }
-  const domain = readTerminalDomain(index);
-  const label = `${readTerminalName(index)} \u2014 ${domain}`;
+  const domainId = TERM_D_ID[index];
+  const nameId = TERM_S_ID[index];
+  const domain = TERM_D_BLOB.slice(
+    TERM_D_OFF[domainId],
+    TERM_D_OFF[domainId + 1]
+  );
+  const name = TERM_S_BLOB.slice(TERM_S_OFF[nameId], TERM_S_OFF[nameId + 1]);
+  const label = `${name} \u2014 ${domain}`;
   const url = `https://${domain}`;
   const meta = {
     label,
@@ -396,19 +395,23 @@ export function bangSuggestions(
     break;
   }
 
-  const customMatches: Candidate[] = [];
-  for (const trigger of custom) {
-    if (!trigger.startsWith(partial)) {
-      if (trigger > `${partial}\uFFFF`) {
-        break;
+  const customMatches: Candidate[] =
+    custom.length === 0 ? EMPTY_CANDIDATES : [];
+  if (custom.length > 0) {
+    const upperBound = `${partial}\uFFFF`;
+    for (const trigger of custom) {
+      if (!trigger.startsWith(partial)) {
+        if (trigger > upperBound) {
+          break;
+        }
+        continue;
       }
-      continue;
+      customMatches.push({
+        terminalIndex: -1,
+        trigger,
+        score: hasFrecent ? effectiveScore(0, frecent, trigger) : 0,
+      });
     }
-    customMatches.push({
-      terminalIndex: -1,
-      trigger,
-      score: hasFrecent ? effectiveScore(0, frecent, trigger) : 0,
-    });
   }
 
   if (!result) {

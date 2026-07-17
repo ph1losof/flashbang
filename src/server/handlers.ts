@@ -92,20 +92,20 @@ export function handleSuggestRequest(
   }
   const allowUnsafeCustomUrls =
     environment.ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS === "true";
-  return suggest(q, settings, bang, allowUnsafeCustomUrls).then((response) => {
-    if (!rewrittenSuggestCookie) {
-      return response;
-    }
-
-    const headers = new Headers(response.headers);
+  const response = suggest(q, settings, bang, allowUnsafeCustomUrls);
+  if (!rewrittenSuggestCookie) {
+    return response;
+  }
+  return response.then((resolved) => {
+    const headers = new Headers(resolved.headers);
     headers.append(
       "Set-Cookie",
       `suggest=${rewrittenSuggestCookie};path=/;max-age=${COOKIE_MAX_AGE_S};SameSite=Lax;Secure`
     );
-    return new Response(response.body, {
+    return new Response(resolved.body, {
       headers,
-      status: response.status,
-      statusText: response.statusText,
+      status: resolved.status,
+      statusText: resolved.statusText,
     });
   });
 }
