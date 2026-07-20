@@ -192,7 +192,7 @@ Unit, integration, performance, and docs tests:
 
 End-to-end tests:
 
-- `tests/e2e/flashbang.e2e.ts` — Suggest/OpenSearch endpoints, settings persistence and import/export, warm/cold/offline redirect flows, Service Worker cache updates, and custom bang/capture/snap scenarios
+- `tests/e2e/flashbang.e2e.ts` — Suggest endpoint, settings persistence and import/export, warm/cold/offline redirect flows, Service Worker cache updates, and custom bang/capture/snap scenarios
 - `tests/e2e/private-perf.e2e.ts` — Opt-in browser performance profile for private hash redirects
 
 If this is your first Playwright run on a machine, install browsers once:

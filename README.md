@@ -127,7 +127,7 @@ A public instance is available at **[flashbang.tech](https://flashbang.tech)**. 
 
 Nothing to build or deploy.
 
-For the privacy-sensitive case where query text must remain on your device until navigation to the destination, use `https://flashbang.tech/#q=%s` and leave the Suggestion URL unset. This fragment-based option is significantly slower and is not recommended for normal use. Search suggestions are separate network requests; leaving the Suggestion URL unset keeps address-bar input from being sent to the configured suggestion provider through Flashbang.
+For maximum query privacy, use `https://flashbang.tech/#q=%s`. Everything after `#` is a URL fragment, which browsers do not include in the HTTP request to Flashbang. Flashbang loads without receiving the query, reads the fragment locally in your browser, resolves the bang on your device, and then navigates directly to the destination. The query therefore stays on your device until that final navigation. This requires loading and running Flashbang before the redirect, so it is significantly slower than the standard Search URL and is best used when privacy matters more than speed.
 
 ### Browser quirks
 
