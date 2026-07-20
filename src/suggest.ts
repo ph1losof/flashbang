@@ -49,31 +49,22 @@ export interface PartialBang {
   triggerPrefix: TriggerPrefix;
 }
 
-function partialBang(
+function partialSnapChain(
   prefix: string,
   value: string,
-  triggerPrefix: TriggerPrefix,
-  isSnap: boolean
+  triggerPrefix: TriggerPrefix
 ): PartialBang | null {
-  if (isSnap && value.includes(",")) {
-    const chain = parsePartialSnapChain(value);
-    if (!chain) {
-      return null;
-    }
-    return {
-      prefix,
-      partial: chain.partial,
-      isSnap: true,
-      triggerPrefix,
-      chainPrefix: chain.chainPrefix,
-      selectedTriggers: chain.selectedTriggers,
-    };
+  const chain = parsePartialSnapChain(value);
+  if (!chain) {
+    return null;
   }
   return {
     prefix,
-    partial: value.toLowerCase(),
-    isSnap: isSnap || undefined,
+    partial: chain.partial,
+    isSnap: true,
     triggerPrefix,
+    chainPrefix: chain.chainPrefix,
+    selectedTriggers: chain.selectedTriggers,
   };
 }
 
@@ -154,18 +145,35 @@ export function parsePartialBang(
   const snapCode = snapPrefix.charCodeAt(0);
 
   if (c0 === bangCode || c0 === snapCode) {
-    for (let i = start + 1; i < end; i++) {
-      if (q.charCodeAt(i) === CH_SPACE) {
-        return null;
+    const isSnap = c0 === snapCode;
+    let isChain = false;
+    if (isSnap && end - start > 3) {
+      for (let i = start + 1; i < end; i++) {
+        const c = q.charCodeAt(i);
+        if (c === CH_SPACE) {
+          return null;
+        }
+        if (c === 44) {
+          isChain = true;
+        }
+      }
+    } else {
+      for (let i = start + 1; i < end; i++) {
+        if (q.charCodeAt(i) === CH_SPACE) {
+          return null;
+        }
       }
     }
-    const isSnap = c0 === snapCode;
-    return partialBang(
-      "",
-      q.substring(start + 1, end),
-      isSnap ? snapPrefix : bangPrefix,
-      isSnap
-    );
+    const value = q.substring(start + 1, end);
+    if (isChain) {
+      return partialSnapChain("", value, snapPrefix);
+    }
+    return {
+      prefix: "",
+      partial: value.toLowerCase(),
+      isSnap: isSnap || undefined,
+      triggerPrefix: isSnap ? snapPrefix : bangPrefix,
+    };
   }
 
   for (let i = end - 2; i >= start; i--) {
@@ -175,18 +183,36 @@ export function parsePartialBang(
       continue;
     }
     const triggerStart = i + 2;
-    for (let j = triggerStart; j < end; j++) {
-      if (q.charCodeAt(j) === CH_SPACE) {
-        return null;
+    const isSnap = ci1 === snapCode;
+    let isChain = false;
+    if (isSnap && end - triggerStart >= 3) {
+      for (let j = triggerStart; j < end; j++) {
+        const c = q.charCodeAt(j);
+        if (c === CH_SPACE) {
+          return null;
+        }
+        if (c === 44) {
+          isChain = true;
+        }
+      }
+    } else {
+      for (let j = triggerStart; j < end; j++) {
+        if (q.charCodeAt(j) === CH_SPACE) {
+          return null;
+        }
       }
     }
-    const isSnap = ci1 === snapCode;
-    return partialBang(
-      q.substring(start, i + 1),
-      q.substring(triggerStart, end),
-      isSnap ? snapPrefix : bangPrefix,
-      isSnap
-    );
+    const prefix = q.substring(start, i + 1);
+    const value = q.substring(triggerStart, end);
+    if (isChain) {
+      return partialSnapChain(prefix, value, snapPrefix);
+    }
+    return {
+      prefix,
+      partial: value.toLowerCase(),
+      isSnap: isSnap || undefined,
+      triggerPrefix: isSnap ? snapPrefix : bangPrefix,
+    };
   }
 
   return null;

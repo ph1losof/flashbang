@@ -616,13 +616,72 @@ function snapSeparatorWidthAt(s: string, i: number, end: number): number {
 const snapSiteFilters = new Array<string>(MAX_SNAP_CHAIN_TARGETS);
 let _snapSeparator = -1;
 let _snapSeparatorWidth = 0;
+let _snapTrigger = "";
 
-function extractSnapTrigger(s: string, from: number, to: number): string {
+function findSnapSpaceAndExtract(s: string, from: number, end: number): number {
+  _snapSeparator = -1;
+  _snapSeparatorWidth = 0;
+  let h = 2166136261 >>> 0;
+  let hasUpper = false;
+  let triggerEnd = end;
+  let space = -1;
+  for (let i = from; i < end; i++) {
+    const c = s.charCodeAt(i);
+    if (c === CH_PLUS) {
+      space = (i << 2) | 1;
+      if (_snapSeparator === -1) {
+        triggerEnd = i;
+      }
+      break;
+    }
+    if (c === CH_PERCENT && s.charCodeAt(i + 1) === CH_2) {
+      const c2 = s.charCodeAt(i + 2) | 32;
+      if (c2 === CH_0) {
+        space = (i << 2) | 3;
+        if (_snapSeparator === -1) {
+          triggerEnd = i;
+        }
+        break;
+      }
+      if (_snapSeparator === -1 && c2 === 99) {
+        triggerEnd = i;
+        _snapSeparator = i;
+        _snapSeparatorWidth = 3;
+        continue;
+      }
+    } else if (_snapSeparator === -1 && c === 44) {
+      triggerEnd = i;
+      _snapSeparator = i;
+      _snapSeparatorWidth = 1;
+      continue;
+    }
+    if (_snapSeparator !== -1) {
+      continue;
+    }
+    if (c >= 65 && c <= 90) {
+      hasUpper = true;
+      h ^= c | 32;
+    } else {
+      h ^= c;
+    }
+    h = Math.imul(h, 16777619);
+  }
+  _lastHash = h >>> 0;
+  if (hasUpper) {
+    _snapTrigger = s.slice(from, triggerEnd).toLowerCase();
+  } else {
+    _snapTrigger =
+      from === 0 && triggerEnd === s.length ? s : s.substring(from, triggerEnd);
+  }
+  return space;
+}
+
+function extractSnapSegment(s: string, from: number, to: number): string {
+  _snapSeparator = -1;
+  _snapSeparatorWidth = 0;
   let h = 2166136261 >>> 0;
   let hasUpper = false;
   let end = to;
-  _snapSeparator = -1;
-  _snapSeparatorWidth = 0;
   for (let i = from; i < to; i++) {
     const separatorWidth = snapSeparatorWidthAt(s, i, to);
     if (separatorWidth) {
@@ -672,7 +731,7 @@ function resolveSnapChain(
       return null;
     }
 
-    const trigger = extractSnapTrigger(rawQuery, segmentStart, triggerEnd);
+    const trigger = extractSnapSegment(rawQuery, segmentStart, triggerEnd);
     const siteFilter = resolveSnapSiteFilter(trigger, custom, _lastHash);
     if (!siteFilter) {
       return null;
@@ -824,11 +883,11 @@ function resolvePrefixSnap(
     return buildUrl(defaultUrl, rawQuery, start, end);
   }
 
-  const spPacked = findSpace(rawQuery, afterAt, end);
+  const spPacked = findSnapSpaceAndExtract(rawQuery, afterAt, end);
   const sp = spPacked === -1 ? -1 : spPacked >> 2;
   const spLen = spPacked === -1 ? 0 : spPacked & 0b11;
   const triggerEnd = sp === -1 ? end : sp;
-  const trigger = extractSnapTrigger(rawQuery, afterAt, triggerEnd);
+  const trigger = _snapTrigger;
 
   if (_snapSeparator === -1) {
     if (sp === -1 || sp + spLen >= end) {
@@ -1059,11 +1118,16 @@ function resolveRaw(rawQuery: string, settings: RedirectSettings): string {
         const suffixAtWidth = snapPacked & 0b11;
         const triggerStart =
           spaceBeforeAtPos + spaceBeforeAtWidth + suffixAtWidth;
-        if (
-          triggerStart < end &&
-          findSpace(rawQuery, triggerStart, end) === -1
-        ) {
-          const trigger = extractSnapTrigger(rawQuery, triggerStart, end);
+        if (triggerStart < end) {
+          const snapSpace = findSnapSpaceAndExtract(
+            rawQuery,
+            triggerStart,
+            end
+          );
+          const trigger = _snapTrigger;
+          if (snapSpace !== -1) {
+            return buildUrl(defaultUrl, rawQuery, start, end);
+          }
           const siteFilter =
             _snapSeparator === -1
               ? resolveSnapSiteFilter(trigger, custom, _lastHash)

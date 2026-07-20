@@ -233,10 +233,19 @@ function topK(
     const terminalIndex = NODES[nodeOff + NODE_TERMINAL_INDEX];
 
     if (terminalIndex >= 0) {
-      const trigger = readTerminalTrigger(terminalIndex);
-      if (!includesTrigger(excluded, trigger)) {
+      let trigger: string | undefined;
+      let isExcluded = false;
+      if (excluded) {
+        trigger = readTerminalTrigger(terminalIndex);
+        isExcluded = includesTrigger(excluded, trigger);
+      }
+      if (!isExcluded) {
         const score = hasFrecent
-          ? effectiveScore(TERM_R[terminalIndex], frecent, trigger)
+          ? effectiveScore(
+              TERM_R[terminalIndex],
+              frecent,
+              trigger ?? readTerminalTrigger(terminalIndex)
+            )
           : TERM_R[terminalIndex];
         if (resultLen < TOP_K || score > threshold) {
           if (resultLen < TOP_K) {
