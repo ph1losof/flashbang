@@ -10,7 +10,7 @@ Every other bang tool loads a full page before redirecting — adding hundreds o
 
 ### Try it now
 
-Visit **[flashbang-dyr.pages.dev](https://flashbang-dyr.pages.dev)** — if your browser supports [OpenSearch](https://developer.mozilla.org/en-US/docs/Web/OpenSearch), flashbang will appear in your search engine list automatically. Otherwise, add **`https://flashbang-dyr.pages.dev?q=%s`** as a custom search engine in your browser. Optionally, set **`https://flashbang-dyr.pages.dev/suggest?q=%s`** as the suggestion URL for address bar autocomplete. That's it.
+Visit **[flashbang.tech](https://flashbang.tech)** — if your browser supports [OpenSearch](https://developer.mozilla.org/en-US/docs/Web/OpenSearch), flashbang will appear in your search engine list automatically. Otherwise, add **`https://flashbang.tech?q=%s`** as a custom search engine in your browser. Optionally, set **`https://flashbang.tech/suggest?q=%s`** as the suggestion URL for address bar autocomplete. That's it.
 
 > **Note for Microsoft Edge users:** Edge needs a one-time setup tweak (the auto-discovered entry has to be deleted and re-added manually) — see [Browser quirks](#browser-quirks). Without it, your default search engine gets overwritten after the first bang you use.
 
@@ -26,7 +26,7 @@ All three support bangs natively — but every query still round-trips through t
 
 ## Features
 
-- **Built for speed** — The redirect parser itself runs in well under 1ms, while browser-visible latency is dominated by browser-to-Service-Worker transport and scheduling. The `/bench` page measures that fetch round trip with deterministic settings, randomized paths, a no-op transport baseline, high-resolution isolated timing, and verification that every request was handled locally. It also runs paired top-level navigations against a direct same-origin target to estimate actual redirect overhead without destination network time. The Service Worker intercepts real searches before they hit the network, parses the bang, and responds with a 302 — no page load, framework, or round-trip to Flashbang's server. [Run the benchmark yourself](https://flashbang-dyr.pages.dev/bench) — results vary by browser and machine
+- **Built for speed** — The redirect parser itself runs in well under 1ms, while browser-visible latency is dominated by browser-to-Service-Worker transport and scheduling. The `/bench` page measures that fetch round trip with deterministic settings, randomized paths, a no-op transport baseline, high-resolution isolated timing, and verification that every request was handled locally. It also runs paired top-level navigations against a direct same-origin target to estimate actual redirect overhead without destination network time. The Service Worker intercepts real searches before they hit the network, parses the bang, and responds with a 302 — no page load, framework, or round-trip to Flashbang's server. [Run the benchmark yourself](https://flashbang.tech/bench) — results vary by browser and machine
 - **Zero runtime deps** — Ships without production npm dependencies; redirects run on plain browser APIs in the Service Worker
 - **Private** — No analytics, no tracking. All data stays on your device for the core feature - redirects
 - **14,000+ bangs** — Merged from DuckDuckGo, Kagi, and custom sources. Updated daily via automated CI
@@ -107,18 +107,18 @@ google, ddg, bing, brave, yahoo, ecosia, kagi, qwant, startpage, yandex, baidu, 
 Example Firefox suggestion URL with provider and syntax overrides:
 
 ```text
-https://flashbang-dyr.pages.dev/suggest?q=%s&sp=ddg&bp=%24&np=~
+https://flashbang.tech/suggest?q=%s&sp=ddg&bp=%24&np=~
 ```
 
 **Why this exists:** in Chromium-based browsers, cookies are sent with suggest requests and settings configured in the UI are picked up automatically, so these overrides are rarely needed. Firefox-based browsers withhold cookies; the settings UI therefore generates a copyable URL containing `sp`, and adds `bp` plus `np` when the selected syntax differs from the default `!`/`@` pair. See [Browser quirks](#browser-quirks) for details.
 
 ### Use the hosted version
 
-A public instance is available at **[flashbang-dyr.pages.dev](https://flashbang-dyr.pages.dev)**. Just visit it, then add it as a custom search engine in your browser:
+A public instance is available at **[flashbang.tech](https://flashbang.tech)**. Just visit it, then add it as a custom search engine in your browser:
 
-- **Search URL:** `https://flashbang-dyr.pages.dev?q=%s`
-- **Private Search URL:** `https://flashbang-dyr.pages.dev/#q=%s` (slightly slower; keeps submitted query text out of search-navigation requests to the Flashbang host)
-- **Suggestion URL:** `https://flashbang-dyr.pages.dev/suggest?q=%s` (Optional)
+- **Search URL:** `https://flashbang.tech?q=%s`
+- **Private Search URL:** `https://flashbang.tech/#q=%s` (slightly slower; keeps submitted query text out of search-navigation requests to the Flashbang host)
+- **Suggestion URL:** `https://flashbang.tech/suggest?q=%s` (Optional)
 
 Nothing to build or deploy.
 
@@ -135,7 +135,7 @@ These apply equally to the hosted version and any self-hosted instance — worth
   2. Click **Add** and re-add it manually:
      - **Search engine:** `flashbang`
      - **Shortcut:** something short and unique like `f`
-     - **URL with %s:** `https://flashbang-dyr.pages.dev?q=%s` (or your self-hosted URL)
+     - **URL with %s:** `https://flashbang.tech?q=%s` (or your self-hosted URL)
   3. Set it as your default.
 
   **Important:** _editing_ the auto-discovered entry's Shortcut doesn't persist — Edge re-derives it from `/opensearch.xml` on restart and reverts to the host. The delete-and-readd step is what makes the fix stick, because a manually-added entry is independent of the discovery XML.
@@ -274,7 +274,7 @@ That lookup path is pre-optimized by `scripts/codegen.ts` at build time. Instead
 
 Yes. Try it yourself: open unduck or unduckified, type `!g cats`, and watch the screen. You'll likely see a white flash or brief page load before Google appears. This is evident by the issues opened in unduckified repo [#6](https://github.com/taciturnaxolotl/unduckified/issues/6) and in unduck repo [#70](https://github.com/T3-Content/unduck/issues/70), [#141](https://github.com/T3-Content/unduck/issues/141). Now do the same with Flashbang. The browser navigates directly to Google — there is no intermediate page to see. The difference is immediately obvious, especially on mobile devices or environments where JavaScript parse time is higher.
 
-[Run the benchmark yourself](https://flashbang-dyr.pages.dev/bench) to measure validated browser-to-Service-Worker fetch latency and paired top-level redirect overhead on your device.
+[Run the benchmark yourself](https://flashbang.tech/bench) to measure validated browser-to-Service-Worker fetch latency and paired top-level redirect overhead on your device.
 
 ## Acknowledgments
 
