@@ -9,6 +9,7 @@ const MPH_SLOT_MULTIPLIER = 0x85ebca6b;
 
 let lookup: ((trigger: string, hash: number) => BuiltinUrlParts | null) | null =
   null;
+const BANG_DATA_UNAVAILABLE = new Error("Binary bang data is not initialized");
 
 function offsets(lengths: Uint8Array | Uint16Array): Uint32Array {
   const result = new Uint32Array(lengths.length + 1);
@@ -155,7 +156,11 @@ export function lookupBang(
   hash: number
 ): BuiltinUrlParts | null {
   if (!lookup) {
-    throw new Error("Binary bang data is not initialized");
+    throw BANG_DATA_UNAVAILABLE;
   }
   return lookup(trigger, hash);
+}
+
+export function isBangDataUnavailable(error: unknown): boolean {
+  return error === BANG_DATA_UNAVAILABLE;
 }

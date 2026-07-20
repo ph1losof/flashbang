@@ -1,10 +1,15 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { HOT_PREFIXES, HOT_TRIGGERS } from "../src/generated/bangs-hot.js";
+import { compileCaptureUrl } from "../src/shared/capture-template";
 import { TRIGGER_PREFIXES } from "../src/shared/trigger-prefix";
 import {
   createHotBootState,
   encodeHotBootRecord,
+  getHotBootDefaultBang,
+  getHotBootSettings,
   getResolvedHotTrigger,
+  hotBootSettingsNeedPublish,
+  MAX_HOT_BOOT_RECORD_LENGTH,
   NO_HOT_BOOT,
   parseHotBootRecord,
   resolveHotRedirect,
@@ -58,6 +63,76 @@ describe("service worker hot redirects", () => {
     expect(parseHotBootRecord("h2|fb-test|not-valid!", "fb-test")).toBe(
       NO_HOT_BOOT
     );
+    expect(hotBootSettingsNeedPublish()).toBe(true);
+    expect(parseHotBootRecord(`${record}|not-base64!`, "fb-test")).toBe(
+      NO_HOT_BOOT
+    );
+    expect(getHotBootSettings()).toBeNull();
+  });
+
+  test("round-trips materialized settings and every simple custom entry", () => {
+    const custom = Object.assign(Object.create(null), {
+      docs: [
+        "https://docs.example/search?q=",
+        "",
+        ["+site:docs.example", "https://docs.example"],
+      ],
+      path: ["https://example.com/users/", ""],
+      regex: compileCaptureUrl("https://example.com/$1", "^(.*)$", "percent")!,
+    }) as Record<string, CustomUrlParts>;
+    const sourceSnapshot = snapshot(custom);
+    sourceSnapshot.defaultBang = "sp";
+    const sourceSettings: RedirectSettings = {
+      custom,
+      defaultUrl: ["https://startpage.com/do/metasearch.pl?query=", ""],
+      luckyUrl: ["https://duckduckgo.com/?q=\\", ""],
+      syntax,
+    };
+    const state = createHotBootState(sourceSnapshot);
+    const record = encodeHotBootRecord(
+      "fb-test",
+      state,
+      sourceSnapshot,
+      sourceSettings
+    );
+
+    expect(record.length).toBeLessThan(MAX_HOT_BOOT_RECORD_LENGTH);
+    expect(parseHotBootRecord(record, "fb-test")).toBe(state);
+    expect(getHotBootDefaultBang()).toBe("sp");
+    expect(hotBootSettingsNeedPublish()).toBe(false);
+    const decoded = getHotBootSettings()!;
+    expect(decoded.custom.regex).toBeUndefined();
+    expect(redirectRawUrl("regular+query", decoded)).toBe(
+      "https://startpage.com/do/metasearch.pl?query=regular+query"
+    );
+    expect(redirectRawUrl(";path+alice", decoded)).toBe(
+      "https://example.com/users/alice"
+    );
+    expect(redirectRawUrl("@docs+service+workers", decoded)).toBe(
+      "https://startpage.com/do/metasearch.pl?query=service+workers+site:docs.example"
+    );
+  });
+
+  test("drops the complete rich payload rather than truncating oversized settings", () => {
+    const custom = Object.create(null) as Record<string, CustomUrlParts>;
+    for (let i = 0; i < 30; i++) {
+      custom[`custom${i}`] = [
+        `https://example.com/search/${"x".repeat(3_500)}?q=`,
+        "",
+      ];
+    }
+    const sourceSnapshot = snapshot(custom);
+    const state = createHotBootState(sourceSnapshot);
+    const record = encodeHotBootRecord(
+      "fb-test",
+      state,
+      sourceSnapshot,
+      settings(custom)
+    );
+    expect(record.endsWith("|-")).toBe(true);
+    expect(parseHotBootRecord(record, "fb-test")).toBe(state);
+    expect(getHotBootSettings()).toBeNull();
+    expect(hotBootSettingsNeedPublish()).toBe(false);
   });
 
   test("matches the full resolver for every generated hot bang", () => {

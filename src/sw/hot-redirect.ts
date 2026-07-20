@@ -5,16 +5,27 @@ import {
   HOT_TRIGGERS,
   lookupHotBang,
 } from "../generated/bangs-hot.js";
+import { validateCustomTrigger } from "../shared/custom-trigger";
 import { HOT_BOOT_SENTINEL, HOT_BOOT_VERSION } from "../shared/hot-boot";
+import {
+  type CustomUrlParts,
+  compileTriggerSyntax,
+  type RedirectSettings,
+  type UrlParts,
+} from "./redirect";
 import type { RedirectSettingsSnapshot } from "./redirect-settings";
 
 const MASK_BASE = 2 ** HOT_BANG_COUNT;
 const MAX_PACKED_STATE = 256 * MASK_BASE - 1;
+export const MAX_HOT_BOOT_RECORD_LENGTH = 96 * 1024;
 
 export { HOT_BOOT_SENTINEL };
 export const NO_HOT_BOOT = -1;
 
 let resolvedHotId = -1;
+let bootSettings: RedirectSettings | null = null;
+let bootDefaultBang = "";
+let bootPayloadComplete = false;
 
 function isBangMarker(code: number): boolean {
   return (
@@ -27,12 +38,12 @@ function isBangMarker(code: number): boolean {
   );
 }
 
-function parseBase36(raw: string, start: number): number {
+function parseBase36(raw: string, start: number, end = raw.length): number {
   let value = 0;
-  if (start >= raw.length) {
+  if (start >= end) {
     return -1;
   }
-  for (let i = start; i < raw.length; i++) {
+  for (let i = start; i < end; i++) {
     const code = raw.charCodeAt(i);
     let digit = -1;
     if (code >= 48 && code <= 57) {
@@ -51,6 +62,156 @@ function parseBase36(raw: string, start: number): number {
   return value;
 }
 
+function encodeBase64Url(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary)
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
+}
+
+function decodeBase64Url(value: string): string | null {
+  try {
+    const padding = (4 - (value.length & 3)) & 3;
+    const binary = atob(
+      `${value.replaceAll("-", "+").replaceAll("_", "/")}${"=".repeat(padding)}`
+    );
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+function isUrlParts(value: unknown): value is UrlParts {
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    typeof value[0] === "string" &&
+    (value[1] === null || typeof value[1] === "string")
+  );
+}
+
+function isSnapTarget(value: unknown): value is readonly [string, string] {
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    typeof value[0] === "string" &&
+    typeof value[1] === "string"
+  );
+}
+
+function isSimpleCustom(value: unknown): value is CustomUrlParts {
+  return (
+    isUrlParts(value) ||
+    (Array.isArray(value) &&
+      value.length === 3 &&
+      typeof value[0] === "string" &&
+      (value[1] === null || typeof value[1] === "string") &&
+      isSnapTarget(value[2]))
+  );
+}
+
+function decodeBootSettings(encoded: string): {
+  defaultBang: string;
+  settings: RedirectSettings;
+} | null {
+  const decoded = decodeBase64Url(encoded);
+  if (decoded === null) {
+    return null;
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(value) || value.length !== 5) {
+    return null;
+  }
+  const [defaultBang, defaultUrl, luckyUrl, markers, entries] = value;
+  if (
+    typeof defaultBang !== "string" ||
+    !defaultBang ||
+    defaultBang.length > 64 ||
+    !isUrlParts(defaultUrl) ||
+    !(luckyUrl === null || isUrlParts(luckyUrl)) ||
+    !Array.isArray(markers) ||
+    markers.length !== 2 ||
+    !markers.every(
+      (marker) => Number.isInteger(marker) && isBangMarker(marker)
+    ) ||
+    markers[0] === markers[1] ||
+    !Array.isArray(entries)
+  ) {
+    return null;
+  }
+
+  const custom = Object.create(null) as Record<string, CustomUrlParts>;
+  for (const item of entries) {
+    if (
+      !Array.isArray(item) ||
+      item.length !== 2 ||
+      typeof item[0] !== "string" ||
+      validateCustomTrigger(item[0]) !== null ||
+      Object.hasOwn(custom, item[0]) ||
+      !isSimpleCustom(item[1])
+    ) {
+      return null;
+    }
+    custom[item[0]] = item[1];
+  }
+
+  const syntax = compileTriggerSyntax(
+    String.fromCharCode(markers[0]) as Parameters<
+      typeof compileTriggerSyntax
+    >[0],
+    String.fromCharCode(markers[1]) as Parameters<
+      typeof compileTriggerSyntax
+    >[1]
+  );
+  return {
+    defaultBang,
+    settings: {
+      custom,
+      defaultUrl,
+      luckyUrl,
+      ...(syntax ? { syntax } : {}),
+    },
+  };
+}
+
+function encodeBootSettings(
+  snapshot: RedirectSettingsSnapshot,
+  settings: RedirectSettings
+): string {
+  const custom = Object.keys(snapshot.custom)
+    .sort()
+    .flatMap((trigger) => {
+      const entry = snapshot.custom[trigger];
+      return entry.length === 2 || entry.length === 3 ? [[trigger, entry]] : [];
+    });
+  const markers = settings.syntax
+    ? [settings.syntax[0] & 0xff, settings.syntax[1] & 0xff]
+    : [33, 64];
+  return encodeBase64Url(
+    JSON.stringify([
+      snapshot.defaultBang,
+      settings.defaultUrl,
+      settings.luckyUrl,
+      markers,
+      custom,
+    ])
+  );
+}
+
 export function createHotBootState(snapshot: RedirectSettingsSnapshot): number {
   let overrides = 0;
   for (let i = 0; i < HOT_BANG_COUNT; i++) {
@@ -62,20 +223,63 @@ export function createHotBootState(snapshot: RedirectSettingsSnapshot): number {
   return marker * MASK_BASE + overrides;
 }
 
-export function encodeHotBootRecord(cacheName: string, state: number): string {
-  return `${HOT_BOOT_VERSION}|${cacheName}|${state.toString(36)}`;
+export function encodeHotBootRecord(
+  cacheName: string,
+  state: number,
+  snapshot?: RedirectSettingsSnapshot,
+  settings?: RedirectSettings
+): string {
+  const compact = `${HOT_BOOT_VERSION}|${cacheName}|${state.toString(36)}`;
+  if (!(snapshot && settings)) {
+    return compact;
+  }
+  const record = `${compact}|${encodeBootSettings(snapshot, settings)}`;
+  return record.length <= MAX_HOT_BOOT_RECORD_LENGTH ? record : `${compact}|-`;
 }
 
 export function parseHotBootRecord(raw: string, cacheName: string): number {
+  bootSettings = null;
+  bootDefaultBang = "";
+  bootPayloadComplete = false;
   const prefix = `${HOT_BOOT_VERSION}|${cacheName}|`;
   if (!raw.startsWith(prefix)) {
     return NO_HOT_BOOT;
   }
-  const packed = parseBase36(raw, prefix.length);
+  const payloadStart = raw.indexOf("|", prefix.length);
+  const packed = parseBase36(
+    raw,
+    prefix.length,
+    payloadStart === -1 ? raw.length : payloadStart
+  );
   if (packed < 0 || !isBangMarker(Math.floor(packed / MASK_BASE))) {
     return NO_HOT_BOOT;
   }
+  if (payloadStart !== -1) {
+    bootPayloadComplete = true;
+    const encoded = raw.substring(payloadStart + 1);
+    if (encoded !== "-") {
+      const decoded = decodeBootSettings(encoded);
+      if (!decoded) {
+        bootPayloadComplete = false;
+        return NO_HOT_BOOT;
+      }
+      bootDefaultBang = decoded.defaultBang;
+      bootSettings = decoded.settings;
+    }
+  }
   return packed;
+}
+
+export function getHotBootDefaultBang(): string {
+  return bootDefaultBang;
+}
+
+export function getHotBootSettings(): RedirectSettings | null {
+  return bootSettings;
+}
+
+export function hotBootSettingsNeedPublish(): boolean {
+  return !bootPayloadComplete;
 }
 
 export function getResolvedHotTrigger(): string {

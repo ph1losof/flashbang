@@ -5,12 +5,18 @@ import {
   encodeSuggestCookieValue,
   parseSuggestCookieValue,
 } from "../shared/suggest-cookie";
-import { initializeBangData, isBangDataInitialized } from "./bang-data";
+import {
+  initializeBangData,
+  isBangDataInitialized,
+  isBangDataUnavailable,
+} from "./bang-data";
 import {
   createHotBootState,
   encodeHotBootRecord,
+  getHotBootSettings,
   getResolvedHotTrigger,
   HOT_BOOT_SENTINEL,
+  hotBootSettingsNeedPublish,
   NO_HOT_BOOT,
   parseHotBootRecord,
   resolveHotRedirect,
@@ -103,6 +109,7 @@ function queueHotBootMutation(operation: () => Promise<void>): Promise<void> {
 
 async function disableHotBoot(): Promise<void> {
   hotBootPromise = NO_HOT_BOOT_PROMISE;
+  parseHotBootRecord(HOT_BOOT_SENTINEL, CACHE_NAME);
   if (!navigationPreload) {
     return;
   }
@@ -110,15 +117,22 @@ async function disableHotBoot(): Promise<void> {
   await navigationPreload.disable();
 }
 
-async function publishHotBoot(): Promise<void> {
+async function publishHotBoot(includeSettings = false): Promise<void> {
   if (!navigationPreload || hotBootUpdateTokens.size > 0) {
     return;
   }
-  const state = createHotBootState(await prepareRedirectSettings());
-  const record = encodeHotBootRecord(CACHE_NAME, state);
+  const snapshot = await prepareRedirectSettings();
+  const state = createHotBootState(snapshot);
+  let settings: RedirectSettings | undefined;
+  if (includeSettings && isBangDataInitialized()) {
+    settings =
+      getCachedSettings() ??
+      (await readRedirectSettings(Promise.resolve(snapshot)));
+  }
+  const record = encodeHotBootRecord(CACHE_NAME, state, snapshot, settings);
   await navigationPreload.disable();
   await navigationPreload.setHeaderValue(record);
-  hotBootPromise = Promise.resolve(state);
+  hotBootPromise = Promise.resolve(parseHotBootRecord(record, CACHE_NAME));
 }
 
 const BENCHMARK_TARGET_PATH = "/__flashbang-bench-target";
@@ -202,7 +216,12 @@ function seedRuntime(
     .open(CACHE_NAME)
     .then((cache) => cache.put(new Request(BANG_DATA_ASSET), response))
     .catch(swallowError);
-  return Promise.all([persistData, loadFrecency()]).then(() => undefined);
+  const publishSettings = hotBootSettingsNeedPublish()
+    ? queueHotBootMutation(() => publishHotBoot(true)).catch(swallowError)
+    : RESOLVED_PROMISE;
+  return Promise.all([persistData, loadFrecency(), publishSettings]).then(
+    () => undefined
+  );
 }
 
 function warmRuntime(): Promise<void> {
@@ -213,7 +232,11 @@ function warmRuntime(): Promise<void> {
     const warming = Promise.all([
       ensureBangData(),
       readRedirectSettings(),
-    ]).then(() => undefined);
+    ]).then(async () => {
+      if (hotBootSettingsNeedPublish()) {
+        await queueHotBootMutation(() => publishHotBoot(true));
+      }
+    });
     let current: Promise<void>;
     current = warming.catch(swallowError).finally(() => {
       if (runtimeWarmPromise === current) {
@@ -493,7 +516,7 @@ self.addEventListener("message", (e: ExtendableMessageEvent) => {
     const update = queueHotBootMutation(async () => {
       hotBootUpdateTokens.delete(token);
       await invalidateCache();
-      await publishHotBoot();
+      await publishHotBoot(true);
     });
     e.waitUntil(update);
     if (e.ports[0]) {
@@ -512,7 +535,7 @@ self.addEventListener("message", (e: ExtendableMessageEvent) => {
     const invalidation = queueHotBootMutation(async () => {
       await disableHotBoot();
       await cacheInvalidation;
-      await publishHotBoot();
+      await publishHotBoot(true);
     });
     e.waitUntil(invalidation);
     if (e.ports[0]) {
@@ -669,6 +692,17 @@ self.addEventListener("fetch", (e: FetchEvent) => {
                 queueBangSideEffects(e, getResolvedHotTrigger());
                 return Response.redirect(hotUrl, 302);
               }
+              const settings =
+                hotBoot === NO_HOT_BOOT ? null : getHotBootSettings();
+              if (settings) {
+                try {
+                  return respondToRedirect(e, rawQ, settings);
+                } catch (error) {
+                  if (!isBangDataUnavailable(error)) {
+                    throw error;
+                  }
+                }
+              }
             }
             const loading =
               hotBootUpdateTokens.size > 0
@@ -677,11 +711,25 @@ self.addEventListener("fetch", (e: FetchEvent) => {
             return loading.then(() => {
               const cached = getCachedSettings();
               if (cached) {
+                if (hotBootSettingsNeedPublish()) {
+                  e.waitUntil(
+                    queueHotBootMutation(() => publishHotBoot(true)).catch(
+                      swallowError
+                    )
+                  );
+                }
                 return respondToRedirect(e, rawQ, cached);
               }
-              return readRedirectSettings().then((settings) =>
-                respondToRedirect(e, rawQ, settings)
-              );
+              return readRedirectSettings().then((settings) => {
+                if (hotBootSettingsNeedPublish()) {
+                  e.waitUntil(
+                    queueHotBootMutation(() => publishHotBoot(true)).catch(
+                      swallowError
+                    )
+                  );
+                }
+                return respondToRedirect(e, rawQ, settings);
+              });
             });
           })
         );

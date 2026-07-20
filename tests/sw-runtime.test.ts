@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { REDIRECT_SETTINGS_SNAPSHOT_KEY } from "../src/shared/constants";
 import {
+  getHotBootSettings,
   HOT_BOOT_SENTINEL,
   parseHotBootRecord,
   resolveHotRedirect,
 } from "../src/sw/hot-redirect";
+import { redirectRawUrl } from "../src/sw/redirect";
 import { loadTestBangData } from "./helpers/bang-data";
 import { installFakeIndexedDb, reqToPromise } from "./helpers/fake-indexeddb";
 
@@ -595,6 +597,9 @@ describe("sw runtime with real modules", () => {
     expect(endReplies).toEqual([true]);
     const updated = parseHotBootRecord(state.headerValue, "fb-test-cache");
     expect(resolveHotRedirect(";gh+test", updated)).toBeNull();
+    expect(redirectRawUrl(";gh+test", getHotBootSettings()!)).toBe(
+      "https://custom.example/?q=test"
+    );
     expect(navigationPreloadWrites).toContain(HOT_BOOT_SENTINEL);
   });
 
