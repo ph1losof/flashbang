@@ -30,9 +30,10 @@ html {
       }),
       import("/fallback.js"),
     ])
-      .then(([data, { redirectWithoutServiceWorker }]) =>
-        redirectWithoutServiceWorker(query, data, true)
-      )
+      .then(async ([data, { resolveFallback }]) => {
+        const { url } = await resolveFallback(query, data, true);
+        location.replace(url);
+      })
       .catch(() => {
         document.body.textContent =
           "Flashbang could not resolve this query. Reload the page or enable Service Workers.";

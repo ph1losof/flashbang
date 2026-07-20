@@ -5,6 +5,7 @@ const COLD_RUNS = Number(process.env.PROFILE_COLD_RUNS ?? 12);
 const WARM_RUNS = Number(process.env.PROFILE_WARM_RUNS ?? 30);
 
 interface Timing {
+  bangDataRequests: number;
   elapsed: number;
   fallbackRequested: boolean;
 }
@@ -22,6 +23,10 @@ function summarize(samples: readonly Timing[]) {
     p95: percentile(values, 0.95).toFixed(2),
     min: values[0].toFixed(2),
     max: values.at(-1)!.toFixed(2),
+    bangDataRequests: samples.reduce(
+      (total, sample) => total + sample.bangDataRequests,
+      0
+    ),
     fallbacks: samples.filter((sample) => sample.fallbackRequested).length,
   };
 }
@@ -36,6 +41,7 @@ async function measure(
   page: Page,
   path = "/#q=%21g%20profile"
 ): Promise<Timing> {
+  let bangDataRequests = 0;
   let fallbackRequested = false;
   let resolveTarget!: (timing: Timing) => void;
   const target = new Promise<Timing>((resolve) => {
@@ -43,11 +49,19 @@ async function measure(
   });
   const started = performance.now();
   const listener = (request: { url(): string }) => {
-    if (new URL(request.url()).pathname === "/fallback.js") {
+    const pathname = new URL(request.url()).pathname;
+    if (
+      pathname === "/bangs.bin" ||
+      (pathname.startsWith("/bangs-") && !pathname.startsWith("/bangs-meta-"))
+    ) {
+      bangDataRequests++;
+    }
+    if (pathname === "/fallback.js") {
       fallbackRequested = true;
     }
     if (request.url().startsWith(`${GOOGLE}/search?`)) {
       resolveTarget({
+        bangDataRequests,
         elapsed: performance.now() - started,
         fallbackRequested,
       });
@@ -86,6 +100,18 @@ test("private hash redirect and public path performance profile", async ({
     });
     await mockGoogle(page);
     cold.push(await measure(page));
+    await context.close();
+  }
+
+  const firstInstall: Timing[] = [];
+  const postInstall: Timing[] = [];
+  for (let i = 0; i < COLD_RUNS; i++) {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await mockGoogle(page);
+    firstInstall.push(await measure(page));
+    await page.waitForTimeout(50);
+    postInstall.push(await measure(page));
     await context.close();
   }
 
@@ -141,6 +167,8 @@ test("private hash redirect and public path performance profile", async ({
       cold: summarize(cold),
       controlledWarm: summarize(warm),
       documentFloor: summarize(documentFloor),
+      firstInstall: summarize(firstInstall),
+      postInstall: summarize(postInstall),
       publicWarm: summarize(publicWarm),
     })
   );

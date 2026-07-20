@@ -122,7 +122,7 @@ A public instance is available at **[flashbang-dyr.pages.dev](https://flashbang-
 
 Nothing to build or deploy.
 
-The private template stores the query in the URL fragment, which browsers do not send in HTTP requests. An installed Service Worker serves a purpose-built bootstrap directly from memory; the page passes the still-encoded fragment directly to the worker, then replaces the transient history entry with the destination. A main-thread resolver handles unavailable or unresponsive workers. The normal `?q=%s` template remains the fastest option because the Service Worker can intercept it before any page loads. Search suggestions are separate network requests; leave the Suggestions URL unset if you do not want address-bar input sent to the configured suggestion provider through Flashbang.
+The private template stores the query in the URL fragment, which browsers do not send in HTTP requests. An installed Service Worker serves a purpose-built bootstrap directly from memory; the page passes the still-encoded fragment directly to the worker, then replaces the transient history entry with the destination. When a worker is not yet installed, the page resolves the first query and transfers its bang-data buffer and compiled redirect settings to the registering worker before navigating. The normal `?q=%s` template remains the fastest option because the Service Worker can intercept it before any page loads. Search suggestions are separate network requests; leave the Suggestions URL unset if you do not want address-bar input sent to the configured suggestion provider through Flashbang.
 
 ### Browser quirks
 

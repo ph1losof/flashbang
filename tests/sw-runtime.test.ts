@@ -14,6 +14,7 @@ let handlers: HandlerMap = {};
 let skipWaitingCalls = 0;
 let claimCalls = 0;
 let cacheDeleteCalls: string[] = [];
+let cachePutCalls: string[] = [];
 let fetchCalls: string[] = [];
 let fetchImpl: (input: RequestInfo | URL) => Promise<Response> = () =>
   Promise.resolve(new Response("ok"));
@@ -50,6 +51,7 @@ function setupSwGlobals(requiredAppAssets: readonly string[] = []) {
   skipWaitingCalls = 0;
   claimCalls = 0;
   cacheDeleteCalls = [];
+  cachePutCalls = [];
   fetchCalls = [];
   fetchImpl = () => Promise.resolve(new Response("ok"));
 
@@ -102,8 +104,11 @@ function setupSwGlobals(requiredAppAssets: readonly string[] = []) {
     },
     open() {
       return Promise.resolve({
-        put() {
-          // no-op
+        match() {
+          return Promise.resolve(null);
+        },
+        put(request: Request) {
+          cachePutCalls.push(new URL(request.url).pathname);
           return Promise.resolve();
         },
       });
@@ -235,8 +240,6 @@ describe("sw runtime with real modules", () => {
     await handlers.activate?.(activateEvt.event);
     await Promise.all(activateEvt.waits);
     expect(claimCalls).toBe(1);
-    const swIdb = await import("../src/sw/idb");
-    expect(swIdb.getTopFrecencyRecord()).toEqual({ g: 2 });
     expect(cacheDeleteCalls).toEqual(["fb-old-cache", "flashbang-dev"]);
     expect(cacheDeleteCalls).not.toContain("other-cache");
 
@@ -244,6 +247,8 @@ describe("sw runtime with real modules", () => {
     await handlers.fetch?.(fetchEvt.event);
     await Promise.all(fetchEvt.waits);
     await fetchEvt.response();
+    const swIdb = await import("../src/sw/idb");
+    expect(swIdb.getTopFrecencyRecord()).toEqual({ g: 2 });
     expect([...new Set(fetchCalls)].toSorted()).toEqual([
       "/app.js",
       "/bench",
@@ -254,6 +259,52 @@ describe("sw runtime with real modules", () => {
       "/icon.svg",
       "/manifest.json",
     ]);
+  });
+
+  test("seeds bang data and redirect settings without a worker fetch", async () => {
+    await loadSwRuntime();
+    const bangData = await Bun.file("src/generated/bangs.bin").arrayBuffer();
+    const staleSeedEvt = createMessageEvent({
+      type: "seed-runtime",
+      asset: "/bangs-stale.bin",
+      bangData,
+      redirectSettings: {
+        custom: Object.create(null),
+        defaultUrl: ["https://stale.example/?q=", ""],
+        luckyUrl: null,
+      },
+    });
+    await handlers.message?.(staleSeedEvt.event);
+    expect(staleSeedEvt.waits).toHaveLength(0);
+    expect(cachePutCalls).toEqual([]);
+
+    const seedEvt = createMessageEvent({
+      type: "seed-runtime",
+      asset: "/bangs.bin",
+      bangData,
+      redirectSettings: {
+        custom: Object.create(null),
+        defaultUrl: ["https://seeded.example/search?q=", ""],
+        luckyUrl: null,
+      },
+    });
+
+    await handlers.message?.(seedEvt.event);
+    expect(seedEvt.waits).toHaveLength(1);
+    await Promise.all(seedEvt.waits);
+    expect(cachePutCalls).toContain("/bangs.bin");
+    expect(fetchCalls).toEqual([]);
+
+    const posted: unknown[] = [];
+    const redirectEvt = createMessageEvent(
+      { type: "redirect", query: "hello" },
+      { postMessage: (message) => posted.push(message) }
+    );
+    await handlers.message?.(redirectEvt.event);
+    expect(redirectEvt.waits).toHaveLength(0);
+    expect((posted[0] as { url: string }).url).toBe(
+      "https://seeded.example/search?q=hello"
+    );
   });
 
   test("serves the root bootstrap from memory without starting precache", async () => {

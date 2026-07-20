@@ -11,7 +11,9 @@ import {
   getTopFrecencyRecord,
   hasTopFrecency,
   invalidateCache,
+  loadFrecency,
   readRedirectSettings,
+  seedRedirectSettings,
   trackBangUsage,
 } from "./idb";
 import {
@@ -110,6 +112,27 @@ function ensureBangData(): Promise<void> {
     });
   }
   return bangDataPromise;
+}
+
+function seedRuntime(
+  buffer: ArrayBuffer,
+  settings: RedirectSettings
+): Promise<void> {
+  const response = new Response(buffer);
+  initializeBangData(buffer);
+  seedRedirectSettings(settings);
+  bangDataPromise = RESOLVED_PROMISE;
+  const persistData = caches
+    .open(CACHE_NAME)
+    .then((cache) => cache.put(new Request(BANG_DATA_ASSET), response))
+    .catch(swallowError);
+  return Promise.all([persistData, loadFrecency()]).then(() => undefined);
+}
+
+function warmRuntime(): Promise<void> {
+  return ensureBangData()
+    .then(() => readRedirectSettings())
+    .then(() => undefined);
 }
 
 async function precacheAssets(
@@ -227,22 +250,32 @@ function queueBangSideEffects(e: FetchEvent, trigger: string): void {
 }
 
 self.addEventListener("install", (e: ExtendableEvent) => {
-  e.waitUntil(ensureBangData().then(() => self.skipWaiting()));
+  e.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener("activate", (e: ExtendableEvent) => {
   e.waitUntil(
-    Promise.all([
-      deleteOldCaches(CACHE_NAME),
-      self.clients.claim(),
-      ensureBangData().then(() => readRedirectSettings()),
-    ]).then(() => {
-      /* no-op */
-    })
+    Promise.all([deleteOldCaches(CACHE_NAME), self.clients.claim()]).then(
+      () => {
+        /* no-op */
+      }
+    )
   );
 });
 
 self.addEventListener("message", (e: ExtendableMessageEvent) => {
+  if (
+    e.data?.type === "seed-runtime" &&
+    e.data.asset === BANG_DATA_ASSET &&
+    e.data.bangData instanceof ArrayBuffer &&
+    typeof e.data.redirectSettings === "object" &&
+    e.data.redirectSettings !== null
+  ) {
+    e.waitUntil(
+      seedRuntime(e.data.bangData, e.data.redirectSettings as RedirectSettings)
+    );
+    return;
+  }
   if (e.data?.type === "benchmark-mode") {
     const sourceId = (e.source as Client | null)?.id ?? null;
     const token = typeof e.data.token === "string" ? e.data.token : "";
@@ -260,14 +293,22 @@ self.addEventListener("message", (e: ExtendableMessageEvent) => {
     ) {
       benchmarkState = null;
     }
-    e.ports[0]?.postMessage({
-      bangDataReady: isBangDataInitialized(),
-      enabled:
-        benchmarkState?.clientId === sourceId && benchmarkState.token === token,
-      navigationCount: benchmarkState?.navigationCount ?? 0,
-      requestCount: benchmarkState?.requestCount ?? 0,
-      token: benchmarkState?.token ?? null,
-    });
+    const reply = () => {
+      e.ports[0]?.postMessage({
+        bangDataReady: isBangDataInitialized(),
+        enabled:
+          benchmarkState?.clientId === sourceId &&
+          benchmarkState.token === token,
+        navigationCount: benchmarkState?.navigationCount ?? 0,
+        requestCount: benchmarkState?.requestCount ?? 0,
+        token: benchmarkState?.token ?? null,
+      });
+    };
+    if (enable && !isBangDataInitialized()) {
+      e.waitUntil(ensureBangData().then(reply, reply));
+    } else {
+      reply();
+    }
     return;
   }
   if (e.data?.type === "benchmark-count") {
@@ -455,6 +496,9 @@ self.addEventListener("fetch", (e: FetchEvent) => {
 
   // Private redirects should not install or compete with UI assets. Root is
   // handled above because the worker cannot see its URL fragment.
+  if (!(isBangDataInitialized() && getCachedSettings())) {
+    e.waitUntil(warmRuntime().catch(swallowError));
+  }
   if (!deferredPrecachePromise) {
     e.waitUntil(ensureDeferredPrecache());
   }

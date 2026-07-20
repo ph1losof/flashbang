@@ -1,15 +1,20 @@
 import { initializeBangData } from "../sw/bang-data";
 import { readRedirectSettings } from "../sw/idb";
-import { redirectRawUrl, redirectUrl } from "../sw/redirect";
+import {
+  type RedirectSettings,
+  redirectRawUrl,
+  redirectUrl,
+} from "../sw/redirect";
 
-export async function redirectWithoutServiceWorker(
+export async function resolveFallback(
   query: string,
   bangData: ArrayBuffer,
   raw = false
-): Promise<void> {
+): Promise<{ settings: RedirectSettings; url: string }> {
   initializeBangData(bangData);
   const settings = await readRedirectSettings();
-  location.replace(
-    raw ? redirectRawUrl(query, settings) : redirectUrl(query, settings)
-  );
+  return {
+    settings,
+    url: raw ? redirectRawUrl(query, settings) : redirectUrl(query, settings),
+  };
 }

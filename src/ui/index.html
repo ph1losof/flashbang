@@ -26,6 +26,12 @@
       const query =
         privateQuery ||
         (hasQuery && new URLSearchParams(location.search).get("q"));
+      const workerRegistrationPromise =
+        "serviceWorker" in navigator &&
+        query &&
+        !navigator.serviceWorker.controller
+          ? navigator.serviceWorker.register("/sw.js").catch(() => null)
+          : null;
 
       let fallbackStarted = false;
       const fallback = () => {
@@ -46,9 +52,36 @@
           }),
           import("/fallback.js"),
         ])
-          .then(([data, { redirectWithoutServiceWorker }]) =>
-            redirectWithoutServiceWorker(query, data, privateQuery !== null)
-          )
+          .then(async ([data, { resolveFallback }]) => {
+            const { settings, url } = await resolveFallback(
+              query,
+              data,
+              privateQuery !== null
+            );
+            const registration = workerRegistrationPromise
+              ? await workerRegistrationPromise
+              : null;
+            const worker =
+              registration?.installing ||
+              registration?.waiting ||
+              registration?.active;
+            if (worker) {
+              try {
+                worker.postMessage(
+                  {
+                    type: "seed-runtime",
+                    asset: "__BANG_DATA_ASSET__",
+                    bangData: data,
+                    redirectSettings: settings,
+                  },
+                  [data]
+                );
+              } catch {
+                // Handoff must never prevent the resolved navigation.
+              }
+            }
+            location.replace(url);
+          })
           .catch(() => {
             document.body.textContent =
               "Flashbang could not resolve this query. Reload the page or enable Service Workers.";
@@ -71,18 +104,8 @@
           [channel.port2]
         );
       } else if (privateQuery) {
-        if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("/sw.js").catch(() => {
-            // The main-thread resolver below remains available.
-          });
-        }
         fallback();
       } else if (query) {
-        if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("/sw.js").catch(() => {
-            // The main-thread resolver below remains available.
-          });
-        }
         fallback();
       } else if ("serviceWorker" in navigator) {
         navigator.serviceWorker.register("/sw.js").catch(fallback);

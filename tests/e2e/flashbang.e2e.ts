@@ -1641,6 +1641,84 @@ test("first installation redirects before a controller exists", async ({
   }
 });
 
+test("first fallback seeds the worker for the next offline redirect", async ({
+  browser,
+  browserName,
+}) => {
+  test.skip(
+    browserName === "webkit",
+    "Playwright WebKit does not support service worker lifecycle testing"
+  );
+  const context = await browser.newContext();
+  try {
+    const page = await context.newPage();
+    await mockGoogleSearchRoute(page);
+    const bangDataRequests: string[] = [];
+    context.on("request", (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (
+        pathname === "/bangs.bin" ||
+        (pathname.startsWith("/bangs-") && !pathname.startsWith("/bangs-meta-"))
+      ) {
+        bangDataRequests.push(pathname);
+      }
+    });
+
+    await page.goto("/health");
+    await navigateAndWaitForRedirect(
+      page,
+      "/?q=%21g%20first",
+      /google\.com\/search\?q=first/
+    );
+
+    const probe = await context.newPage();
+    await mockGoogleSearchRoute(probe);
+    await probe.goto("/health");
+    await probe.waitForFunction(
+      () =>
+        "serviceWorker" in navigator &&
+        navigator.serviceWorker.controller !== null
+    );
+    await expect
+      .poll(() =>
+        probe.evaluate(async () => {
+          for (const cacheName of await caches.keys()) {
+            const requests = await (await caches.open(cacheName)).keys();
+            if (
+              requests.some(({ url }) => {
+                const pathname = new URL(url).pathname;
+                return (
+                  pathname === "/bangs.bin" ||
+                  (pathname.startsWith("/bangs-") &&
+                    !pathname.startsWith("/bangs-meta-"))
+                );
+              })
+            ) {
+              return true;
+            }
+          }
+          return false;
+        })
+      )
+      .toBe(true);
+    expect(bangDataRequests).toHaveLength(1);
+
+    const origin = new URL(probe.url()).origin;
+    await context.route(`${origin}/**`, (route) => route.abort());
+    try {
+      await navigateAndWaitForRedirect(
+        probe,
+        "/?q=%21g%20second",
+        /google\.com\/search\?q=second/
+      );
+    } finally {
+      await context.unroute(`${origin}/**`);
+    }
+  } finally {
+    await context.close();
+  }
+});
+
 test("private hash redirect keeps the query out of origin requests", async ({
   browser,
 }) => {

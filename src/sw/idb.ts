@@ -77,6 +77,11 @@ export function getCachedSettings(): RedirectSettings | null {
   return cachedRedirect;
 }
 
+export function seedRedirectSettings(settings: RedirectSettings): void {
+  cachedRedirect = settings;
+  redirectSettingsRetryAt = 0;
+}
+
 export function readRedirectSettings(): Promise<RedirectSettings> {
   const cached = getCachedSettings();
   if (cached) {
