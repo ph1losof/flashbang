@@ -108,6 +108,7 @@ const generated = [
   Bun.file("src/generated/bangs-sparse.js"),
   Bun.file("src/generated/bangs-meta.bin"),
   Bun.file("src/generated/bangs-trie.js"),
+  Bun.file("src/generated/bangs-hot.js"),
 ];
 if (
   !(await Promise.all(generated.map((file) => file.exists()))).every(Boolean)

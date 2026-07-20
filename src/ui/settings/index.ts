@@ -6,7 +6,6 @@ import { setSuggestCookie } from "../cookie";
 import type { DB } from "../db";
 import { $ } from "../dom";
 import { resolveSuggestProvider } from "../suggest-provider";
-import { notifySW } from "../sw-bridge";
 import { setupCustomBangs } from "./custom-bangs";
 import { setupDefaultBangSetting } from "./default-bang";
 import { getProviderControls, setupProviderSettings } from "./providers";
@@ -163,7 +162,6 @@ export async function initSettings(
       syntax.refresh();
       writer.clearErrors();
       syncCookie();
-      notifySW("invalidate");
       onSyntaxChange?.(state.bangPrefix, state.snapPrefix);
     },
     runWrite: writer.run,

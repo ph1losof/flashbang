@@ -4,7 +4,6 @@ import {
 } from "../../shared/trigger-prefix";
 import type { DB } from "../db";
 import { $ } from "../dom";
-import { notifySW } from "../sw-bridge";
 import type { SettingsWriter } from "./write";
 
 export interface SyntaxSettingsState {
@@ -81,7 +80,6 @@ export function setupSyntaxSettings({
         onCommit: () => {
           state[stateKey] = value;
           refresh();
-          notifySW("invalidate");
           onChange();
         },
         onFailure: refresh,

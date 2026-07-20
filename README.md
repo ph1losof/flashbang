@@ -4,6 +4,8 @@
 
 ![Flashbang](.github/images/landing.png)
 
+<p align="center"><a href="#features">Features</a> &nbsp;|&nbsp; <a href="#bang-syntax">Bang syntax</a> &nbsp;|&nbsp; <a href="#snap-syntax">Snap syntax</a> &nbsp;|&nbsp; <a href="#setup-as-search-engine">Setup</a> &nbsp;|&nbsp; <a href="#deploy-your-own">Self-host</a> &nbsp;|&nbsp; <a href="#how-it-works">How it works</a> &nbsp;|&nbsp; <a href="#contributing">Contributing</a></p>
+
 Turn your browser's address bar into a shortcut launcher. Type `!g kittens` to search Google, `!w dogs` for Wikipedia, `!gh react` for GitHub — over 14,000 shortcuts (called "bangs") that take you straight to the right site, instantly. No extra tabs, no round-trips, no waiting for a page to load. Or use **snaps** — type `@w quantum` to search your default engine restricted to Wikipedia, `@gh api` for GitHub-only results.
 
 Every other bang tool loads a full page before redirecting — adding hundreds of milliseconds — or routes through an edge server adding network latency. Flashbang skips the page entirely — a [Service Worker](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API) handles the redirect before your browser even starts rendering.

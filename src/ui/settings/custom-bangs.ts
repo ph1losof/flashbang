@@ -12,7 +12,6 @@ import {
 } from "../../shared/trigger-prefix";
 import type { DB } from "../db";
 import { $, el } from "../dom";
-import { notifySW } from "../sw-bridge";
 
 type RunWrite = (write: () => Promise<unknown>) => Promise<boolean>;
 
@@ -56,7 +55,6 @@ async function renderCustom(
           return;
         }
         onRemove(b.trigger);
-        notifySW("invalidate");
         await renderCustom(
           db,
           onChange,
@@ -225,7 +223,6 @@ export function setupCustomBangs(
     if (!committed) {
       return;
     }
-    notifySW("invalidate");
     resetForm();
     await refresh();
   });

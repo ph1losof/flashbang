@@ -1,4 +1,9 @@
 import { $ } from "../dom";
+import {
+  beginHotBootUpdate,
+  endHotBootUpdate,
+  invalidateRedirectSettings,
+} from "../sw-bridge";
 
 export type SettingControl =
   | HTMLInputElement
@@ -87,6 +92,11 @@ export function createSettingsWriter(
 
   const run: RunWrite = (write, options = {}) => {
     const key = options.key || "custom-bangs";
+    const affectsHotBoot =
+      key === "custom-bangs" ||
+      key === "bang-prefix" ||
+      key === "snap-prefix" ||
+      key === "import";
     const wasIdle = pendingWrites === 0;
     pendingWrites++;
     if (wasIdle) {
@@ -104,7 +114,20 @@ export function createSettingsWriter(
     }
     render();
     const task = writeChain.then(async () => {
-      await write();
+      const hotBootToken = affectsHotBoot ? await beginHotBootUpdate() : null;
+      try {
+        await write();
+      } catch (error) {
+        if (hotBootToken) {
+          await endHotBootUpdate(hotBootToken).catch(console.error);
+        }
+        throw error;
+      }
+      if (hotBootToken) {
+        await endHotBootUpdate(hotBootToken).catch(console.error);
+      } else if (affectsHotBoot) {
+        await invalidateRedirectSettings();
+      }
       failedWrites.delete(key);
       options.onCommit?.();
     });

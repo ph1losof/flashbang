@@ -52,6 +52,7 @@ export const GENERATED_BANG_DATA_FILES = [
   "src/generated/bangs-sparse.js",
   "src/generated/bangs-meta.bin",
   "src/generated/bangs-trie.js",
+  "src/generated/bangs-hot.js",
 ] as const;
 
 const DATA_DIR = "data";
@@ -60,6 +61,7 @@ const KAGI_BANGS_PATH = `${DATA_DIR}/kagi.json`;
 const CUSTOM_BANGS_PATH = `${DATA_DIR}/custom-bangs.json`;
 const MERGED_BANGS_PATH = `${DATA_DIR}/bangs.json`;
 const GENERATED_OUT_DIR = "src/generated";
+const HOT_BANG_LIMIT = 24;
 
 const DDG_SOURCE_URL = "https://duckduckgo.com/bang.js";
 const KAGI_SOURCE_URL =
@@ -1313,9 +1315,55 @@ async function loadBangs(options: CodegenOptions): Promise<Bang[]> {
 
 interface GeneratedArtifacts {
   binary: Uint8Array;
+  hotJs: string;
   meta: Uint8Array;
   sparseJs: string;
   trieJs: string;
+}
+
+function generateHotBangs(bangs: readonly Bang[]): string {
+  const hot = bangs
+    .filter((bang) => {
+      if (bang.regex) {
+        return false;
+      }
+      const placeholder = bang.url.indexOf("{}");
+      if (
+        placeholder === -1 ||
+        bang.url.indexOf("{}", placeholder + 2) !== -1
+      ) {
+        return false;
+      }
+      const prefix = bang.url.substring(0, placeholder);
+      const query = prefix.indexOf("?");
+      const fragment = prefix.indexOf("#");
+      return query !== -1 && fragment === -1;
+    })
+    .sort(
+      (a, b) => b.relevance - a.relevance || a.trigger.localeCompare(b.trigger)
+    )
+    .slice(0, HOT_BANG_LIMIT);
+
+  const prefixes: string[] = [];
+  const suffixes: string[] = [];
+  const cases: string[] = [];
+  for (let i = 0; i < hot.length; i++) {
+    const bang = hot[i];
+    const placeholder = bang.url.indexOf("{}");
+    prefixes.push(bang.url.substring(0, placeholder));
+    suffixes.push(bang.url.substring(placeholder + 2));
+    cases.push(
+      `case ${hashFNV1a(bang.trigger)}:return e-s===${bang.trigger.length}&&q.startsWith(${JSON.stringify(bang.trigger)},s)?${i}:-1;`
+    );
+  }
+
+  return (
+    `export const HOT_BANG_COUNT=${hot.length};` +
+    `export const HOT_TRIGGERS=${JSON.stringify(hot.map((bang) => bang.trigger))};` +
+    `export const HOT_PREFIXES=${JSON.stringify(prefixes)};` +
+    `export const HOT_SUFFIXES=${JSON.stringify(suffixes)};` +
+    `export function lookupHotBang(q,s,e,h){switch(h>>>0){${cases.join("")}default:return -1}}`
+  );
 }
 
 function buildGeneratedArtifacts(bangs: Bang[]): GeneratedArtifacts {
@@ -1328,6 +1376,7 @@ function buildGeneratedArtifacts(bangs: Bang[]): GeneratedArtifacts {
   const trieRuntimeHelpers = buildMinifiedTrieRuntimeHelpers();
   return {
     binary: generateBinary(bangs),
+    hotJs: generateHotBangs(bangs),
     meta: generateMeta(bangs),
     sparseJs: generateSparse(bangs),
     trieJs: generateTrie(trieData, trieRuntimeHelpers),
@@ -1342,11 +1391,13 @@ async function writeGeneratedArtifacts(
     rm(`${outDir}/bangs-meta.js`, { force: true }),
     rm(`${outDir}/bangs-meta.d.ts`, { force: true }),
     Bun.write(`${outDir}/bangs.bin`, artifacts.binary),
+    Bun.write(`${outDir}/bangs-hot.js`, artifacts.hotJs),
     Bun.write(`${outDir}/bangs-meta.bin`, artifacts.meta),
     Bun.write(`${outDir}/bangs-sparse.js`, artifacts.sparseJs),
     Bun.write(`${outDir}/bangs-trie.js`, artifacts.trieJs),
   ]);
   console.log(`  bangs.bin: ${artifacts.binary.byteLength} bytes`);
+  console.log(`  bangs-hot.js: ${artifacts.hotJs.length} bytes`);
   console.log(`  bangs-meta.bin: ${artifacts.meta.byteLength} bytes`);
   console.log(`  bangs-sparse.js: ${artifacts.sparseJs.length} bytes`);
   console.log(`  bangs-trie.js: ${artifacts.trieJs.length} bytes`);
@@ -1354,6 +1405,17 @@ async function writeGeneratedArtifacts(
 
 async function writeGeneratedDeclarations(outDir: string): Promise<void> {
   await Promise.all([
+    Bun.write(
+      `${outDir}/bangs-hot.d.ts`,
+      [
+        "export declare const HOT_BANG_COUNT: number;",
+        "export declare const HOT_TRIGGERS: readonly string[];",
+        "export declare const HOT_PREFIXES: readonly string[];",
+        "export declare const HOT_SUFFIXES: readonly string[];",
+        "export declare function lookupHotBang(rawQuery: string, start: number, end: number, hash: number): number;",
+        "",
+      ].join("\n")
+    ),
     Bun.write(
       `${outDir}/bangs-sparse.d.ts`,
       [

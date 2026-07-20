@@ -72,6 +72,7 @@ flashbang/
 │   │   ├── custom-trigger.ts  # Custom trigger validation and reserved names
 │   │   ├── frecency-serial.ts # Compact frecency serialization
 │   │   ├── hash.ts            # Shared FNV-1a hash
+│   │   ├── hot-boot.ts        # Hot-boot metadata protocol constants
 │   │   ├── idb.ts             # Shared IndexedDB open helper
 │   │   ├── raw-query.ts       # Raw query string parsing
 │   │   ├── raw-url.ts         # Raw URL pathname and origin parsing
@@ -83,6 +84,7 @@ flashbang/
 │   │   └── trie.ts            # Radix trie lookup
 │   ├── generated/             # Output of codegen (gitignored, generated from data/bangs.json)
 │   │   ├── bangs.bin          # packed trigger→URL data for Service Worker
+│   │   ├── bangs-hot.js       # generated top-relevance cold-start redirect tier
 │   │   ├── bangs-sparse.js    # advanced bang and snap override lookups
 │   │   ├── bangs-meta.bin     # packed trigger/name/domain catalog for UI
 │   │   ├── bangs-trie.js      # radix trie for prefix-matched bang suggestions
@@ -93,6 +95,7 @@ flashbang/
 │   │   ├── redirect.ts        # Bang/snap parsing & redirect logic (zero-copy raw + decoded paths)
 │   │   ├── idb.ts             # IndexedDB access, settings cache & in-memory frecency
 │   │   ├── frecency.ts        # Top-K frecency helpers used by SW
+│   │   ├── hot-redirect.ts     # Registration-metadata hot-tier redirects
 │   │   └── sw.ts              # Service Worker lifecycle & fetch handler
 │   └── ui/
 │       ├── index.html         # Initial registration and fallback HTML template
