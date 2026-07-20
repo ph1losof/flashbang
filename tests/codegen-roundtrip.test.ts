@@ -190,6 +190,7 @@ describe("codegen round-trip", () => {
 
   test("Kagi ad values are emitted through the hashed snap lookup", () => {
     expect(lookupSnapOverride("g", hashFNV1a("g"), false)).toBeNull();
+    expect(lookupSnapOverride("not-hn", hashFNV1a("hn"), false)).toBeNull();
     expect(lookupSnapOverride("hn", hashFNV1a("hn"), false)).toBe(
       "+site:news.ycombinator.com"
     );

@@ -832,16 +832,39 @@ function renderSnapLookup(overrides: readonly GeneratedSnapOverride[]): string {
     }
   }
 
-  let lookup = "export function lookupSnapOverride(t,h,o){switch(h>>>0){";
+  const triggers: string[] = [];
+  const definitionIds: number[] = [];
+  const indexes: string[] = [];
+  const collisions: string[] = [];
   for (const [hash, entries] of byHash) {
-    lookup += `case ${hash}:`;
-    for (const entry of entries) {
-      lookup += `if(t==='${jsEscape(entry.trigger)}')return _ST[${entry.id * 2}+(o?1:0)];`;
+    if (entries.length === 1) {
+      const entry = entries[0];
+      indexes.push(`${hash}:${triggers.length}`);
+      triggers.push(`'${jsEscape(entry.trigger)}'`);
+      definitionIds.push(entry.id);
+      continue;
     }
-    lookup += "return null;";
+
+    let collision = `case ${hash}:`;
+    for (const entry of entries) {
+      collision += `if(t==='${jsEscape(entry.trigger)}')return _ST[${entry.id * 2}+(o?1:0)];`;
+    }
+    collisions.push(`${collision}return null;`);
   }
-  lookup += "default:return null}}";
-  return `const _ST=[${definitions.join(",")}];${lookup}`;
+
+  const collisionLookup = collisions.length
+    ? `switch(h>>>0){${collisions.join("")}default:return null}`
+    : "return null";
+  return (
+    `const _ST=[${definitions.join(",")}],` +
+    `_SK=[${triggers.join(",")}],` +
+    `_SD=[${definitionIds.join(",")}],` +
+    `_SI={${indexes.join(",")}};` +
+    "export function lookupSnapOverride(t,h,o){" +
+    "const i=_SI[h>>>0];" +
+    "if(i!==undefined&&_SK[i]===t)return _ST[_SD[i]*2+(o?1:0)];" +
+    `${collisionLookup}}`
+  );
 }
 
 function generateSparse(bangs: readonly Bang[]): string {

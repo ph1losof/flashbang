@@ -51,6 +51,7 @@ flashbang/
 │   ├── codegen.ts            # Fetch sources, parse, merge, generate bang artifacts
 │   ├── build.ts              # Bundle + minify pipeline
 │   ├── dev.ts                # Dev server with file watching, rebuild & live reload
+│   ├── inline-script-hash.ts # Shared inline-script CSP hash extraction
 │   ├── profile.ts            # Profiling script
 │   ├── shared.ts             # Shared HTML and static-asset build helpers
 │   └── start.ts              # Production server (serves pre-built dist/)
@@ -87,10 +88,11 @@ flashbang/
 │   │   └── *.d.ts             # TypeScript declarations for each generated .js file
 │   ├── sw/
 │   │   ├── bang-data.ts       # Binary bang decoder and regular lookup
-│   │   ├── sw.ts              # Service Worker lifecycle & fetch handler
+│   │   ├── redirect-settings.ts # Redirect settings loading and compilation
 │   │   ├── redirect.ts        # Bang/snap parsing & redirect logic (zero-copy raw + decoded paths)
 │   │   ├── idb.ts             # IndexedDB access, settings cache & in-memory frecency
-│   │   └── frecency.ts        # Top-K frecency helpers used by SW
+│   │   ├── frecency.ts        # Top-K frecency helpers used by SW
+│   │   └── sw.ts              # Service Worker lifecycle & fetch handler
 │   └── ui/
 │       ├── index.html         # Initial registration and fallback HTML template
 │       ├── controlled.html    # In-memory bootstrap for worker-controlled root navigations
