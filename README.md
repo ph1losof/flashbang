@@ -123,12 +123,11 @@ https://flashbang.tech/suggest?q=%s&sp=ddg&bp=%24&np=~
 A public instance is available at **[flashbang.tech](https://flashbang.tech)**. Just visit it, then add it as a custom search engine in your browser:
 
 - **Search URL:** `https://flashbang.tech?q=%s`
-- **Private Search URL:** `https://flashbang.tech/#q=%s` (slightly slower; keeps submitted query text out of search-navigation requests to the Flashbang host)
 - **Suggestion URL:** `https://flashbang.tech/suggest?q=%s` (Optional)
 
 Nothing to build or deploy.
 
-The private template stores the query in the URL fragment, which browsers do not send in HTTP requests. An installed Service Worker serves a purpose-built bootstrap directly from memory; the page passes the still-encoded fragment directly to the worker, then replaces the transient history entry with the destination. When a worker is not yet installed, the page resolves the first query and transfers its bang-data buffer and compiled redirect settings to the registering worker before navigating. The normal `?q=%s` template remains the fastest option because the Service Worker can intercept it before any page loads. Search suggestions are separate network requests; leave the Suggestions URL unset if you do not want address-bar input sent to the configured suggestion provider through Flashbang.
+For the privacy-sensitive case where query text must remain on your device until navigation to the destination, use `https://flashbang.tech/#q=%s` and leave the Suggestion URL unset. This fragment-based option is significantly slower and is not recommended for normal use. Search suggestions are separate network requests; leaving the Suggestion URL unset keeps address-bar input from being sent to the configured suggestion provider through Flashbang.
 
 ### Browser quirks
 
