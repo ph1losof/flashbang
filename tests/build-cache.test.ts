@@ -49,10 +49,12 @@ describe("build cache version", () => {
   test("maps every concrete core and chunk precache input", () => {
     expect(precacheFileInputs(["/chunk-abc12345.js"])).toEqual([
       ["/bangs.bin", "dist/bangs.bin"],
+      ["/index.html", "dist/index.html"],
       ["/home", "dist/home.html"],
       ["/bench", "dist/bench.html"],
       ["/bench.js", "dist/bench.js"],
       ["/app.js", "dist/app.js"],
+      ["/fallback.js", "dist/fallback.js"],
       ["/icon.svg", "dist/icon.svg"],
       ["/manifest.json", "dist/manifest.json"],
       ["/chunk-abc12345.js", "dist/chunk-abc12345.js"],

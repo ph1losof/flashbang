@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { cpus } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -48,10 +49,13 @@ interface ProfileMetric {
   max?: number;
   mean?: number;
   cvPct?: number;
+  samples?: number[];
 }
 
 interface ProfileReport {
-  schemaVersion: 1;
+  schemaVersion: 2;
+  suiteVersion: number;
+  dataFingerprint: string;
   generatedAt: string;
   environment: {
     bun: string;
@@ -161,7 +165,9 @@ function isProfileReport(value: unknown): value is ProfileReport {
   }
   const candidate = value as Partial<ProfileReport>;
   return (
-    candidate.schemaVersion === 1 &&
+    candidate.schemaVersion === 2 &&
+    Number.isInteger(candidate.suiteVersion) &&
+    typeof candidate.dataFingerprint === "string" &&
     typeof candidate.environment === "object" &&
     candidate.environment !== null &&
     typeof candidate.config === "object" &&
@@ -171,7 +177,10 @@ function isProfileReport(value: unknown): value is ProfileReport {
       (metric) =>
         typeof metric?.id === "string" &&
         typeof metric.label === "string" &&
-        Number.isFinite(metric.p50)
+        Number.isFinite(metric.p50) &&
+        (metric.samples === undefined ||
+          (Array.isArray(metric.samples) &&
+            metric.samples.every(Number.isFinite)))
     )
   );
 }
@@ -226,6 +235,7 @@ interface RunStats {
   max: number;
   mean: number;
   cvPct: number;
+  samples: number[];
 }
 
 function summarizeRuns(arr: number[]): RunStats {
@@ -245,6 +255,7 @@ function summarizeRuns(arr: number[]): RunStats {
     max: sorted[sorted.length - 1] ?? 0,
     mean: avg,
     cvPct: avg > 0 ? (stdev / avg) * 100 : 0,
+    samples: arr.slice(),
   };
 }
 
@@ -323,6 +334,7 @@ function separator(title: string) {
 
 const RUNS = profileOptions.runs ?? (profileOptions.quick ? 4 : 12);
 const COLD_RUNS = profileOptions.quick ? 3 : 5;
+const PROFILE_SUITE_VERSION = 2;
 
 function iterations(normal: number): number {
   return profileOptions.quick
@@ -352,15 +364,80 @@ function bench(
   return summarizeRuns(times);
 }
 
+function benchPair(
+  iters: number,
+  left: (i: number, run: number) => void,
+  right: (i: number, run: number) => void,
+  warmup = 10_000
+): readonly [RunStats, RunStats] {
+  const warmupIterations = profileOptions.quick
+    ? Math.min(warmup, 2_000)
+    : warmup;
+  for (let i = 0; i < warmupIterations; i++) {
+    left(i, -1);
+    right(i, -1);
+  }
+  const leftTimes: number[] = [];
+  const rightTimes: number[] = [];
+  const measure = (
+    fn: (i: number, run: number) => void,
+    samples: number[],
+    run: number
+  ) => {
+    const t0 = Bun.nanoseconds();
+    for (let i = 0; i < iters; i++) {
+      fn(i, run);
+    }
+    samples.push((Bun.nanoseconds() - t0) / iters);
+  };
+  for (let run = 0; run < RUNS; run++) {
+    if (run % 2 === 0) {
+      measure(left, leftTimes, run);
+      measure(right, rightTimes, run);
+    } else {
+      measure(right, rightTimes, run);
+      measure(left, leftTimes, run);
+    }
+  }
+  return [summarizeRuns(leftTimes), summarizeRuns(rightTimes)];
+}
+
 function benchTable<T extends { label: string }>(
   items: T[],
   iters: number,
   fn: (item: T, i: number, run: number) => void,
   labelWidth = 24
 ): Map<string, RunStats> {
+  const warmupIterations = profileOptions.quick ? 2_000 : 10_000;
+  for (const item of items) {
+    for (let i = 0; i < warmupIterations; i++) {
+      fn(item, i, -1);
+    }
+  }
+
+  const samples = new Map(items.map((item) => [item.label, [] as number[]]));
+  const indexes = items.map((_, index) => index);
+  for (let run = 0; run < RUNS; run++) {
+    const offset = run % items.length;
+    const order = indexes.map(
+      (_, index) => indexes[(index + offset) % items.length]
+    );
+    if (run % 2 === 1) {
+      order.reverse();
+    }
+    for (const index of order) {
+      const item = items[index];
+      const t0 = Bun.nanoseconds();
+      for (let i = 0; i < iters; i++) {
+        fn(item, i, run);
+      }
+      samples.get(item.label)!.push((Bun.nanoseconds() - t0) / iters);
+    }
+  }
+
   const results = new Map<string, RunStats>();
   for (const item of items) {
-    const stats = bench(iters, (i, run) => fn(item, i, run));
+    const stats = summarizeRuns(samples.get(item.label)!);
     results.set(item.label, stats);
     console.log(
       `  ${item.label.padEnd(labelWidth)} ${color.green(fmt(stats.p50).padStart(10))} ${fmt(stats.p90).padStart(10)} ${fmt(stats.p99).padStart(10)} ${colorCv(stats.cvPct).padStart(useColor ? 17 : 8)}`
@@ -372,7 +449,7 @@ function benchTable<T extends { label: string }>(
 function benchTableHeader(label: string, labelWidth: number): void {
   console.log(
     color.dim(
-      `  ${label.padEnd(labelWidth)} ${"p50".padStart(10)} ${"p90".padStart(10)} ${"p99".padStart(10)} ${"CV".padStart(8)}`
+      `  ${label.padEnd(labelWidth)} ${"run p50".padStart(10)} ${"run p90".padStart(10)} ${"run p99".padStart(10)} ${"CV".padStart(8)}`
     )
   );
   console.log(color.dim(`  ${"─".repeat(labelWidth + 42)}`));
@@ -384,7 +461,8 @@ import { hashFNV1a as fnvHash } from "../src/shared/hash";
 
 await ensureGeneratedBangData(true);
 const { initializeBangData, lookupBang } = await import("../src/sw/bang-data");
-initializeBangData(await Bun.file(binaryPath).arrayBuffer());
+const binaryBuffer = await Bun.file(binaryPath).arrayBuffer();
+initializeBangData(binaryBuffer);
 
 const [
   { BANG_COUNT },
@@ -458,7 +536,6 @@ console.log(
   `bangs-meta.bin: ${fmtBytesExact(metaBytes)}  (packed catalog metadata, used by UI)`
 );
 
-const trieFile = await Bun.file(triePath).text();
 console.log(
   `bangs-trie.js: ${fmtBytesExact(trieBytes)}  (radix trie, used by suggest)`
 );
@@ -563,11 +640,16 @@ separator("3b. BANG LOOKUP — COLD VS WARM PATH");
 
 const allTriggers = metaCatalog.entries.map((entry) => entry.trigger);
 
-const coldT0 = Bun.nanoseconds();
-for (const tr of allTriggers) {
-  lookupBang(tr, fnvHash(tr));
+const firstLookupTimes: number[] = [];
+for (let run = 0; run < RUNS; run++) {
+  initializeBangData(binaryBuffer);
+  const t0 = Bun.nanoseconds();
+  for (const tr of allTriggers) {
+    lookupBang(tr, fnvHash(tr));
+  }
+  firstLookupTimes.push((Bun.nanoseconds() - t0) / allTriggers.length);
 }
-const coldNsPerLookup = (Bun.nanoseconds() - coldT0) / allTriggers.length;
+const firstLookupStats = summarizeRuns(firstLookupTimes);
 
 const warmTimes: number[] = [];
 for (let run = 0; run < RUNS; run++) {
@@ -580,13 +662,15 @@ for (let run = 0; run < RUNS; run++) {
 const warmRunStats = summarizeRuns(warmTimes);
 
 console.log(
-  `\nAll-triggers cold/warm (${allTriggers.length.toLocaleString()} triggers):`
+  `\nAll-triggers first-lookup/warm (${allTriggers.length.toLocaleString()} triggers):`
 );
-console.log(`  Cold pass (1×):    ${fmt(coldNsPerLookup)}/lookup`);
+console.log(
+  `  First lookup p50:  ${fmt(firstLookupStats.p50)}/lookup (${RUNS} cache resets)`
+);
 console.log(`  Warm p50 (${RUNS}×):  ${fmt(warmRunStats.p50)}/lookup`);
 console.log(`  Warm p90:          ${fmt(warmRunStats.p90)}/lookup`);
 console.log(
-  `  Cold/warm ratio:   ${(coldNsPerLookup / warmRunStats.p50).toFixed(1)}×`
+  `  First/warm ratio:  ${(firstLookupStats.p50 / warmRunStats.p50).toFixed(1)}×`
 );
 console.log(
   `  Run spread:        ${fmt(warmRunStats.min)}..${fmt(warmRunStats.max)} (cv ${warmRunStats.cvPct.toFixed(1)}%)`
@@ -861,12 +945,15 @@ for (const sample of [
   { label: "Suffix snap", defaultRaw: "kittens+%40g", customRaw: "kittens+~g" },
   { label: "No trigger", defaultRaw: "kittens", customRaw: "kittens" },
 ]) {
-  const defaultStats = bench(REDIRECT_ITERS, () => {
-    redirectRaw(sample.defaultRaw, settings);
-  });
-  const customStats = bench(REDIRECT_ITERS, () => {
-    redirectRaw(sample.customRaw, configuredSyntaxSettings);
-  });
+  const [defaultStats, customStats] = benchPair(
+    REDIRECT_ITERS,
+    () => {
+      redirectRaw(sample.defaultRaw, settings);
+    },
+    () => {
+      redirectRaw(sample.customRaw, configuredSyntaxSettings);
+    }
+  );
   const ratio = customStats.p50 / defaultStats.p50;
   console.log(
     `  ${sample.label.padEnd(14)} default ${fmt(defaultStats.p50).padStart(8)}  configured ${fmt(customStats.p50).padStart(8)}  ${ratio.toFixed(2)}×`
@@ -882,12 +969,11 @@ const encodedTriggerPrefixes = [
   "%7E",
 ] as const;
 const PAIR_ITERS = iterations(100_000);
-const baselinePairStats = bench(PAIR_ITERS, (i) => {
-  redirectRaw(i & 1 ? "%40g+kittens" : "%21g+kittens", settings);
-});
+const pairBaselineSamples: number[] = [];
 let fastestPair = Number.POSITIVE_INFINITY;
 let slowestPair = 0;
 let slowestPairLabel = "";
+let slowestPairRatio = 0;
 let pairCount = 0;
 for (let bangIndex = 0; bangIndex < TRIGGER_PREFIXES.length; bangIndex++) {
   for (let snapIndex = 0; snapIndex < TRIGGER_PREFIXES.length; snapIndex++) {
@@ -903,19 +989,29 @@ for (let bangIndex = 0; bangIndex < TRIGGER_PREFIXES.length; bangIndex++) {
     };
     const bangRaw = `${encodedTriggerPrefixes[bangIndex]}g+kittens`;
     const snapRaw = `${encodedTriggerPrefixes[snapIndex]}g+kittens`;
-    const pairStats = bench(PAIR_ITERS, (i) => {
-      redirectRaw(i & 1 ? snapRaw : bangRaw, pairSettings);
-    });
+    const [defaultStats, pairStats] = benchPair(
+      PAIR_ITERS,
+      (i) => {
+        redirectRaw(i & 1 ? "%40g+kittens" : "%21g+kittens", settings);
+      },
+      (i) => {
+        redirectRaw(i & 1 ? snapRaw : bangRaw, pairSettings);
+      }
+    );
+    pairBaselineSamples.push(...defaultStats.samples);
     fastestPair = Math.min(fastestPair, pairStats.p50);
-    if (pairStats.p50 > slowestPair) {
+    const ratio = pairStats.p50 / defaultStats.p50;
+    if (ratio > slowestPairRatio) {
       slowestPair = pairStats.p50;
       slowestPairLabel = `${TRIGGER_PREFIXES[bangIndex]}/${TRIGGER_PREFIXES[snapIndex]}`;
+      slowestPairRatio = ratio;
     }
     pairCount++;
   }
 }
+const baselinePairStats = summarizeRuns(pairBaselineSamples);
 console.log(
-  `  All ${pairCount} pairs   default ${fmt(baselinePairStats.p50).padStart(8)}  range ${fmt(fastestPair)}..${fmt(slowestPair)}  worst ${slowestPairLabel} ${(slowestPair / baselinePairStats.p50).toFixed(2)}×`
+  `  All ${pairCount} pairs   paired default ${fmt(baselinePairStats.p50).padStart(8)}  range ${fmt(fastestPair)}..${fmt(slowestPair)}  worst ${slowestPairLabel} ${slowestPairRatio.toFixed(2)}×`
 );
 
 separator("5b. REDIRECT FIXUP ISOLATION");
@@ -1107,7 +1203,7 @@ for (let run = 0; run < RUNS; run++) {
     const next = (incrementalCounts[trigger] || 0) + 1;
     incrementalCounts[trigger] = next;
     updateTopFrecencyOnIncrement(top, trigger, next, FRECENCY_LIMIT);
-    sink += JSON.stringify(top).length;
+    sink += top[0]?.count ?? 0;
   }
   incrementalFrecencyTimes.push((Bun.nanoseconds() - t0) / FRECENCY_ITERS);
 }
@@ -1206,11 +1302,11 @@ function runIsolatedNs(script: string, label: string): number {
 
 function isolatedFirstHitNs(url: string, cookie: string): number {
   const script = `
-import { handleSuggestRequest } from "./src/server/handlers";
 const req = new Request(${JSON.stringify(url)}, {
   headers: { Cookie: ${JSON.stringify(cookie)} }
 });
 const t0 = Bun.nanoseconds();
+const { handleSuggestRequest } = await import("./src/server/handlers");
 await handleSuggestRequest(req);
 console.log(Bun.nanoseconds() - t0);
 `;
@@ -1272,19 +1368,45 @@ console.log(
 
 separator("11. ARTIFACT INITIALIZATION TIME");
 
-const trieEvalCode = trieFile.replace(/export const /g, "var ");
-
 const EVAL_RUNS = profileOptions.quick ? 8 : 20;
 
-const evalFullTimes: number[] = [];
+const bangDataInitTimes: number[] = [];
 for (let i = 0; i < EVAL_RUNS; i++) {
+  const input = binaryBuffer.slice(0);
   const t0 = Bun.nanoseconds();
-  sink += decodeBangCatalog(metaBuffer).entries.length + i;
-  evalFullTimes.push(Bun.nanoseconds() - t0);
+  initializeBangData(input);
+  bangDataInitTimes.push(Bun.nanoseconds() - t0);
+}
+const bangDataInitStats = summarizeRuns(bangDataInitTimes);
+
+console.log(`\nbangs.bin initialization (${fmtBytesExact(binaryBytes)}):`);
+console.log(`  Median: ${fmt(bangDataInitStats.p50)}`);
+console.log(`  p90:    ${fmt(bangDataInitStats.p90)}`);
+console.log(`  p99:    ${fmt(bangDataInitStats.p99)}`);
+console.log(
+  `  Spread: ${fmt(bangDataInitStats.min)}..${fmt(bangDataInitStats.max)} (cv ${bangDataInitStats.cvPct.toFixed(1)}%)`
+);
+
+const evalFullTimes: number[] = [];
+for (let i = 0; i < COLD_RUNS; i++) {
+  evalFullTimes.push(
+    runIsolatedNs(
+      `
+import { decodeBangCatalog } from "./src/ui/bang-catalog";
+const buffer = await Bun.file(${JSON.stringify(metaPath)}).arrayBuffer();
+const t0 = Bun.nanoseconds();
+decodeBangCatalog(buffer);
+console.log(Bun.nanoseconds() - t0);
+`,
+      "isolated metadata decode"
+    )
+  );
 }
 const evalFullStats = summarizeRuns(evalFullTimes);
 
-console.log(`\nbangs-meta.bin decode time (${fmtBytesExact(metaBytes)}):`);
+console.log(
+  `\nbangs-meta.bin first decode (${fmtBytesExact(metaBytes)}, ${COLD_RUNS} isolated runs):`
+);
 console.log(`  Median: ${fmt(evalFullStats.p50)}`);
 console.log(`  p90:    ${fmt(evalFullStats.p90)}`);
 console.log(`  p99:    ${fmt(evalFullStats.p99)}`);
@@ -1293,14 +1415,23 @@ console.log(
 );
 
 const evalTrieTimes: number[] = [];
-for (let i = 0; i < EVAL_RUNS; i++) {
-  const t0 = Bun.nanoseconds();
-  new Function(`${trieEvalCode};${i}`)();
-  evalTrieTimes.push(Bun.nanoseconds() - t0);
+for (let i = 0; i < COLD_RUNS; i++) {
+  evalTrieTimes.push(
+    runIsolatedNs(
+      `
+const t0 = Bun.nanoseconds();
+await import("./src/generated/bangs-trie.js");
+console.log(Bun.nanoseconds() - t0);
+`,
+      "isolated trie import"
+    )
+  );
 }
 const evalTrieStats = summarizeRuns(evalTrieTimes);
 
-console.log(`\nbangs-trie.js eval time (${fmtBytesExact(trieBytes)}):`);
+console.log(
+  `\nbangs-trie.js cold import (${fmtBytesExact(trieBytes)}, ${COLD_RUNS} isolated runs):`
+);
 console.log(`  Median: ${fmt(evalTrieStats.p50)}`);
 console.log(`  p90:    ${fmt(evalTrieStats.p90)}`);
 console.log(`  p99:    ${fmt(evalTrieStats.p99)}`);
@@ -1336,14 +1467,20 @@ function pointMetric(
 
 const summaryRows: ProfileMetric[] = [
   metric(
+    "module-eval.bang-data",
+    "Binary bang-data initialization",
+    "Cold start",
+    bangDataInitStats
+  ),
+  metric(
     "module-eval.meta",
-    "Metadata decode (bangs-meta.bin)",
+    "First metadata decode",
     "Cold start",
     evalFullStats
   ),
   metric(
     "module-eval.trie",
-    "Module eval (bangs-trie.js)",
+    "Cold trie module import",
     "Cold start",
     evalTrieStats
   ),
@@ -1504,7 +1641,7 @@ console.log(
   `\n┌${"─".repeat(componentWidth + 2)}┬${"─".repeat(timeWidth + 2)}┬${"─".repeat(barWidth + 2)}┬${"─".repeat(categoryWidth + 2)}┐`
 );
 console.log(
-  `│ ${color.bold("Component".padEnd(componentWidth))} │ ${color.bold("p50".padStart(timeWidth))} │ ${color.bold("relative".padEnd(barWidth))} │ ${color.bold("Scope".padEnd(categoryWidth))} │`
+  `│ ${color.bold("Component".padEnd(componentWidth))} │ ${color.bold("run p50".padStart(timeWidth))} │ ${color.bold("relative".padEnd(barWidth))} │ ${color.bold("Scope".padEnd(categoryWidth))} │`
 );
 console.log(summaryRule);
 
@@ -1545,8 +1682,42 @@ type ComparisonStatus =
 interface MetricComparison {
   current: ProfileMetric;
   baseline?: ProfileMetric;
+  confidenceInterval?: readonly [number, number];
   deltaPct?: number;
   status: ComparisonStatus;
+}
+
+function bootstrapDeltaInterval(
+  current: readonly number[] | undefined,
+  baseline: readonly number[] | undefined
+): readonly [number, number] | null {
+  if (!(current && baseline && current.length >= 3 && baseline.length >= 3)) {
+    return null;
+  }
+  let state = 0x9e3779b9;
+  for (const value of [...current, ...baseline]) {
+    state = Math.imul(state ^ Math.round(value), 1664525) + 1013904223;
+  }
+  const randomIndex = (length: number): number => {
+    state = Math.imul(state, 1664525) + 1013904223;
+    return (state >>> 0) % length;
+  };
+  const sampleMedian = (source: readonly number[]): number => {
+    const sample = new Array<number>(source.length);
+    for (let i = 0; i < sample.length; i++) {
+      sample[i] = source[randomIndex(source.length)];
+    }
+    sample.sort((a, b) => a - b);
+    return pct(sample, 0.5);
+  };
+  const deltas = new Array<number>(2_000);
+  for (let i = 0; i < deltas.length; i++) {
+    const previous = sampleMedian(baseline);
+    deltas[i] =
+      previous > 0 ? ((sampleMedian(current) - previous) / previous) * 100 : 0;
+  }
+  deltas.sort((a, b) => a - b);
+  return [pct(deltas, 0.025), pct(deltas, 0.975)];
 }
 
 function compareMetrics(
@@ -1562,16 +1733,35 @@ function compareMetrics(
         return { current: item, status: "new" };
       }
       const deltaPct = ((item.p50 - previous.p50) / previous.p50) * 100;
-      const noisy = (item.cvPct ?? 0) > 10 || (previous.cvPct ?? 0) > 10;
+      const confidenceInterval = bootstrapDeltaInterval(
+        item.samples,
+        previous.samples
+      );
       let status: ComparisonStatus = "stable";
-      if (noisy) {
-        status = "noisy";
-      } else if (deltaPct >= thresholdPct) {
+      if (
+        confidenceInterval?.[0] !== undefined &&
+        confidenceInterval[0] >= thresholdPct
+      ) {
         status = "regression";
-      } else if (deltaPct <= -thresholdPct) {
+      } else if (
+        confidenceInterval?.[1] !== undefined &&
+        confidenceInterval[1] <= -thresholdPct
+      ) {
         status = "improvement";
+      } else if (
+        Math.abs(deltaPct) >= thresholdPct ||
+        (item.cvPct ?? 0) > 10 ||
+        (previous.cvPct ?? 0) > 10
+      ) {
+        status = "noisy";
       }
-      return { current: item, baseline: previous, deltaPct, status };
+      return {
+        current: item,
+        baseline: previous,
+        confidenceInterval: confidenceInterval ?? undefined,
+        deltaPct,
+        status,
+      };
     })
     .sort((a, b) => (b.deltaPct ?? -Infinity) - (a.deltaPct ?? -Infinity));
 }
@@ -1608,7 +1798,6 @@ function comparisonDelta(status: ComparisonStatus, delta: string): string {
 function printComparisons(
   comparisons: MetricComparison[],
   baseline: ProfileReport,
-  current: ProfileReport,
   path: string
 ): void {
   separator(`BASELINE COMPARISON — ${profileOptions.thresholdPct}% threshold`);
@@ -1617,35 +1806,13 @@ function printComparisons(
       `  ${path}  •  ${baseline.generatedAt}  •  Bun ${baseline.environment.bun}`
     )
   );
-  if (
-    baseline.config.quick !== profileOptions.quick ||
-    baseline.config.runs !== RUNS
-  ) {
-    console.log(
-      color.yellow(
-        `  Warning: baseline used ${baseline.config.runs} runs (${baseline.config.quick ? "quick" : "full"}), current run used ${RUNS} (${profileOptions.quick ? "quick" : "full"}).`
-      )
-    );
-  }
-  const sameMachine =
-    baseline.environment.platform === current.environment.platform &&
-    baseline.environment.arch === current.environment.arch &&
-    baseline.environment.cpu === current.environment.cpu;
-  if (!sameMachine || baseline.environment.bun !== current.environment.bun) {
-    console.log(
-      color.yellow(
-        `  Warning: runtime or machine differs from baseline (${baseline.environment.bun}, ${baseline.environment.cpu}).`
-      )
-    );
-  }
-
   const labelWidth = 35;
   console.log(
     color.dim(
-      `\n  ${"Component".padEnd(labelWidth)} ${"Baseline".padStart(10)} ${"Current".padStart(10)} ${"Delta".padStart(9)}  Status`
+      `\n  ${"Component".padEnd(labelWidth)} ${"Baseline".padStart(10)} ${"Current".padStart(10)} ${"Delta".padStart(9)} ${"95% delta CI".padStart(18)}  Status`
     )
   );
-  console.log(color.dim(`  ${"─".repeat(labelWidth + 44)}`));
+  console.log(color.dim(`  ${"─".repeat(labelWidth + 63)}`));
   for (const comparison of comparisons) {
     const baselineValue = comparison.baseline
       ? fmt(comparison.baseline.p50)
@@ -1655,8 +1822,11 @@ function printComparisons(
         ? "—"
         : `${comparison.deltaPct >= 0 ? "+" : ""}${comparison.deltaPct.toFixed(1)}%`;
     const coloredDelta = comparisonDelta(comparison.status, delta);
+    const interval = comparison.confidenceInterval
+      ? `[${comparison.confidenceInterval[0].toFixed(1)}, ${comparison.confidenceInterval[1].toFixed(1)}]%`
+      : "—";
     console.log(
-      `  ${comparison.current.label.padEnd(labelWidth)} ${baselineValue.padStart(10)} ${fmt(comparison.current.p50).padStart(10)} ${coloredDelta.padStart(useColor ? 18 : 9)}  ${comparisonStatus(comparison.status)}`
+      `  ${comparison.current.label.padEnd(labelWidth)} ${baselineValue.padStart(10)} ${fmt(comparison.current.p50).padStart(10)} ${coloredDelta.padStart(useColor ? 18 : 9)} ${interval.padStart(18)}  ${comparisonStatus(comparison.status)}`
     );
   }
 }
@@ -1675,8 +1845,16 @@ function gitOutput(args: string[]): string | null {
 
 const gitCommit = gitOutput(["rev-parse", "--short", "HEAD"]);
 const gitStatus = gitOutput(["status", "--porcelain"]);
+const dataHash = createHash("sha256");
+for (const path of GENERATED_BANG_DATA_FILES) {
+  const bytes = await Bun.file(path).bytes();
+  dataHash.update(`${path}:${bytes.byteLength}:`);
+  dataHash.update(bytes);
+}
 const profileReport: ProfileReport = {
-  schemaVersion: 1,
+  schemaVersion: 2,
+  suiteVersion: PROFILE_SUITE_VERSION,
+  dataFingerprint: dataHash.digest("hex").slice(0, 16),
   generatedAt: new Date().toISOString(),
   environment: {
     bun: Bun.version,
@@ -1696,6 +1874,45 @@ const profileReport: ProfileReport = {
 
 let stableRegressions = 0;
 if (baselineReport && baselinePath) {
+  const compatibilityChecks: Array<readonly [string, unknown, unknown]> = [
+    ["suite version", baselineReport.suiteVersion, profileReport.suiteVersion],
+    [
+      "data fingerprint",
+      baselineReport.dataFingerprint,
+      profileReport.dataFingerprint,
+    ],
+    [
+      "Bun version",
+      baselineReport.environment.bun,
+      profileReport.environment.bun,
+    ],
+    [
+      "platform",
+      baselineReport.environment.platform,
+      profileReport.environment.platform,
+    ],
+    [
+      "architecture",
+      baselineReport.environment.arch,
+      profileReport.environment.arch,
+    ],
+    ["CPU", baselineReport.environment.cpu, profileReport.environment.cpu],
+    ["quick mode", baselineReport.config.quick, profileReport.config.quick],
+    ["run count", baselineReport.config.runs, profileReport.config.runs],
+    [
+      "cold run count",
+      baselineReport.config.coldRuns,
+      profileReport.config.coldRuns,
+    ],
+  ];
+  const incompatible = compatibilityChecks
+    .filter(([, previous, current]) => previous !== current)
+    .map(([label, previous, current]) => `${label}: ${previous} != ${current}`);
+  if (incompatible.length > 0) {
+    throw new Error(
+      `Profile baseline is not comparable:\n  ${incompatible.join("\n  ")}`
+    );
+  }
   const comparisons = compareMetrics(
     profileReport.metrics,
     baselineReport.metrics,
@@ -1704,7 +1921,7 @@ if (baselineReport && baselinePath) {
   stableRegressions = comparisons.filter(
     (item) => item.status === "regression"
   ).length;
-  printComparisons(comparisons, baselineReport, profileReport, baselinePath);
+  printComparisons(comparisons, baselineReport, baselinePath);
   const improvements = comparisons.filter(
     (item) => item.status === "improvement"
   ).length;

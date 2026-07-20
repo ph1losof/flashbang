@@ -8,12 +8,6 @@
     <link rel="icon" type="image/svg+xml" href="/icon.svg">
     <link rel="manifest" href="/manifest.json">
     <link
-      rel="preload"
-      as="fetch"
-      href="__BANG_DATA_ASSET__"
-      crossorigin="anonymous"
-    >
-    <link
       rel="search"
       type="application/opensearchdescription+xml"
       title="flashbang"
@@ -183,7 +177,7 @@
             <label
               for="setup-search-url"
               class="mb-1.5 block text-xs font-medium text-text-secondary"
-              >Search URL</label
+              >Fast Search URL</label
             >
             <div class="flex items-center gap-2">
               <input
@@ -195,13 +189,46 @@
               <button
                 type="button"
                 id="copy-search-url"
-                data-label="Search URL"
+                data-label="Fast Search URL"
                 class="btn setup-copy inline-flex min-w-20 shrink-0 items-center justify-center gap-1.5 px-3 py-2.5"
-                aria-label="Copy search URL"
+                aria-label="Copy fast search URL"
               >
                 <span data-copy-label>Copy</span>
               </button>
             </div>
+          </div>
+
+          <div>
+            <label
+              for="setup-private-search-url"
+              class="mb-1.5 block text-xs font-medium text-text-secondary"
+              >Private Search URL
+              <span class="font-normal opacity-70"
+                >(slightly slower)</span
+              ></label
+            >
+            <div class="flex items-center gap-2">
+              <input
+                type="text"
+                id="setup-private-search-url"
+                readonly
+                class="input-field min-w-0 flex-1 font-mono text-xs"
+              >
+              <button
+                type="button"
+                id="copy-private-search-url"
+                data-label="Private Search URL"
+                class="btn setup-copy inline-flex min-w-20 shrink-0 items-center justify-center gap-1.5 px-3 py-2.5"
+                aria-label="Copy private search URL"
+              >
+                <span data-copy-label>Copy</span>
+              </button>
+            </div>
+            <p class="mt-1.5 text-xs leading-relaxed text-text-secondary">
+              Keeps submitted queries in the URL fragment, so search navigations
+              do not send them to the Flashbang host. Leave Suggestions URL
+              unset to keep address-bar input local too.
+            </p>
           </div>
 
           <div>

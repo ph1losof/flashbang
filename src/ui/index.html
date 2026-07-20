@@ -10,12 +10,6 @@
       title="flashbang"
       href="/opensearch.xml"
     >
-    <link
-      rel="preload"
-      as="fetch"
-      href="__BANG_DATA_ASSET__"
-      crossorigin="anonymous"
-    >
     <style>
     html {
       background: #0a0a0f;
@@ -26,39 +20,75 @@
     (() => {
       const hasQuery =
         location.search.startsWith("?q=") || location.search.includes("&q=");
+      const privateQuery = location.hash.startsWith("#q=")
+        ? location.hash.substring(3).split("&", 1)[0]
+        : null;
+      const query =
+        privateQuery ||
+        (hasQuery && new URLSearchParams(location.search).get("q"));
 
-      const query = hasQuery && new URLSearchParams(location.search).get("q");
+      let fallbackStarted = false;
+      const fallback = () => {
+        if (fallbackStarted) {
+          return;
+        }
+        fallbackStarted = true;
+        if (!query) {
+          location.replace("/home");
+          return;
+        }
+        Promise.all([
+          fetch("__BANG_DATA_ASSET__").then((response) => {
+            if (!response.ok) {
+              throw new Error(`Failed to load bang data: ${response.status}`);
+            }
+            return response.arrayBuffer();
+          }),
+          import("/fallback.js"),
+        ])
+          .then(([data, { redirectWithoutServiceWorker }]) =>
+            redirectWithoutServiceWorker(query, data, privateQuery !== null)
+          )
+          .catch(() => {
+            document.body.textContent =
+              "Flashbang could not resolve this query. Reload the page or enable Service Workers.";
+          });
+      };
 
       if (
+        privateQuery &&
         "serviceWorker" in navigator &&
-        query &&
-        !navigator.serviceWorker.controller
+        navigator.serviceWorker.controller
       ) {
-        navigator.serviceWorker.addEventListener(
-          "message",
-          (e) => {
-            if (e.data?.url) {
-              location.replace(e.data.url);
-            }
-          },
-          { once: true }
+        const channel = new MessageChannel();
+        channel.port1.onmessage = (event) => {
+          if (typeof event.data === "string") {
+            location.replace(event.data);
+          }
+        };
+        navigator.serviceWorker.controller.postMessage(
+          { type: "redirect", rawQuery: query },
+          [channel.port2]
         );
-        navigator.serviceWorker.addEventListener(
-          "controllerchange",
-          () => {
-            navigator.serviceWorker.controller.postMessage({
-              type: "redirect",
-              query,
-            });
-          },
-          { once: true }
-        );
-        navigator.serviceWorker.register("/sw.js");
+      } else if (privateQuery) {
+        if ("serviceWorker" in navigator) {
+          navigator.serviceWorker.register("/sw.js").catch(() => {
+            // The main-thread resolver below remains available.
+          });
+        }
+        fallback();
+      } else if (query) {
+        if ("serviceWorker" in navigator) {
+          navigator.serviceWorker.register("/sw.js").catch(() => {
+            // The main-thread resolver below remains available.
+          });
+        }
+        fallback();
       } else if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("/sw.js");
+        navigator.serviceWorker.register("/sw.js").catch(fallback);
         Promise.all([
           fetch("/opensearch.xml").catch(() => {
-            // pre-warm — ignore errors
+            // Pre-warm only; registration can continue without it.
           }),
           new Promise((resolve) => {
             if (navigator.serviceWorker.controller) {
@@ -72,11 +102,14 @@
             }
           }),
         ]).then(() => {
-          const p = location.pathname;
-          if (p === "/" || p === "/index.html" || p === "/settings") {
+          if (location.pathname === "/settings") {
             location.replace(location.href);
+          } else {
+            location.replace("/home");
           }
         });
+      } else {
+        fallback();
       }
     })();
     </script>

@@ -11,15 +11,21 @@ import {
   getTopFrecencyRecord,
   hasTopFrecency,
   invalidateCache,
-  loadFrecency,
   readRedirectSettings,
   trackBangUsage,
 } from "./idb";
-import { type RedirectSettings, redirectRaw, redirectUrl } from "./redirect";
+import {
+  type RedirectSettings,
+  redirectRaw,
+  redirectRawUrl,
+  redirectUrl,
+} from "./redirect";
 
 declare const __CACHE_VERSION__: string;
 declare const __BANG_DATA_ASSET__: string;
 declare const __REQUIRED_APP_ASSETS__: string[];
+declare const __CONTROLLED_HTML__: string;
+declare const __CONTROLLED_HEADERS__: Record<string, string>;
 declare const __IS_DEV__: boolean;
 
 const CACHE_PREFIX = "fb-";
@@ -31,6 +37,7 @@ const BANG_DATA_ASSET = __BANG_DATA_ASSET__;
 const APP_ASSETS = [
   "/home",
   "/app.js",
+  "/fallback.js",
   "/icon.svg",
   "/manifest.json",
   ...__REQUIRED_APP_ASSETS__,
@@ -40,11 +47,41 @@ const DEFERRED_ASSETS = [...APP_ASSETS, "/bench", "/bench.js"];
 const PRECACHE_CONCURRENCY = 4;
 let deferredPrecachePromise: Promise<void> | null = null;
 let bangDataPromise: Promise<void> | null = null;
-let benchmarkClientId: string | null = null;
+const BENCHMARK_SETTINGS: RedirectSettings = {
+  custom: Object.assign(Object.create(null), {
+    custom: ["https://benchmark.example/search?q=", ""],
+    path: ["https://benchmark.example/users/", ""],
+  }),
+  defaultUrl: ["https://www.google.com/search?q=", ""],
+  luckyUrl: ["https://duckduckgo.com/?q=\\", ""],
+};
+let benchmarkState: {
+  clientId: string;
+  navigationCount: number;
+  requestCount: number;
+  token: string;
+} | null = null;
 const RESOLVED_PROMISE: Promise<void> = Promise.resolve();
 const swallowError = () => {
   /* best-effort */
 };
+
+const BENCHMARK_TARGET_PATH = "/__flashbang-bench-target";
+const BENCHMARK_TARGET_HTML = `<!doctype html><meta charset="utf-8"><title>flashbang benchmark target</title><script>opener?.postMessage({type:"flashbang-benchmark-navigation",token:new URLSearchParams(location.search).get("fb-bench"),sequence:Number(new URLSearchParams(location.search).get("fb-seq"))},location.origin)</script>`;
+
+function rawQueryParameter(rawUrl: string, name: string): string | null {
+  const marker = `${name}=`;
+  let start = rawUrl.indexOf(`?${marker}`);
+  if (start === -1) {
+    start = rawUrl.indexOf(`&${marker}`);
+  }
+  if (start === -1) {
+    return null;
+  }
+  start += marker.length + 1;
+  const end = rawUrl.indexOf("&", start);
+  return end === -1 ? rawUrl.substring(start) : rawUrl.substring(start, end);
+}
 
 async function loadBangData(): Promise<void> {
   const request = new Request(BANG_DATA_ASSET);
@@ -151,16 +188,16 @@ function findQueryValueStart(raw: string): number {
 function queueBangSideEffects(e: FetchEvent, trigger: string): void {
   e.waitUntil(
     RESOLVED_PROMISE.then(() => {
-      trackBangUsage(trigger);
-      if (typeof cookieStore === "undefined") {
-        return;
+      const usage = trackBangUsage(trigger);
+      if (typeof cookieStore === "undefined" || !usage.topChanged) {
+        return usage.persistence;
       }
 
       if (!hasTopFrecency()) {
-        return;
+        return usage.persistence;
       }
       const frecency = getTopFrecencyRecord();
-      return cookieStore
+      const cookieSync = cookieStore
         .get("suggest")
         .then((cookie) => {
           if (!cookie?.value) {
@@ -184,6 +221,7 @@ function queueBangSideEffects(e: FetchEvent, trigger: string): void {
           });
         })
         .catch(swallowError);
+      return Promise.all([usage.persistence, cookieSync]).then(() => undefined);
     }).catch(swallowError)
   );
 }
@@ -198,7 +236,6 @@ self.addEventListener("activate", (e: ExtendableEvent) => {
       deleteOldCaches(CACHE_NAME),
       self.clients.claim(),
       ensureBangData().then(() => readRedirectSettings()),
-      loadFrecency(),
     ]).then(() => {
       /* no-op */
     })
@@ -208,13 +245,46 @@ self.addEventListener("activate", (e: ExtendableEvent) => {
 self.addEventListener("message", (e: ExtendableMessageEvent) => {
   if (e.data?.type === "benchmark-mode") {
     const sourceId = (e.source as Client | null)?.id ?? null;
-    const enable = e.data.enabled === true && sourceId !== null;
+    const token = typeof e.data.token === "string" ? e.data.token : "";
+    const enable = e.data.enabled === true && sourceId !== null && token !== "";
     if (enable) {
-      benchmarkClientId = sourceId;
-    } else if (benchmarkClientId === sourceId) {
-      benchmarkClientId = null;
+      benchmarkState = {
+        clientId: sourceId,
+        navigationCount: 0,
+        requestCount: 0,
+        token,
+      };
+    } else if (
+      benchmarkState?.clientId === sourceId &&
+      benchmarkState.token === token
+    ) {
+      benchmarkState = null;
     }
-    e.ports[0]?.postMessage({ enabled: benchmarkClientId === sourceId });
+    e.ports[0]?.postMessage({
+      bangDataReady: isBangDataInitialized(),
+      enabled:
+        benchmarkState?.clientId === sourceId && benchmarkState.token === token,
+      navigationCount: benchmarkState?.navigationCount ?? 0,
+      requestCount: benchmarkState?.requestCount ?? 0,
+      token: benchmarkState?.token ?? null,
+    });
+    return;
+  }
+  if (e.data?.type === "benchmark-count") {
+    const sourceId = (e.source as Client | null)?.id ?? null;
+    const token = typeof e.data.token === "string" ? e.data.token : "";
+    e.ports[0]?.postMessage({
+      active:
+        benchmarkState?.clientId === sourceId && benchmarkState.token === token,
+      navigationCount:
+        benchmarkState?.clientId === sourceId && benchmarkState.token === token
+          ? benchmarkState.navigationCount
+          : -1,
+      requestCount:
+        benchmarkState?.clientId === sourceId && benchmarkState.token === token
+          ? benchmarkState.requestCount
+          : -1,
+    });
     return;
   }
   if (e.data?.type === "invalidate") {
@@ -223,12 +293,23 @@ self.addEventListener("message", (e: ExtendableMessageEvent) => {
   if (e.data?.type === "claim") {
     e.waitUntil(self.clients.claim());
   }
-  if (e.data?.type === "redirect" && e.data.query) {
-    const q = e.data.query as string;
+  const hasRawQuery = typeof e.data?.rawQuery === "string";
+  let messageQuery = "";
+  if (hasRawQuery) {
+    messageQuery = e.data.rawQuery;
+  } else if (typeof e.data?.query === "string") {
+    messageQuery = e.data.query;
+  }
+  if (e.data?.type === "redirect" && messageQuery) {
     const resolve = (s: RedirectSettings) => {
-      (e.source as Client)?.postMessage({
-        url: redirectUrl(q, s),
-      });
+      const url = hasRawQuery
+        ? redirectRawUrl(messageQuery, s)
+        : redirectUrl(messageQuery, s);
+      if (e.ports[0]) {
+        e.ports[0].postMessage(url);
+      } else {
+        (e.source as Client)?.postMessage(hasRawQuery ? url : { url });
+      }
     };
     const cached = getCachedSettings();
     if (isBangDataInitialized()) {
@@ -257,11 +338,14 @@ function respondToRedirect(
   rawQuery: string,
   settings: RedirectSettings
 ): Response {
-  const [response, trigger] = redirectRaw(rawQuery, settings);
-  if (
-    trigger &&
-    (benchmarkClientId === null || e.clientId !== benchmarkClientId)
-  ) {
+  const benchmark = benchmarkState?.clientId === e.clientId;
+  const [response, trigger] = redirectRaw(
+    rawQuery,
+    benchmark ? BENCHMARK_SETTINGS : settings
+  );
+  if (benchmark && benchmarkState) {
+    benchmarkState.requestCount++;
+  } else if (trigger) {
     queueBangSideEffects(e, trigger);
   }
   return response;
@@ -274,12 +358,64 @@ self.addEventListener("fetch", (e: FetchEvent) => {
     return;
   }
 
+  let benchmarkToken: string | null = null;
+  if (benchmarkState) {
+    benchmarkToken = rawQueryParameter(raw, "fb-bench");
+    if (
+      benchmarkState.token === benchmarkToken &&
+      raw.includes(`${BENCHMARK_TARGET_PATH}?`)
+    ) {
+      e.respondWith(
+        new Response(BENCHMARK_TARGET_HTML, {
+          headers: {
+            "Cache-Control": "no-store",
+            "Content-Type": "text/html; charset=utf-8",
+            "Cross-Origin-Embedder-Policy": "credentialless",
+            "Cross-Origin-Opener-Policy": "same-origin",
+          },
+        })
+      );
+      return;
+    }
+
+    if (
+      benchmarkState.clientId === e.clientId &&
+      raw.endsWith("/__flashbang-bench-noop")
+    ) {
+      benchmarkState.requestCount++;
+      e.respondWith(new Response(null, { status: 204 }));
+      return;
+    }
+  }
+
   const vStart = findQueryValueStart(raw);
   if (vStart !== -1) {
     const vEnd = raw.indexOf("&", vStart);
     const rawQ =
       vEnd === -1 ? raw.substring(vStart) : raw.substring(vStart, vEnd);
     if (rawQ) {
+      if (
+        e.request.mode === "navigate" &&
+        benchmarkState?.token === benchmarkToken
+      ) {
+        redirectRawUrl(rawQ, BENCHMARK_SETTINGS);
+        benchmarkState.navigationCount++;
+        const sequence = rawQueryParameter(raw, "fb-seq") ?? "0";
+        const target = new URL(BENCHMARK_TARGET_PATH, raw);
+        target.searchParams.set("fb-bench", benchmarkState.token);
+        target.searchParams.set("fb-seq", sequence);
+        e.respondWith(
+          new Response(null, {
+            status: 302,
+            headers: {
+              "Cross-Origin-Embedder-Policy": "credentialless",
+              "Cross-Origin-Opener-Policy": "same-origin",
+              Location: target.href,
+            },
+          })
+        );
+        return;
+      }
       if (isBangDataInitialized()) {
         const cached = getCachedSettings();
         if (cached) {
@@ -308,12 +444,22 @@ self.addEventListener("fetch", (e: FetchEvent) => {
     }
   }
 
-  // Redirect requests should not install or compete with UI assets.
+  if (raw.endsWith("/") || raw.endsWith("/index.html")) {
+    e.respondWith(
+      new Response(__CONTROLLED_HTML__, {
+        headers: __CONTROLLED_HEADERS__,
+      })
+    );
+    return;
+  }
+
+  // Private redirects should not install or compete with UI assets. Root is
+  // handled above because the worker cannot see its URL fragment.
   if (!deferredPrecachePromise) {
     e.waitUntil(ensureDeferredPrecache());
   }
 
-  if (raw.endsWith("/bench")) {
+  if (raw.endsWith("/bench") || raw.endsWith("/bench.html")) {
     e.respondWith(
       caches
         .match(new Request("/bench"))
@@ -334,11 +480,7 @@ self.addEventListener("fetch", (e: FetchEvent) => {
     return;
   }
 
-  if (
-    raw.endsWith("/") ||
-    raw.endsWith("/index.html") ||
-    raw.endsWith("/settings")
-  ) {
+  if (raw.endsWith("/settings")) {
     e.respondWith(
       caches
         .match(new Request("/home"))

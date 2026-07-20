@@ -6,7 +6,7 @@ let dbPromise: Promise<IDBDatabase> | null = null;
 
 export function openDB(): Promise<IDBDatabase> {
   if (!dbPromise) {
-    dbPromise = new Promise((ok, err) => {
+    const opening = new Promise<IDBDatabase>((ok, err) => {
       const r = indexedDB.open(DB_NAME, DB_VERSION);
       r.onupgradeneeded = (event) => {
         const db = r.result;
@@ -19,12 +19,38 @@ export function openDB(): Promise<IDBDatabase> {
       r.onsuccess = () => ok(r.result);
       r.onerror = () => err(r.error);
     });
+    let current: Promise<IDBDatabase>;
+    current = opening.then(
+      (db) => {
+        db.onversionchange = () => {
+          db.close();
+          if (dbPromise === current) {
+            dbPromise = null;
+          }
+        };
+        return db;
+      },
+      (error) => {
+        if (dbPromise === current) {
+          dbPromise = null;
+        }
+        throw error;
+      }
+    );
+    dbPromise = current;
   }
   return dbPromise;
 }
 
 export function resetDB(): void {
+  const existing = dbPromise;
   dbPromise = null;
+  void existing?.then(
+    (db) => db.close(),
+    () => {
+      /* A failed open has no connection to close. */
+    }
+  );
 }
 
 export function idbWrap<T>(req: IDBRequest<T>): Promise<T> {

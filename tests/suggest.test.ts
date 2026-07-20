@@ -377,6 +377,18 @@ describe("parseCookie", () => {
     expect(s.trigger).toBe("b");
   });
 
+  test("suggest cookie accepts compact and padded separators", () => {
+    const compact = parseCookie(req("theme=dark;suggest=bing,b;lang=en"));
+    const padded = parseCookie(req("theme=dark;   suggest=ddg,g;lang=en"));
+    const leading = parseCookie(req("\t suggest=google,g"));
+
+    expect(compact.provider).toBe("bing");
+    expect(compact.trigger).toBe("b");
+    expect(padded.provider).toBe("ddg");
+    expect(padded.trigger).toBe("g");
+    expect(leading.provider).toBe("google");
+  });
+
   test("legacy suggest context is normalized on next response", () => {
     const { settings, rewrittenSuggestCookie } =
       parseSettingsFromRawUrlWithCleanup(

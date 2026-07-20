@@ -294,6 +294,17 @@ describe("sw/idb redirect settings", () => {
 });
 
 describe("sw/idb frecency", () => {
+  test("hydrates frecency while reading the shared settings snapshot", async () => {
+    await seedDb({
+      settings: [{ key: "frecency", value: `${Date.now()}|g:5,ddg:2` }],
+    });
+
+    const mod = await loadSwIdb();
+    await mod.readRedirectSettings();
+
+    expect(mod.getTopFrecencyRecord()).toEqual({ g: 5, ddg: 2 });
+  });
+
   test("loads compact frecency format and exposes top entries", async () => {
     await seedDb({
       settings: [{ key: "frecency", value: `${Date.now()}|g:5,ddg:2` }],
@@ -323,5 +334,78 @@ describe("sw/idb frecency", () => {
 
     mod.trackBangUsage("yt");
     expect(mod.getTopFrecencyRecord()).toEqual({ yt: 3, g: 1 });
+  });
+
+  test("coalesces usage updates through the final committed snapshot", async () => {
+    await seedDb({
+      settings: [{ key: "frecency", value: `${Date.now()}|g:1` }],
+    });
+    const mod = await loadSwIdb();
+    await mod.readRedirectSettings();
+
+    const first = mod.trackBangUsage("yt");
+    const second = mod.trackBangUsage("yt");
+    const third = mod.trackBangUsage("yt");
+    expect(first.persistence).toBe(second.persistence);
+    expect(second.persistence).toBe(third.persistence);
+    await third.persistence;
+
+    const shared = await loadSharedIdb();
+    const db = await shared.openDB();
+    const record = await reqToPromise<{ value: string } | undefined>(
+      db
+        .transaction("settings", "readonly")
+        .objectStore("settings")
+        .get("frecency")
+    );
+    expect(record?.value).toContain("g:1");
+    expect(record?.value).toContain("yt:3");
+  });
+
+  test("bounds in-memory and persisted frecency during a worker lifetime", async () => {
+    await seedDb({
+      settings: [{ key: "frecency", value: `${Date.now()}|` }],
+    });
+    const mod = await loadSwIdb();
+    await mod.readRedirectSettings();
+
+    let persistence = Promise.resolve();
+    for (let i = 0; i < 80; i++) {
+      persistence = mod.trackBangUsage(`trigger-${i}`).persistence;
+    }
+    await persistence;
+
+    const shared = await loadSharedIdb();
+    const db = await shared.openDB();
+    const record = await reqToPromise<{ value: string } | undefined>(
+      db
+        .transaction("settings", "readonly")
+        .objectStore("settings")
+        .get("frecency")
+    );
+    const entries = record?.value.split("|")[1]?.split(",").filter(Boolean);
+    expect(entries).toHaveLength(64);
+  });
+});
+
+describe("shared IndexedDB recovery", () => {
+  test("retries after a failed database open", async () => {
+    const shared = await loadSharedIdb();
+    shared.resetDB();
+    const working = indexedDB;
+    let attempts = 0;
+    (globalThis as { indexedDB: IDBFactory }).indexedDB = {
+      open(...args: Parameters<IDBFactory["open"]>) {
+        attempts++;
+        if (attempts === 1) {
+          throw new Error("temporary open failure");
+        }
+        return working.open(...args);
+      },
+    } as IDBFactory;
+
+    await expect(shared.openDB()).rejects.toThrow("temporary open failure");
+    expect(await shared.openDB()).toBeDefined();
+    expect(attempts).toBe(2);
   });
 });

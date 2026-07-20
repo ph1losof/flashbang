@@ -19,6 +19,7 @@ bun run dev        # bundle + dev server with file watching & live reload (auto-
 bun run start      # serve pre-built dist/ (run `bun run build` first)
 bun run typecheck  # type-check with tsc (no emit)
 bun run profile    # run performance profile benchmarks (auto-runs codegen --from-merged if generated bang files are missing)
+bun run profile:private # build and profile private hash redirects in Chromium, Firefox, and WebKit
 bun run profile:quick  # run a shorter profiling pass
 bun run profile:cpu   # write Bun CPU profiles under profiles/
 bun audit          # audit dependencies for known vulnerabilities
@@ -91,15 +92,18 @@ flashbang/
 │   │   ├── idb.ts             # IndexedDB access, settings cache & in-memory frecency
 │   │   └── frecency.ts        # Top-K frecency helpers used by SW
 │   └── ui/
-│       ├── index.html         # HTML template
+│       ├── index.html         # Initial registration and fallback HTML template
+│       ├── controlled.html    # In-memory bootstrap for worker-controlled root navigations
 │       ├── app.ts             # Initialization & orchestration
+│       ├── fallback.ts        # Main-thread redirects for private mode or unavailable Service Workers
 │       ├── bang-catalog.ts    # Shared normalized bang metadata and bounded search
 │       ├── bang-meta.ts       # Packed metadata validation and cursor decoder
 │       ├── firefox-suggest.ts # Shared Firefox detection and suggestion URL builder
 │       ├── suggest-provider.ts # Suggestion provider feature availability
 │       ├── bench/
 │       │   ├── index.html     # Benchmark page
-│       │   └── index.ts       # Benchmark script
+│       │   ├── index.ts       # Benchmark script
+│       │   └── stats.ts       # Robust browser benchmark statistics
 │       ├── home/
 │       │   ├── index.html     # Home page partial
 │       │   ├── index.ts       # Homepage initialization
@@ -128,7 +132,8 @@ flashbang/
 │       └── manifest.json      # PWA manifest
 ├── tests/
 │   ├── e2e/
-│   │   └── flashbang.e2e.ts  # Playwright browser scenarios
+│   │   ├── flashbang.e2e.ts  # Playwright browser scenarios
+│   │   └── private-perf.e2e.ts # Manual private-redirect browser performance profile
 │   ├── helpers/
 │   │   ├── bang-data.ts       # Generated binary initialization for tests
 │   │   └── fake-indexeddb.ts # IndexedDB test double
@@ -163,6 +168,7 @@ Unit, integration, performance, and docs tests:
 
 - `tests/redirect.test.ts` — Bang/snap parsing, routing logic, and URL encoding
 - `tests/redirect-perf.test.ts` — Redirect performance benchmarks
+- `tests/bench-stats.test.ts` — Browser benchmark percentile, dispersion, and confidence statistics
 - `tests/bang-catalog.test.ts` — Bounded UI bang-catalog search and normalization
 - `tests/capture-template.test.ts` — Capture template parsing and regex safety
 - `tests/snap-target.test.ts` — Alternate snap target validation
@@ -184,6 +190,7 @@ Unit, integration, performance, and docs tests:
 End-to-end tests:
 
 - `tests/e2e/flashbang.e2e.ts` — Suggest/OpenSearch endpoints, settings persistence and import/export, warm/cold/offline redirect flows, Service Worker cache updates, and custom bang/capture/snap scenarios
+- `tests/e2e/private-perf.e2e.ts` — Opt-in browser performance profile for private hash redirects
 
 If this is your first Playwright run on a machine, install browsers once:
 
@@ -235,8 +242,8 @@ On **self-hosted** (Docker/Railway via `start.ts`), the Bun server sets headers 
 
 `bun run build` bundles the app:
 
-1. **Bundle UI + bench** — Bun bundles `src/ui/app.ts` (with code splitting) to `dist/app.js` plus lazy chunks, and bundles `src/ui/bench/index.ts` to `dist/bench.js`. Every app chunk is marked as a required offline dependency regardless of size; benchmark assets remain optional.
-2. **Bundle Service Worker** — Bun bundles `src/sw/sw.ts` and the sparse generated lookups into `dist/sw.js`, then copies `bangs.bin` and `bangs-meta.bin` to content-hashed production paths. The lookup path is injected into the worker and HTML preload tags; the metadata path is injected into the UI bundle and included in deferred precaching. Both receive immutable cache headers. Hashes of the binaries, precached assets, and a preliminary Service Worker bundle determine the injected cache version. The worker caches lookup data before activating, then removes old versioned caches.
+1. **Bundle UI + fallback + bench** — Bun bundles `src/ui/app.ts` (with code splitting) to `dist/app.js` plus lazy chunks, the private/restricted-browser redirect fallback to `dist/fallback.js`, and `src/ui/bench/index.ts` to `dist/bench.js`. Every app chunk and the standalone fallback are marked as required offline dependencies regardless of size; benchmark assets remain optional.
+2. **Bundle Service Worker** — Bun minifies `src/ui/controlled.html` and embeds it with its CSP headers into the Service Worker so controlled root navigations avoid Cache Storage and network reads. It then bundles `src/sw/sw.ts` and the sparse generated lookups into `dist/sw.js`, and copies `bangs.bin` and `bangs-meta.bin` to content-hashed production paths. The lookup path is injected into the worker and private fallback; the metadata path is injected into the UI bundle and included in deferred precaching. Both receive immutable cache headers. Hashes of the binaries, precached assets, and a preliminary Service Worker bundle determine the injected cache version. The worker caches lookup data before activating, then removes old versioned caches.
 3. **Generate CSS** — UnoCSS scans `src/ui/**/*.ts`, `src/ui/home/index.html`, and `src/ui/bench/index.html`, emitting atomic utility classes
 4. **Inline & minify HTML** — CSS is inlined into `<style>`, HTML is minified with `@minify-html/node`
 5. **Generate static-host headers** — Writes `dist/_headers` with shared security headers, per-page inline-script hashes, the stricter Service Worker CSP, and the OpenSearch content type
@@ -255,17 +262,19 @@ bun run profile --save main
 bun run profile --compare main --threshold 5 --fail-on-regression
 ```
 
-Bare baseline names resolve under `profiles/baselines/`, which is gitignored. Reports include run-level percentiles and variation; low single-digit nanosecond differences should be treated as directional. The browser benchmark at `/bench` enables client-scoped benchmark mode so its own redirects do not update frecency.
+Bare baseline names resolve under `profiles/baselines/`, which is gitignored. Reports include raw run samples, run-level percentiles, variation, and bootstrap confidence intervals. Comparisons fail closed when the runtime, CPU, suite version, run configuration, or generated-data fingerprint differs. Low single-digit nanosecond differences should still be treated as directional. The browser benchmark at `/bench` requires cross-origin-isolated timing, uses deterministic client-scoped settings, randomizes paths, measures a Service Worker no-op baseline, and verifies that the worker handled every sample. It reports both fetch round-trip measurements and a paired top-level navigation check against a same-origin direct-navigation target.
+
+`bun run profile:private` reports no-worker private redirects, worker-controlled private redirects, the public `?q=` Service Worker path, and a document-only navigation floor in Chromium, Firefox, and WebKit. Set `PROFILE_COLD_RUNS` or `PROFILE_WARM_RUNS` to override its sample counts when iterating locally.
 
 ## Frecency
 
 The Service Worker tracks bang usage to personalize suggestion ordering. The flow:
 
-1. **On bang or snap redirect** — `sw.ts` queues `trackBangUsage(trigger)`, which updates the in-memory count map and top-eight entries. Coalesced compact snapshots are persisted in IndexedDB across Service Worker restarts
+1. **On bang or snap redirect** — `sw.ts` queues `trackBangUsage(trigger)`, which updates the bounded in-memory count map and top-eight entries. Concurrent updates are coalesced into the latest compact snapshot, and the FetchEvent remains alive until the final IndexedDB transaction commits
 2. **Cookie sync** — When Cookie Store is available, `sw.ts` preserves the existing provider/custom context and writes top frecency entries into the `f:` section of the unified `suggest` cookie
 3. **Suggest reads frecency** — `suggest.ts` parses the unified cookie and passes its frecency map to `bangSuggestions()`, which boosts candidates by usage count
 
-The in-memory state (`frecencyCounts` plus `topFrecency` in `idb.ts`) is loaded from IndexedDB once and kept for the Service Worker lifetime. `invalidateCache()` clears only redirect settings and the shared database connection; loaded frecency and pending persistence remain intact. Browser benchmark mode suppresses these side effects only for the requesting benchmark client.
+The in-memory state (`frecencyCounts` plus `topFrecency` in `idb.ts`) is hydrated from the same IndexedDB settings snapshot as redirect configuration and kept for the Service Worker lifetime. `invalidateCache()` clears only redirect settings and the shared database connection; loaded frecency and pending persistence remain intact. Browser benchmark mode suppresses these side effects only for the requesting benchmark client.
 
 **Browser cookie behavior**: Chromium-based browsers (Chrome, Edge, Arc) send cookies with suggest requests when the site is the default search engine. Firefox-based browsers (Firefox, Zen, LibreWolf) intentionally withhold cookies from OpenSearch suggest requests as a privacy decision ([bug 1624457](https://bugzilla.mozilla.org/show_bug.cgi?id=1624457)). The settings UI therefore provides a copyable Firefox suggestion URL with an explicit provider; it adds `bp` and `np` only for non-default syntax and omits the default `!`/`@` pair. Cookie-backed custom trigger suggestions and frecency are unavailable on those requests; redirect behavior is unaffected.
 

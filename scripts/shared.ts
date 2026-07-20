@@ -32,11 +32,25 @@ export function configureBangDataAsset(
   return html.replaceAll(BANG_DATA_ASSET_MARKER, assetPath);
 }
 
+export async function buildControlledBootstrap(
+  bangDataAsset = "/bangs.bin"
+): Promise<string> {
+  const source = configureBangDataAsset(
+    await Bun.file("src/ui/controlled.html").text(),
+    bangDataAsset
+  );
+  return minify(Buffer.from(source), {
+    minify_css: true,
+    minify_js: true,
+  }).toString();
+}
+
 export async function bundleUI(
   allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled(),
-  bangMetaAsset = "/bangs-meta.bin"
+  bangMetaAsset = "/bangs-meta.bin",
+  bangDataAsset = "/bangs.bin"
 ) {
-  const [appBuild, benchBuild] = await Promise.all([
+  const [appBuild, benchBuild, fallbackBuild] = await Promise.all([
     Bun.build({
       entrypoints: ["src/ui/app.ts"],
       outdir: DIST_DIR,
@@ -60,8 +74,19 @@ export async function bundleUI(
       target: "browser",
       format: "esm",
     }),
+    Bun.build({
+      entrypoints: ["src/ui/fallback.ts"],
+      outdir: DIST_DIR,
+      naming: "fallback.js",
+      minify: true,
+      target: "browser",
+      format: "esm",
+      define: {
+        __BANG_DATA_ASSET__: JSON.stringify(bangDataAsset),
+      },
+    }),
   ]);
-  const builds = [appBuild, benchBuild];
+  const builds = [appBuild, benchBuild, fallbackBuild];
   const failed = builds.filter((build) => !build.success);
   if (failed.length > 0) {
     throw new AggregateError(
@@ -72,6 +97,7 @@ export async function bundleUI(
   return {
     appOutputs: appBuild.outputs,
     benchOutputs: benchBuild.outputs,
+    fallbackOutputs: fallbackBuild.outputs,
   };
 }
 

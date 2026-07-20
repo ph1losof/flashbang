@@ -26,7 +26,7 @@ All three support bangs natively — but every query still round-trips through t
 
 ## Features
 
-- **Built for speed** — Advertised as sub-1ms to be conservative, since technically, it could fall anywhere in this range, in my tests I have achieved median of `0.14ms` on `/bench` page in Chrome's Incognito window. That's the overhead Flashbang adds before your browser starts loading the destination — network time to reach the target site is the same regardless of which tool you use. The Service Worker intercepts requests before they hit the network, parses the bang, and responds with a 302 — no page load, no framework, no round-trip to a server. Don't trust our numbers? [Run the benchmark yourself](https://flashbang-dyr.pages.dev/bench) — results vary by machine
+- **Built for speed** — The redirect parser itself runs in well under 1ms, while browser-visible latency is dominated by browser-to-Service-Worker transport and scheduling. The `/bench` page measures that fetch round trip with deterministic settings, randomized paths, a no-op transport baseline, high-resolution isolated timing, and verification that every request was handled locally. It also runs paired top-level navigations against a direct same-origin target to estimate actual redirect overhead without destination network time. The Service Worker intercepts real searches before they hit the network, parses the bang, and responds with a 302 — no page load, framework, or round-trip to Flashbang's server. [Run the benchmark yourself](https://flashbang-dyr.pages.dev/bench) — results vary by browser and machine
 - **Zero runtime deps** — Ships without production npm dependencies; redirects run on plain browser APIs in the Service Worker
 - **Private** — No analytics, no tracking. All data stays on your device for the core feature - redirects
 - **14,000+ bangs** — Merged from DuckDuckGo, Kagi, and custom sources. Updated daily via automated CI
@@ -117,9 +117,12 @@ https://flashbang-dyr.pages.dev/suggest?q=%s&sp=ddg&bp=%24&np=~
 A public instance is available at **[flashbang-dyr.pages.dev](https://flashbang-dyr.pages.dev)**. Just visit it, then add it as a custom search engine in your browser:
 
 - **Search URL:** `https://flashbang-dyr.pages.dev?q=%s`
+- **Private Search URL:** `https://flashbang-dyr.pages.dev/#q=%s` (slightly slower; keeps submitted query text out of search-navigation requests to the Flashbang host)
 - **Suggestion URL:** `https://flashbang-dyr.pages.dev/suggest?q=%s` (Optional)
 
 Nothing to build or deploy.
+
+The private template stores the query in the URL fragment, which browsers do not send in HTTP requests. An installed Service Worker serves a purpose-built bootstrap directly from memory; the page passes the still-encoded fragment directly to the worker, then replaces the transient history entry with the destination. A main-thread resolver handles unavailable or unresponsive workers. The normal `?q=%s` template remains the fastest option because the Service Worker can intercept it before any page loads. Search suggestions are separate network requests; leave the Suggestions URL unset if you do not want address-bar input sent to the configured suggestion provider through Flashbang.
 
 ### Browser quirks
 
@@ -138,6 +141,8 @@ These apply equally to the hosted version and any self-hosted instance — worth
   **Important:** _editing_ the auto-discovered entry's Shortcut doesn't persist — Edge re-derives it from `/opensearch.xml` on restart and reverts to the host. The delete-and-readd step is what makes the fix stick, because a manually-added entry is independent of the discovery XML.
 
 - **Firefox / Zen / LibreWolf — no frecency, no custom bangs in suggestions.** Firefox-based browsers intentionally [withhold cookies from OpenSearch suggest requests](https://bugzilla.mozilla.org/show_bug.cgi?id=1624457) as a privacy measure. Flashbang's custom bang trigger names and frecency data are carried by the unified `suggest` cookie, so those features remain unavailable on these requests. Provider and bang/snap prefix settings can be embedded directly with `sp`, `bp`, and `np`; the settings UI generates the complete URL — see [Suggestion URL parameters](#suggestion-url-parameters).
+
+- **Tor Browser and Safari Lockdown Mode — slower fallback.** These privacy modes can disable Service Workers, which Flashbang normally uses for local redirects. Flashbang falls back to loading the same bang data and resolving the query in the page, so redirects still work but require a network page load and do not have the normal sub-millisecond or offline guarantees. The query is still resolved in your browser, not by Flashbang's server.
 
 - **Chromium — plain-text suggestions only.** Chrome, Edge, Arc, and other Chromium-based browsers don't render rich suggestion details (descriptions, favicons, entity images) for search-type suggestions from custom search engines; they're shown as plain text. Firefox-based browsers render the rich data passed through `google:suggestdetail`. This is a Chromium limitation, not flashbang's.
 
@@ -269,7 +274,7 @@ That lookup path is pre-optimized by `scripts/codegen.ts` at build time. Instead
 
 Yes. Try it yourself: open unduck or unduckified, type `!g cats`, and watch the screen. You'll likely see a white flash or brief page load before Google appears. This is evident by the issues opened in unduckified repo [#6](https://github.com/taciturnaxolotl/unduckified/issues/6) and in unduck repo [#70](https://github.com/T3-Content/unduck/issues/70), [#141](https://github.com/T3-Content/unduck/issues/141). Now do the same with Flashbang. The browser navigates directly to Google — there is no intermediate page to see. The difference is immediately obvious, especially on mobile devices or environments where JavaScript parse time is higher.
 
-[Run the benchmark yourself](https://flashbang-dyr.pages.dev/bench) to see measured redirect latency on your device.
+[Run the benchmark yourself](https://flashbang-dyr.pages.dev/bench) to measure validated browser-to-Service-Worker fetch latency and paired top-level redirect overhead on your device.
 
 ## Acknowledgments
 

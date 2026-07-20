@@ -43,7 +43,7 @@ const BROWSER_GUIDES: Record<AddressBarBrowser, BrowserGuide> = {
     steps: [
       "Select Manage Search Engines.",
       "If flashbang appears under Inactive Shortcuts, select Activate.",
-      "Otherwise select Add and enter Search Engine: flashbang, Keyword: f (or another shortcut), and URL with %s in place of query: paste the Search URL from above.",
+      "Otherwise select Add and enter Search Engine: flashbang, Keyword: f (or another shortcut), and URL with %s in place of query: paste either Search URL from above.",
       "In Search Engines, open flashbang's three-dot menu and select Make default.",
     ],
     docsUrl:
@@ -56,7 +56,7 @@ const BROWSER_GUIDES: Record<AddressBarBrowser, BrowserGuide> = {
     steps: [
       "Under Site search, check Inactive shortcuts. If flashbang appears, select Activate.",
       "If it was not indexed automatically, select Add.",
-      "Enter Search engine: flashbang, Shortcut: f (or another shortcut), and URL with %s in place of query: paste the Search URL from above.",
+      "Enter Search engine: flashbang, Shortcut: f (or another shortcut), and URL with %s in place of query: paste either Search URL from above.",
       "Open flashbang's More menu and select Make default.",
     ],
     docsUrl:
@@ -69,7 +69,7 @@ const BROWSER_GUIDES: Record<AddressBarBrowser, BrowserGuide> = {
     steps: [
       "Edge can give bang destinations the same host-derived shortcut as flashbang, allowing the most recently used destination to take over plain searches.",
       "Delete the auto-discovered flashbang entry.",
-      "Select Add and enter Search engine: flashbang, Shortcut: f (or another unique shortcut), and URL with %s: paste the Search URL you copied from above, not the optional Suggestions URL.",
+      "Select Add and enter Search engine: flashbang, Shortcut: f (or another unique shortcut), and URL with %s: paste the Search URL you chose above, not the optional Suggestions URL.",
       "Open the new flashbang entry's menu and select Make default.",
     ],
     warning: {
@@ -85,7 +85,7 @@ const BROWSER_GUIDES: Record<AddressBarBrowser, BrowserGuide> = {
     settingsUrl: "about:preferences#search",
     steps: [
       "Under Search Shortcuts, select Add.",
-      "Enter flashbang as the Search engine name and paste the Search URL above into Engine URL.",
+      "Enter flashbang as the Search engine name and paste either Search URL above into Engine URL.",
       "Optional: paste the Suggestions URL above into Search suggestion API URL to enable address-bar autocomplete, then save.",
       "Choose flashbang under Default Search Engine.",
     ],
@@ -136,6 +136,7 @@ export function setupAddressBarSheet(
   const closeButton = $<HTMLButtonElement>("#setup-close");
   const status = $("#setup-copy-status");
   const searchUrl = $<HTMLInputElement>("#setup-search-url");
+  const privateSearchUrl = $<HTMLInputElement>("#setup-private-search-url");
   const suggestUrl = $<HTMLInputElement>("#setup-suggest-url");
   const browserTabs = $("#setup-browser-tabs");
   const browserPanel = $("#setup-browser-panel");
@@ -146,6 +147,7 @@ export function setupAddressBarSheet(
   let activeBrowser: AddressBarBrowser | null = null;
 
   searchUrl.value = `${location.origin}?q=%s`;
+  privateSearchUrl.value = `${location.origin}/#q=%s`;
   suggestUrl.value = `${location.origin}/suggest?q=%s`;
 
   function refreshSuggestionUrl(): void {
@@ -323,6 +325,7 @@ export function setupAddressBarSheet(
 
   for (const [buttonId, input] of [
     ["#copy-search-url", searchUrl],
+    ["#copy-private-search-url", privateSearchUrl],
     ["#copy-suggest-url", suggestUrl],
   ] as const) {
     const button = $<HTMLButtonElement>(buttonId);

@@ -57,6 +57,12 @@ function setupSwGlobals(requiredAppAssets: readonly string[] = []) {
   globals.__BANG_DATA_ASSET__ = "/bangs.bin";
   globals.__CACHE_VERSION__ = "test-cache";
   globals.__REQUIRED_APP_ASSETS__ = [...requiredAppAssets];
+  globals.__CONTROLLED_HTML__ =
+    "<!doctype html><title>flashbang bootstrap</title>";
+  globals.__CONTROLLED_HEADERS__ = {
+    "Content-Security-Policy": "default-src 'self'",
+    "Content-Type": "text/html; charset=utf-8",
+  };
   globals.__IS_DEV__ = false;
 
   (globalThis as unknown as { self: unknown }).self = {
@@ -137,13 +143,15 @@ function createExtendableEvent() {
 
 function createMessageEvent(
   data: unknown,
-  source?: { postMessage: (message: unknown) => void }
+  source?: { id?: string; postMessage: (message: unknown) => void },
+  reply?: (message: unknown) => void
 ) {
   const waits: Promise<unknown>[] = [];
   return {
     waits,
     event: {
       data,
+      ports: reply ? [{ postMessage: reply }] : [],
       source,
       waitUntil(promise: Promise<unknown>) {
         waits.push(Promise.resolve(promise));
@@ -152,13 +160,18 @@ function createMessageEvent(
   };
 }
 
-function createFetchEvent(url: string) {
+function createFetchEvent(url: string, clientId = "", mode?: RequestMode) {
   const waits: Promise<unknown>[] = [];
   let responsePromise: Promise<Response> | null = null;
+  const request = new Request(url);
+  if (mode) {
+    Object.defineProperty(request, "mode", { value: mode });
+  }
   return {
     waits,
     event: {
-      request: new Request(url),
+      clientId,
+      request,
       respondWith(response: Response | Promise<Response>) {
         responsePromise = Promise.resolve(response);
       },
@@ -236,10 +249,26 @@ describe("sw runtime with real modules", () => {
       "/bench",
       "/bench.js",
       "/chunk-catalog123.js",
+      "/fallback.js",
       "/home",
       "/icon.svg",
       "/manifest.json",
     ]);
+  });
+
+  test("serves the root bootstrap from memory without starting precache", async () => {
+    await loadSwRuntime(["/chunk-catalog123.js"]);
+
+    const fetchEvt = createFetchEvent("https://flashbang.local/");
+    await handlers.fetch?.(fetchEvt.event);
+    const response = await fetchEvt.response();
+
+    expect(await response.text()).toContain("flashbang bootstrap");
+    expect(response.headers.get("Content-Type")).toBe(
+      "text/html; charset=utf-8"
+    );
+    expect(fetchEvt.waits).toHaveLength(0);
+    expect(fetchCalls).toEqual([]);
   });
 
   test("does not block installation when deferred app precaching fails", async () => {
@@ -284,6 +313,25 @@ describe("sw runtime with real modules", () => {
     await Promise.all(redirectEvt.waits);
     expect(String((posted[0] as { url: string }).url)).toContain("google.com");
 
+    const portReplies: unknown[] = [];
+    const portRedirectEvt = createMessageEvent(
+      { type: "redirect", rawQuery: "%21g%20hello" },
+      undefined,
+      (message) => portReplies.push(message)
+    );
+    await handlers.message?.(portRedirectEvt.event);
+    expect(String(portReplies[0])).toContain("google.com");
+
+    const rawPosted: unknown[] = [];
+    await handlers.message?.(
+      createMessageEvent(
+        { type: "redirect", rawQuery: "%21g%20hello" },
+        { postMessage: (message) => rawPosted.push(message) }
+      ).event
+    );
+    expect(typeof rawPosted[0]).toBe("string");
+    expect(String(rawPosted[0])).toContain("google.com");
+
     // Change default bang, invalidate cache, and verify redirect reflects new settings.
     await seedDb({ settings: [{ key: "default-bang", value: "ddg" }] });
     await handlers.message?.(createMessageEvent({ type: "invalidate" }).event);
@@ -325,6 +373,83 @@ describe("sw runtime with real modules", () => {
     }
   });
 
+  test("benchmark mode validates and counts client-scoped worker requests", async () => {
+    await loadSwRuntime();
+    const source = {
+      id: "bench-client",
+      postMessage() {
+        /* Benchmark replies use the transferred message port. */
+      },
+    };
+    const modeReplies: unknown[] = [];
+    await handlers.message?.(
+      createMessageEvent(
+        { type: "benchmark-mode", enabled: true, token: "token" },
+        source,
+        (message) => modeReplies.push(message)
+      ).event
+    );
+    expect(modeReplies).toEqual([
+      {
+        bangDataReady: true,
+        enabled: true,
+        navigationCount: 0,
+        requestCount: 0,
+        token: "token",
+      },
+    ]);
+
+    const baseline = createFetchEvent(
+      "https://flashbang.local/__flashbang-bench-noop",
+      "bench-client"
+    );
+    await handlers.fetch?.(baseline.event);
+    expect((await baseline.response()).status).toBe(204);
+
+    const redirect = createFetchEvent(
+      "https://flashbang.local/?q=!custom+kittens",
+      "bench-client"
+    );
+    await handlers.fetch?.(redirect.event);
+    expect((await redirect.response()).headers.get("Location")).toBe(
+      "https://benchmark.example/search?q=kittens"
+    );
+
+    const navigation = createFetchEvent(
+      "https://flashbang.local/?q=!custom+kittens&fb-bench=token&fb-seq=7",
+      "popup-client",
+      "navigate"
+    );
+    await handlers.fetch?.(navigation.event);
+    expect((await navigation.response()).headers.get("Location")).toBe(
+      "https://flashbang.local/__flashbang-bench-target?fb-bench=token&fb-seq=7"
+    );
+
+    const target = createFetchEvent(
+      "https://flashbang.local/__flashbang-bench-target?fb-bench=token&fb-seq=7",
+      "popup-client",
+      "navigate"
+    );
+    await handlers.fetch?.(target.event);
+    const targetResponse = await target.response();
+    expect(targetResponse.status).toBe(200);
+    await expect(targetResponse.text()).resolves.toContain(
+      "flashbang-benchmark-navigation"
+    );
+
+    const countReplies: unknown[] = [];
+    await handlers.message?.(
+      createMessageEvent(
+        { type: "benchmark-count", token: "token" },
+        source,
+        (message) => countReplies.push(message)
+      ).event
+    );
+    expect(countReplies).toEqual([
+      { active: true, navigationCount: 1, requestCount: 2 },
+    ]);
+  });
+
   test("bench route returns offline fallback with security headers", async () => {
     await loadSwRuntime();
     expect(typeof handlers.fetch).toBe("function");
@@ -344,15 +469,17 @@ describe("sw runtime with real modules", () => {
       return Promise.resolve(new Response("ok"));
     };
 
-    const fetchEvt = createFetchEvent("https://flashbang.local/bench");
-    await handlers.fetch?.(fetchEvt.event);
-    const response = await fetchEvt.response();
-    expect(response.status).toBe(503);
-    expect(response.headers.get("Cross-Origin-Opener-Policy")).toBe(
-      "same-origin"
-    );
-    expect(response.headers.get("Cross-Origin-Embedder-Policy")).toBe(
-      "credentialless"
-    );
+    for (const path of ["/bench", "/bench.html"]) {
+      const fetchEvt = createFetchEvent(`https://flashbang.local${path}`);
+      await handlers.fetch?.(fetchEvt.event);
+      const response = await fetchEvt.response();
+      expect(response.status).toBe(503);
+      expect(response.headers.get("Cross-Origin-Opener-Policy")).toBe(
+        "same-origin"
+      );
+      expect(response.headers.get("Cross-Origin-Embedder-Policy")).toBe(
+        "credentialless"
+      );
+    }
   });
 });

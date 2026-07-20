@@ -186,10 +186,7 @@ async function main(): Promise<void> {
       }
 
       if (pathname === "/bench") {
-        return serveCompressed(staticManifest, req, "/bench.html", {
-          "Cross-Origin-Opener-Policy": "same-origin",
-          "Cross-Origin-Embedder-Policy": "credentialless",
-        })!;
+        return serveCompressed(staticManifest, req, "/bench.html")!;
       }
 
       const path = pathname === "/" ? "/index.html" : pathname;
