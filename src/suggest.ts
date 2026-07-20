@@ -5,6 +5,7 @@ import {
   SUGGEST_URLS,
 } from "./shared/constants";
 import { readQueryParam } from "./shared/raw-query";
+import { parsePartialSnapChain } from "./shared/snap-chain";
 import {
   encodeSuggestCookieValue,
   parseSuggestCookieContextValueWithValidation,
@@ -40,10 +41,40 @@ export interface SuggestSettings
     SuggestBangContext {}
 
 export interface PartialBang {
+  chainPrefix?: string;
   partial: string;
   prefix: string;
   isSnap?: boolean;
+  selectedTriggers?: readonly string[];
   triggerPrefix: TriggerPrefix;
+}
+
+function partialBang(
+  prefix: string,
+  value: string,
+  triggerPrefix: TriggerPrefix,
+  isSnap: boolean
+): PartialBang | null {
+  if (isSnap && value.includes(",")) {
+    const chain = parsePartialSnapChain(value);
+    if (!chain) {
+      return null;
+    }
+    return {
+      prefix,
+      partial: chain.partial,
+      isSnap: true,
+      triggerPrefix,
+      chainPrefix: chain.chainPrefix,
+      selectedTriggers: chain.selectedTriggers,
+    };
+  }
+  return {
+    prefix,
+    partial: value.toLowerCase(),
+    isSnap: isSnap || undefined,
+    triggerPrefix,
+  };
 }
 
 function isTrimWs(code: number): boolean {
@@ -128,12 +159,13 @@ export function parsePartialBang(
         return null;
       }
     }
-    return {
-      prefix: "",
-      partial: q.substring(start + 1, end).toLowerCase(),
-      isSnap: c0 === snapCode || undefined,
-      triggerPrefix: c0 === snapCode ? snapPrefix : bangPrefix,
-    };
+    const isSnap = c0 === snapCode;
+    return partialBang(
+      "",
+      q.substring(start + 1, end),
+      isSnap ? snapPrefix : bangPrefix,
+      isSnap
+    );
   }
 
   for (let i = end - 2; i >= start; i--) {
@@ -148,12 +180,13 @@ export function parsePartialBang(
         return null;
       }
     }
-    return {
-      prefix: q.substring(start, i + 1),
-      partial: q.substring(triggerStart, end).toLowerCase(),
-      isSnap: ci1 === snapCode || undefined,
-      triggerPrefix: ci1 === snapCode ? snapPrefix : bangPrefix,
-    };
+    const isSnap = ci1 === snapCode;
+    return partialBang(
+      q.substring(start, i + 1),
+      q.substring(triggerStart, end),
+      isSnap ? snapPrefix : bangPrefix,
+      isSnap
+    );
   }
 
   return null;
@@ -414,7 +447,9 @@ export async function suggest(
       bang.partial,
       settings.frecent,
       settings.custom,
-      bang.triggerPrefix
+      bang.triggerPrefix,
+      bang.chainPrefix,
+      bang.selectedTriggers
     );
   }
 

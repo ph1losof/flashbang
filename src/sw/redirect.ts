@@ -17,6 +17,10 @@ import {
   CH_PERCENT,
   CH_PLUS,
 } from "../shared/chars";
+import {
+  MAX_SNAP_CHAIN_TARGETS,
+  MIN_SNAP_CHAIN_TARGETS,
+} from "../shared/snap-chain";
 import type { SnapTargetParts } from "../shared/snap-target";
 import {
   DEFAULT_BANG_PREFIX,
@@ -599,6 +603,102 @@ function resolveSnapSiteFilter(
   return sf;
 }
 
+interface ResolvedSnapTargets {
+  count: number;
+  siteFilter: string;
+  trigger: string;
+}
+
+function snapSeparatorWidthAt(s: string, i: number, end: number): number {
+  const c = s.charCodeAt(i);
+  if (c === 44) {
+    return 1;
+  }
+  return c === CH_PERCENT &&
+    i + 2 < end &&
+    s.charCodeAt(i + 1) === CH_2 &&
+    (s.charCodeAt(i + 2) | 32) === 99
+    ? 3
+    : 0;
+}
+
+function snapSiteFilterKey(siteFilter: string): string {
+  const pathStart = siteFilter.indexOf("/", 6);
+  return pathStart === -1
+    ? siteFilter.toLowerCase()
+    : siteFilter.substring(0, pathStart).toLowerCase() +
+        siteFilter.substring(pathStart);
+}
+
+function resolveSnapTargets(
+  rawQuery: string,
+  triggerStart: number,
+  triggerEnd: number,
+  custom: Record<string, CustomUrlParts>
+): ResolvedSnapTargets | null {
+  let firstSeparator = -1;
+  for (let i = triggerStart; i < triggerEnd; i++) {
+    if (snapSeparatorWidthAt(rawQuery, i, triggerEnd)) {
+      firstSeparator = i;
+      break;
+    }
+  }
+  if (firstSeparator === -1) {
+    const trigger = extractTrigger(rawQuery, triggerStart, triggerEnd);
+    const siteFilter = resolveSnapSiteFilter(trigger, custom, _lastHash);
+    return siteFilter ? { count: 1, siteFilter, trigger } : null;
+  }
+
+  const siteFilters: string[] = [];
+  const seenSiteFilters = new Set<string>();
+  let firstTrigger = "";
+  let segmentStart = triggerStart;
+  let count = 0;
+
+  while (segmentStart <= triggerEnd) {
+    let segmentEnd = triggerEnd;
+    let separatorWidth = 0;
+    for (let i = segmentStart; i < triggerEnd; i++) {
+      const width = snapSeparatorWidthAt(rawQuery, i, triggerEnd);
+      if (width) {
+        segmentEnd = i;
+        separatorWidth = width;
+        break;
+      }
+    }
+    if (segmentEnd === segmentStart || count >= MAX_SNAP_CHAIN_TARGETS) {
+      return null;
+    }
+
+    const trigger = extractTrigger(rawQuery, segmentStart, segmentEnd);
+    const siteFilter = resolveSnapSiteFilter(trigger, custom, _lastHash);
+    if (!siteFilter) {
+      return null;
+    }
+    if (count === 0) {
+      firstTrigger = trigger;
+    }
+    count++;
+
+    const key = snapSiteFilterKey(siteFilter);
+    if (!seenSiteFilters.has(key)) {
+      seenSiteFilters.add(key);
+      siteFilters.push(siteFilter);
+    }
+
+    if (!separatorWidth) {
+      break;
+    }
+    segmentStart = segmentEnd + separatorWidth;
+  }
+
+  const siteFilter =
+    count >= MIN_SNAP_CHAIN_TARGETS && siteFilters.length > 1
+      ? `+(${siteFilters.map((filter) => filter.substring(1)).join("+OR+")})`
+      : siteFilters[0];
+  return { count, siteFilter, trigger: firstTrigger };
+}
+
 function buildSnapUrl(
   defaultUrl: UrlParts,
   siteFilter: string,
@@ -615,7 +715,11 @@ function buildSnapUrl(
     termStart === 0 && termEnd === rawQuery.length
       ? rawQuery
       : rawQuery.substring(termStart, termEnd);
-  return prefix + raw + siteFilter + suffix;
+  const filter =
+    raw || siteFilter.charCodeAt(0) !== CH_PLUS
+      ? siteFilter
+      : siteFilter.substring(1);
+  return prefix + raw + filter + suffix;
 }
 
 function findTrailingBareBang(
@@ -718,23 +822,28 @@ function resolvePrefixSnap(
   const sp = spPacked === -1 ? -1 : spPacked >> 2;
   const spLen = spPacked === -1 ? 0 : spPacked & 0b11;
   const triggerEnd = sp === -1 ? end : sp;
-  const trigger = extractTrigger(rawQuery, afterAt, triggerEnd);
-
-  if (sp === -1 || sp + spLen >= end) {
-    const origin = resolveSnapOrigin(trigger, custom, _lastHash);
-    if (!origin) {
-      return buildUrl(defaultUrl, rawQuery, start, end);
-    }
-    return resolveWithTrigger(origin, trigger);
-  }
-
-  const siteFilter = resolveSnapSiteFilter(trigger, custom, _lastHash);
-  if (!siteFilter) {
+  const snap = resolveSnapTargets(rawQuery, afterAt, triggerEnd, custom);
+  if (!snap) {
     return buildUrl(defaultUrl, rawQuery, start, end);
   }
+
+  if (sp === -1 || sp + spLen >= end) {
+    if (snap.count === 1) {
+      const origin = resolveSnapOrigin(snap.trigger, custom, _lastHash);
+      if (!origin) {
+        return buildUrl(defaultUrl, rawQuery, start, end);
+      }
+      return resolveWithTrigger(origin, snap.trigger);
+    }
+    return resolveWithTrigger(
+      buildSnapUrl(defaultUrl, snap.siteFilter, rawQuery, end, end),
+      snap.trigger
+    );
+  }
+
   return resolveWithTrigger(
-    buildSnapUrl(defaultUrl, siteFilter, rawQuery, sp + spLen, end),
-    trigger
+    buildSnapUrl(defaultUrl, snap.siteFilter, rawQuery, sp + spLen, end),
+    snap.trigger
   );
 }
 
@@ -930,18 +1039,17 @@ function resolveRaw(rawQuery: string, settings: RedirectSettings): string {
           triggerStart < end &&
           findSpace(rawQuery, triggerStart, end) === -1
         ) {
-          const trigger = extractTrigger(rawQuery, triggerStart, end);
-          const siteFilter = resolveSnapSiteFilter(trigger, custom, _lastHash);
-          if (siteFilter) {
+          const snap = resolveSnapTargets(rawQuery, triggerStart, end, custom);
+          if (snap) {
             return resolveWithTrigger(
               buildSnapUrl(
                 defaultUrl,
-                siteFilter,
+                snap.siteFilter,
                 rawQuery,
                 start,
                 spaceBeforeAtPos
               ),
-              trigger
+              snap.trigger
             );
           }
         }

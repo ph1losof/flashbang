@@ -47,6 +47,7 @@ export function setupSyntaxSettings({
   const defaultPrefix = $("#default-bang-prefix");
   const luckyLeading = $("#lucky-leading-syntax");
   const luckyTrailing = $("#lucky-trailing-syntax");
+  const snapChain = $("#snap-chain-syntax");
   setOptions(bangSelect);
   setOptions(snapSelect);
 
@@ -62,6 +63,7 @@ export function setupSyntaxSettings({
     defaultPrefix.textContent = state.bangPrefix;
     luckyLeading.textContent = `${state.bangPrefix} query`;
     luckyTrailing.textContent = `query ${state.bangPrefix}`;
+    snapChain.textContent = `${state.snapPrefix}gh,so,mdn query`;
   }
 
   function bind(

@@ -1253,6 +1253,33 @@ describe("parsePartialBang — snap detection", () => {
     expect(parsePartialBang("!gh", "$", "~")).toBeNull();
     expect(parsePartialBang("@gh", "$", "~")).toBeNull();
   });
+
+  test('"@gh,so,m" parses the current snap-chain segment', () => {
+    expect(parsePartialBang("@gh,so,m")).toEqual({
+      prefix: "",
+      partial: "m",
+      isSnap: true,
+      triggerPrefix: "@",
+      chainPrefix: "gh,so,",
+      selectedTriggers: ["gh", "so"],
+    });
+  });
+
+  test("suffix snap chains preserve the leading query", () => {
+    expect(parsePartialBang("service workers @GH,so,m")).toEqual({
+      prefix: "service workers ",
+      partial: "m",
+      isSnap: true,
+      triggerPrefix: "@",
+      chainPrefix: "GH,so,",
+      selectedTriggers: ["gh", "so"],
+    });
+  });
+
+  test("snap-chain autocomplete rejects empty and ninth segments", () => {
+    expect(parsePartialBang("@gh,,m")).toBeNull();
+    expect(parsePartialBang("@b,ddg,g,gh,mdn,so,w,yt,")).toBeNull();
+  });
 });
 
 describe("snap suggestions — via suggest()", () => {
@@ -1335,6 +1362,58 @@ describe("snap suggestions — via suggest()", () => {
     expect(descriptions).toHaveLength(completions.length);
     expect(urls).toHaveLength(completions.length);
     expect(details).toHaveLength(completions.length);
+  });
+
+  test("snap-chain suggestions complete only the current segment", async () => {
+    const r = await suggest("@gh,so,m", {
+      ...defaultSettings,
+      custom: ["maps", "medium"],
+    });
+    const [, completions] = await r.json();
+    expect(completions).toContain("@gh,so,mdn");
+    expect(completions).toContain("@gh,so,maps");
+    expect(completions).toContain("@gh,so,medium");
+    expect(
+      completions.every((completion: string) =>
+        completion.startsWith("@gh,so,m")
+      )
+    ).toBe(true);
+  });
+
+  test("suffix snap-chain suggestions preserve the query", async () => {
+    const r = await suggest("service workers @gh,so,m", defaultSettings);
+    const [, completions] = await r.json();
+    expect(completions).toContain("service workers @gh,so,mdn");
+  });
+
+  test("already-selected triggers are omitted from chain suggestions", async () => {
+    const r = await suggest("@gh,so,g", defaultSettings);
+    const [, completions] = await r.json();
+    expect(completions).not.toContain("@gh,so,gh");
+    expect(completions).toContain("@gh,so,ghi");
+  });
+
+  test("custom triggers complete snap-chain segments", async () => {
+    const r = await suggest("@gh,so,m", {
+      ...defaultSettings,
+      custom: ["mapillary", "mysite"],
+    });
+    const [, completions] = await r.json();
+    expect(completions).toContain("@gh,so,mapillary");
+    expect(completions).toContain("@gh,so,mysite");
+  });
+
+  test("configured snap prefixes appear only once in chain completions", async () => {
+    const r = await suggest("~gh,so,m", {
+      ...defaultSettings,
+      bangPrefix: "$",
+      snapPrefix: "~",
+    });
+    const [, completions] = await r.json();
+    expect(completions).toContain("~gh,so,mdn");
+    expect(
+      completions.every((completion: string) => completion.indexOf("~", 1) < 0)
+    ).toBe(true);
   });
 });
 

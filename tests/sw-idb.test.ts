@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { REDIRECT_SETTINGS_SNAPSHOT_KEY } from "../src/shared/constants";
 import { redirectUrl } from "../src/sw/redirect";
+import type { RedirectSettingsSnapshot } from "../src/sw/redirect-settings";
 import { loadTestBangData } from "./helpers/bang-data";
 import { installFakeIndexedDb, reqToPromise } from "./helpers/fake-indexeddb";
 
@@ -352,6 +353,42 @@ describe("sw/idb redirect settings", () => {
     expect(settings.luckyUrl).toEqual([
       "https://www.google.com/search?q=",
       "&btnI=1",
+    ]);
+  });
+
+  test("waits for an in-flight settings load before invalidating", async () => {
+    let resolvePrepared!: (snapshot: RedirectSettingsSnapshot) => void;
+    const prepared = new Promise<RedirectSettingsSnapshot>((resolve) => {
+      resolvePrepared = resolve;
+    });
+    const mod = await loadSwIdb();
+    const staleLoad = mod.readRedirectSettings(prepared);
+
+    await seedDb({
+      customBangs: [
+        { trigger: "mydocs", url: "https://docs.example/search?q={}" },
+      ],
+    });
+    const invalidation = mod.invalidateCache();
+    let invalidated = false;
+    void invalidation.then(() => {
+      invalidated = true;
+    });
+    await Promise.resolve();
+    expect(invalidated).toBe(false);
+
+    resolvePrepared({
+      custom: Object.create(null),
+      defaultBang: "g",
+      luckyProvider: "default",
+      luckyUrl: null,
+    });
+    await Promise.all([staleLoad, invalidation]);
+
+    const settings = await mod.readRedirectSettings();
+    expect(settings.custom.mydocs).toEqual([
+      "https://docs.example/search?q=",
+      "",
     ]);
   });
 });

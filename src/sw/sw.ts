@@ -22,7 +22,6 @@ import {
   redirectRawUrl,
   redirectUrl,
 } from "./redirect";
-import { prepareRedirectSettings } from "./redirect-settings";
 
 declare const __CACHE_VERSION__: string;
 declare const __BANG_DATA_ASSET__: string;
@@ -160,11 +159,10 @@ function warmRuntime(): Promise<void> {
     return RESOLVED_PROMISE;
   }
   if (!runtimeWarmPromise) {
-    const preparedSettings = prepareRedirectSettings();
-    void preparedSettings.catch(swallowError);
-    const warming = Promise.all([ensureBangData(), loadFrecency()])
-      .then(() => readRedirectSettings(preparedSettings))
-      .then(() => undefined);
+    const warming = Promise.all([
+      ensureBangData(),
+      readRedirectSettings(),
+    ]).then(() => undefined);
     let current: Promise<void>;
     current = warming.catch(swallowError).finally(() => {
       if (runtimeWarmPromise === current) {
