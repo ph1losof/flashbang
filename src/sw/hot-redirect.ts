@@ -5,8 +5,11 @@ import {
   HOT_TRIGGERS,
   lookupHotBang,
 } from "../generated/bangs-hot.js";
+import { TOP_FRECENCY_ENTRIES } from "../shared/constants";
 import { validateCustomTrigger } from "../shared/custom-trigger";
+import { hashFNV1a } from "../shared/hash";
 import { HOT_BOOT_SENTINEL, HOT_BOOT_VERSION } from "../shared/hot-boot";
+import { lookupBang } from "./bang-data";
 import {
   type CustomUrlParts,
   compileTriggerSyntax,
@@ -23,9 +26,13 @@ export { HOT_BOOT_SENTINEL };
 export const NO_HOT_BOOT = -1;
 
 let resolvedHotId = -1;
+let resolvedFrecencyTrigger = "";
+
+export type HotFrecencyEntry = readonly [string, UrlParts];
 
 export interface HotBootRecord {
   defaultBang: string;
+  frecency: Readonly<Record<string, UrlParts>> | null;
   payloadComplete: boolean;
   settings: RedirectSettings | null;
   state: number;
@@ -137,6 +144,7 @@ function isSimpleCustom(value: unknown): value is CustomUrlParts {
 
 function decodeBootSettings(encoded: string): {
   defaultBang: string;
+  frecency: Readonly<Record<string, UrlParts>>;
   settings: RedirectSettings;
 } | null {
   const decoded = decodeBase64Url(encoded);
@@ -149,10 +157,11 @@ function decodeBootSettings(encoded: string): {
   } catch {
     return null;
   }
-  if (!Array.isArray(value) || value.length !== 5) {
+  if (!Array.isArray(value) || value.length !== 6) {
     return null;
   }
-  const [defaultBang, defaultUrl, luckyUrl, markers, entries] = value;
+  const [defaultBang, defaultUrl, luckyUrl, markers, entries, frecencyEntries] =
+    value;
   if (
     typeof defaultBang !== "string" ||
     !defaultBang ||
@@ -165,7 +174,9 @@ function decodeBootSettings(encoded: string): {
       (marker) => Number.isInteger(marker) && isBangMarker(marker)
     ) ||
     markers[0] === markers[1] ||
-    !Array.isArray(entries)
+    !Array.isArray(entries) ||
+    !Array.isArray(frecencyEntries) ||
+    frecencyEntries.length > TOP_FRECENCY_ENTRIES
   ) {
     return null;
   }
@@ -185,6 +196,23 @@ function decodeBootSettings(encoded: string): {
     custom[item[0]] = item[1];
   }
 
+  const frecency = Object.create(null) as Record<string, UrlParts>;
+  for (const item of frecencyEntries) {
+    if (
+      !Array.isArray(item) ||
+      item.length !== 2 ||
+      typeof item[0] !== "string" ||
+      validateCustomTrigger(item[0]) !== null ||
+      Object.hasOwn(custom, item[0]) ||
+      Object.hasOwn(frecency, item[0]) ||
+      lookupHotBang(item[0], 0, item[0].length) !== -1 ||
+      !isUrlParts(item[1])
+    ) {
+      return null;
+    }
+    frecency[item[0]] = item[1];
+  }
+
   const syntax = compileTriggerSyntax(
     String.fromCharCode(markers[0]) as Parameters<
       typeof compileTriggerSyntax
@@ -195,6 +223,7 @@ function decodeBootSettings(encoded: string): {
   );
   return {
     defaultBang,
+    frecency,
     settings: {
       custom,
       defaultUrl,
@@ -206,7 +235,8 @@ function decodeBootSettings(encoded: string): {
 
 function encodeBootSettings(
   snapshot: RedirectSettingsSnapshot,
-  settings: RedirectSettings
+  settings: RedirectSettings,
+  frecency: readonly HotFrecencyEntry[]
 ): string {
   const custom = Object.keys(snapshot.custom)
     .sort()
@@ -224,8 +254,30 @@ function encodeBootSettings(
       settings.luckyUrl,
       markers,
       custom,
+      frecency.slice(0, TOP_FRECENCY_ENTRIES),
     ])
   );
+}
+
+export function materializeHotFrecency(
+  counts: Readonly<Record<string, number>>,
+  snapshot: RedirectSettingsSnapshot
+): HotFrecencyEntry[] {
+  const entries: HotFrecencyEntry[] = [];
+  for (const trigger of Object.keys(counts)) {
+    if (
+      entries.length >= TOP_FRECENCY_ENTRIES ||
+      Object.hasOwn(snapshot.custom, trigger) ||
+      lookupHotBang(trigger, 0, trigger.length) !== -1
+    ) {
+      continue;
+    }
+    const parts = lookupBang(trigger, hashFNV1a(trigger));
+    if (parts && isUrlParts(parts)) {
+      entries.push([trigger, [parts[0], parts[1]]]);
+    }
+  }
+  return entries;
 }
 
 export function createHotBootState(snapshot: RedirectSettingsSnapshot): number {
@@ -243,13 +295,14 @@ export function encodeHotBootRecord(
   cacheName: string,
   state: number,
   snapshot?: RedirectSettingsSnapshot,
-  settings?: RedirectSettings
+  settings?: RedirectSettings,
+  frecency: readonly HotFrecencyEntry[] = []
 ): string {
   const compact = `${HOT_BOOT_VERSION}|${cacheName}|${state.toString(36)}`;
   if (!(snapshot && settings)) {
     return compact;
   }
-  const record = `${compact}|${encodeBootSettings(snapshot, settings)}`;
+  const record = `${compact}|${encodeBootSettings(snapshot, settings, frecency)}`;
   return record.length <= MAX_HOT_BOOT_RECORD_LENGTH ? record : `${compact}|-`;
 }
 
@@ -278,6 +331,7 @@ export function decodeHotBootRecord(
     return null;
   }
   let defaultBang = "";
+  let frecency: Readonly<Record<string, UrlParts>> | null = null;
   let settings: RedirectSettings | null = null;
   let payloadComplete = false;
   if (payloadStart !== -1) {
@@ -289,10 +343,11 @@ export function decodeHotBootRecord(
         return null;
       }
       defaultBang = decoded.defaultBang;
+      frecency = decoded.frecency;
       settings = decoded.settings;
     }
   }
-  return { defaultBang, payloadComplete, settings, state: packed };
+  return { defaultBang, frecency, payloadComplete, settings, state: packed };
 }
 
 export function hotBootSettingsNeedPublish(
@@ -302,12 +357,15 @@ export function hotBootSettingsNeedPublish(
 }
 
 export function getResolvedHotTrigger(): string {
-  return HOT_TRIGGERS[resolvedHotId];
+  return resolvedHotId === -1
+    ? resolvedFrecencyTrigger
+    : HOT_TRIGGERS[resolvedHotId];
 }
 
 export function resolveHotRedirect(
   rawQuery: string,
-  state: number
+  state: number,
+  frecency?: Readonly<Record<string, UrlParts>> | null
 ): string | null {
   resolvedHotId = -1;
   if (state < 0) {
@@ -353,8 +411,24 @@ export function resolveHotRedirect(
   }
 
   const id = lookupHotBang(rawQuery, triggerStart, separator);
-  if (id < 0 || (state & (1 << id)) !== 0) {
-    return null;
+  let prefix: string;
+  let suffix: string | null;
+  if (id >= 0) {
+    if ((state & (1 << id)) !== 0) {
+      return null;
+    }
+    resolvedHotId = id;
+    prefix = HOT_PREFIXES[id];
+    suffix = HOT_SUFFIXES[id];
+  } else {
+    const trigger = rawQuery.substring(triggerStart, separator);
+    const parts = frecency?.[trigger];
+    if (!parts) {
+      return null;
+    }
+    resolvedFrecencyTrigger = trigger;
+    prefix = parts[0];
+    suffix = parts[1];
   }
 
   const termStart = separator + separatorWidth;
@@ -379,8 +453,7 @@ export function resolveHotRedirect(
     return null;
   }
 
-  resolvedHotId = id;
-  return (
-    HOT_PREFIXES[id] + rawQuery.substring(termStart, termEnd) + HOT_SUFFIXES[id]
-  );
+  return suffix === null
+    ? prefix
+    : prefix + rawQuery.substring(termStart, termEnd) + suffix;
 }

@@ -603,6 +603,34 @@ describe("sw runtime with real modules", () => {
     expect(navigationPreloadWrites).toContain(HOT_BOOT_SENTINEL);
   });
 
+  test("publishes a personalized hot entry when top-eight membership changes", async () => {
+    const state: NavigationPreloadState = {
+      enabled: false,
+      headerValue: "true",
+    };
+    await loadSwRuntime([], false, state);
+
+    const activate = createExtendableEvent();
+    await handlers.activate?.(activate.event);
+    await Promise.all(activate.waits);
+
+    const fetchEvt = createFetchEvent(
+      "https://flashbang.local/?q=!npm+react",
+      "",
+      "navigate"
+    );
+    await handlers.fetch?.(fetchEvt.event);
+    const response = await fetchEvt.response();
+    expect(response.headers.get("Location")).toContain("npmjs.com");
+    await Promise.all(fetchEvt.waits);
+
+    const record = decodeHotBootRecord(state.headerValue, "fb-test-cache")!;
+    expect(Object.keys(record.frecency!)).toContain("npm");
+    expect(
+      resolveHotRedirect("!npm+router", record.state, record.frecency)
+    ).toBe(redirectRawUrl("!npm+router", record.settings!));
+  });
+
   test("keeps hot-boot metadata disabled until concurrent writes finish", async () => {
     const state: NavigationPreloadState = {
       enabled: false,

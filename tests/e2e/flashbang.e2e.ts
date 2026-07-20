@@ -1835,6 +1835,9 @@ test("rich hot boot redirects without IndexedDB or bang data", async ({
   await context.route("https://startpage.com/**", (route) =>
     route.fulfill({ body: "ok", contentType: "text/plain", status: 200 })
   );
+  await context.route("https://www.npmjs.com/**", (route) =>
+    route.fulfill({ body: "ok", contentType: "text/plain", status: 200 })
+  );
   await ensureWarmController(page);
   await seedCustomBangs(page, [
     {
@@ -1877,6 +1880,26 @@ test("rich hot boot redirects without IndexedDB or bang data", async ({
     )
     .toMatch(/^h1\|fb-[^|]+\|[^|]+\|/);
 
+  const headerBeforeFrecency = await page.evaluate(async () => {
+    const state = await (
+      await navigator.serviceWorker.ready
+    ).navigationPreload.getState();
+    return state.headerValue;
+  });
+  await page.evaluate(() =>
+    fetch("/?q=%21npm%20preload", { redirect: "manual" })
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const state = await (
+          await navigator.serviceWorker.ready
+        ).navigationPreload.getState();
+        return state.headerValue;
+      })
+    )
+    .not.toBe(headerBeforeFrecency);
+
   await page.evaluate(async () => {
     for (const name of await caches.keys()) {
       const cache = await caches.open(name);
@@ -1905,7 +1928,13 @@ test("rich hot boot redirects without IndexedDB or bang data", async ({
   await context.route(`${origin}/**`, (route) => route.abort());
   await navigateAndWaitForRedirect(
     page,
-    "/?q=%21mine%20hello",
+    "/?q=%21npm%20router",
+    /npmjs\.com\/search\?q=router/
+  );
+  const customPage = await context.newPage();
+  await navigateAndWaitForRedirect(
+    customPage,
+    `${origin}/?q=%21mine%20hello`,
     /example\.com\/search\?q=hello/
   );
   const defaultPage = await context.newPage();

@@ -18,6 +18,7 @@ import {
   HOT_BOOT_SENTINEL,
   type HotBootRecord,
   hotBootSettingsNeedPublish,
+  materializeHotFrecency,
   NO_HOT_BOOT,
   resolveHotRedirect,
 } from "./hot-redirect";
@@ -135,11 +136,21 @@ async function publishHotBoot(includeSettings = false): Promise<void> {
   const state = createHotBootState(snapshot);
   let settings: RedirectSettings | undefined;
   if (includeSettings && isBangDataInitialized()) {
+    await loadFrecency();
     settings =
       getCachedSettings() ??
       (await readRedirectSettings(Promise.resolve(snapshot)));
   }
-  const record = encodeHotBootRecord(CACHE_NAME, state, snapshot, settings);
+  const frecency = settings
+    ? materializeHotFrecency(getTopFrecencyRecord(), snapshot)
+    : undefined;
+  const record = encodeHotBootRecord(
+    CACHE_NAME,
+    state,
+    snapshot,
+    settings,
+    frecency
+  );
   await navigationPreload.disable();
   await navigationPreload.setHeaderValue(record);
   const decoded = decodeHotBootRecord(record, CACHE_NAME);
@@ -370,12 +381,22 @@ function queueBangSideEffects(e: FetchEvent, trigger: string): void {
     loadFrecency()
       .then(() => {
         const usage = trackBangUsage(trigger);
+        const hotBootSync =
+          usage.topMembershipChanged && isBangDataInitialized()
+            ? queueHotBootMutation(() => publishHotBoot(true)).catch(
+                swallowError
+              )
+            : RESOLVED_PROMISE;
         if (typeof cookieStore === "undefined" || !usage.topChanged) {
-          return usage.persistence;
+          return Promise.all([usage.persistence, hotBootSync]).then(
+            () => undefined
+          );
         }
 
         if (!hasTopFrecency()) {
-          return usage.persistence;
+          return Promise.all([usage.persistence, hotBootSync]).then(
+            () => undefined
+          );
         }
         const frecency = getTopFrecencyRecord();
         const cookieSync = cookieStore
@@ -402,7 +423,7 @@ function queueBangSideEffects(e: FetchEvent, trigger: string): void {
             });
           })
           .catch(swallowError);
-        return Promise.all([usage.persistence, cookieSync]).then(
+        return Promise.all([usage.persistence, cookieSync, hotBootSync]).then(
           () => undefined
         );
       })
@@ -702,7 +723,8 @@ self.addEventListener("fetch", (e: FetchEvent) => {
             if (e.request.mode === "navigate") {
               const hotUrl = resolveHotRedirect(
                 rawQ,
-                hotBoot?.state ?? NO_HOT_BOOT
+                hotBoot?.state ?? NO_HOT_BOOT,
+                hotBoot?.frecency
               );
               if (hotUrl) {
                 queueBangSideEffects(e, getResolvedHotTrigger());

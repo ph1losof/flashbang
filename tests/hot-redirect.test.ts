@@ -9,6 +9,7 @@ import {
   getResolvedHotTrigger,
   hotBootSettingsNeedPublish,
   MAX_HOT_BOOT_RECORD_LENGTH,
+  materializeHotFrecency,
   NO_HOT_BOOT,
   parseHotBootRecord,
   resolveHotRedirect,
@@ -102,6 +103,7 @@ describe("service worker hot redirects", () => {
     const decoded = decodeHotBootRecord(record, "fb-test")!;
     expect(decoded.state).toBe(state);
     expect(decoded.defaultBang).toBe("sp");
+    expect(decoded.frecency).toEqual({});
     expect(hotBootSettingsNeedPublish(decoded)).toBe(false);
     expect(decoded.settings!.custom.regex).toBeUndefined();
     expect(redirectRawUrl("regular+query", decoded.settings!)).toBe(
@@ -113,6 +115,57 @@ describe("service worker hot redirects", () => {
     expect(redirectRawUrl("@docs+service+workers", decoded.settings!)).toBe(
       "https://startpage.com/do/metasearch.pl?query=service+workers+site:docs.example"
     );
+  });
+
+  test("round-trips and resolves eligible personalized frecency bangs", () => {
+    const sourceSnapshot = snapshot();
+    const sourceSettings = settings();
+    const frecency = materializeHotFrecency(
+      { npm: 9, gh: 8, missing: 7 },
+      sourceSnapshot
+    );
+    expect(frecency.map(([trigger]) => trigger)).toEqual(["npm"]);
+
+    const state = createHotBootState(sourceSnapshot);
+    const record = encodeHotBootRecord(
+      "fb-test",
+      state,
+      sourceSnapshot,
+      sourceSettings,
+      frecency
+    );
+    const decoded = decodeHotBootRecord(record, "fb-test")!;
+    expect(Object.keys(decoded.frecency!)).toEqual(["npm"]);
+    expect(
+      resolveHotRedirect(";npm+react%20router", state, decoded.frecency)
+    ).toBe(redirectRawUrl(";npm+react%20router", sourceSettings));
+    expect(getResolvedHotTrigger()).toBe("npm");
+
+    const custom = Object.assign(Object.create(null), {
+      npm: ["https://custom.example/?q=", ""],
+    }) as Record<string, CustomUrlParts>;
+    expect(materializeHotFrecency({ npm: 9 }, snapshot(custom))).toEqual([]);
+  });
+
+  test("caps personalized frecency payloads at eight entries", () => {
+    const sourceSnapshot = snapshot();
+    const state = createHotBootState(sourceSnapshot);
+    const frecency = Array.from(
+      { length: 9 },
+      (_, index) =>
+        [`personal${index}`, [`https://example.com/${index}?q=`, ""]] as const
+    );
+    const decoded = decodeHotBootRecord(
+      encodeHotBootRecord(
+        "fb-test",
+        state,
+        sourceSnapshot,
+        settings(),
+        frecency
+      ),
+      "fb-test"
+    )!;
+    expect(Object.keys(decoded.frecency!)).toHaveLength(8);
   });
 
   test("drops the complete rich payload rather than truncating oversized settings", () => {
