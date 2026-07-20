@@ -17,6 +17,25 @@ async function mockGoogleSearchRoute(page: Page): Promise<void> {
       body: `mocked ${url}`,
     });
   });
+  page.on("framenavigated", async (frame) => {
+    if (frame !== page.mainFrame()) {
+      return;
+    }
+    const url = new URL(frame.url());
+    const continued = url.pathname.startsWith("/sorry/")
+      ? url.searchParams.get("continue")
+      : null;
+    if (!continued?.startsWith(`${GOOGLE_HOST}/`)) {
+      return;
+    }
+    // Firefox can bypass Playwright routing for a Service Worker 302. Preserve
+    // the requested URL if Google's anti-bot page answers that test request.
+    await frame
+      .evaluate((target) => history.replaceState(null, "", target), continued)
+      .catch(() => {
+        // The navigation assertion reports a useful failure if rewriting fails.
+      });
+  });
 }
 
 async function mockCustomHostRoute(page: Page): Promise<void> {
@@ -46,7 +65,8 @@ async function ensureWarmController(page: Page): Promise<void> {
         error instanceof Error ? error.message : String(error ?? "");
       if (
         message.includes("interrupted by another navigation") ||
-        message.includes("Execution context was destroyed")
+        message.includes("Execution context was destroyed") ||
+        message.includes("NS_BINDING_ABORTED")
       ) {
         continue;
       }
@@ -160,9 +180,19 @@ async function seedCustomBangs(
         });
       }, bangs);
 
-      await page.evaluate(() => {
-        navigator.serviceWorker.controller?.postMessage({ type: "invalidate" });
-      });
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) => {
+            const controller = navigator.serviceWorker.controller;
+            if (!controller) {
+              resolve();
+              return;
+            }
+            const channel = new MessageChannel();
+            channel.port1.onmessage = () => resolve();
+            controller.postMessage({ type: "invalidate" }, [channel.port2]);
+          })
+      );
       return;
     } catch (error) {
       const message =
@@ -263,13 +293,31 @@ test("suggest endpoint respects provider override via sp=none", async ({
 test("benchmark page loads its feature bundle", async ({ page }) => {
   await page.goto("/bench", { waitUntil: "domcontentloaded" });
 
-  await expect(page).toHaveTitle("flashbang — query type benchmark");
+  await expect(page).toHaveTitle("flashbang — Service Worker benchmark");
   await expect(page.locator(".wordmark")).toHaveClass(/has-shader/);
   await expect(page.locator("#run-btn")).toBeEnabled();
   const iterations = page.locator("#iterations");
   await iterations.focus();
   await iterations.press("Control+[");
   await expect(iterations).not.toBeFocused();
+
+  await iterations.fill("100");
+  await page.locator("#run-btn").click();
+  const progressText = page.locator("#progress-text");
+  await expect(progressText).toHaveText(/Done|Benchmark aborted/, {
+    timeout: 30_000,
+  });
+  if ((await progressText.textContent()) !== "Done") {
+    throw new Error((await page.locator("#sw-status").textContent()) ?? "");
+  }
+  await expect(page.locator("#stats-body tr")).toHaveCount(15);
+  await expect(page.locator("#summary")).toContainText(
+    "Service Worker transport baseline"
+  );
+  await expect(page.locator("#navigation-summary")).toContainText(
+    "Paired top-level navigation"
+  );
+  await expect(page.locator("#sw-status")).toBeHidden();
 });
 
 test("Firefox locks cookie-backed suggestion settings", async ({ page }) => {
@@ -523,6 +571,9 @@ test("compact address-bar setup exposes browser instructions and copyable URLs",
   await expect(page.locator("#setup-search-url")).toHaveValue(
     `${new URL(page.url()).origin}?q=%s`
   );
+  await expect(page.locator("#setup-private-search-url")).toHaveValue(
+    `${new URL(page.url()).origin}/#q=%s`
+  );
   const baseSuggestUrl = `${new URL(page.url()).origin}/suggest?q=%s`;
   await expect(page.locator("#setup-suggest-url")).toHaveValue(
     browserName === "firefox" ? `${baseSuggestUrl}&sp=google` : baseSuggestUrl
@@ -620,6 +671,16 @@ test("compact address-bar setup exposes browser instructions and copyable URLs",
   await expect(page.locator("#copy-search-url [data-copy-label]")).toHaveText(
     "Copied"
   );
+
+  await page.click("#copy-private-search-url");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as typeof window & { copiedSetupUrl?: string }).copiedSetupUrl
+      )
+    )
+    .toBe(`${new URL(page.url()).origin}/#q=%s`);
 
   await page.keyboard.press("Escape");
   await expect(modal).toHaveAttribute("aria-hidden", "true");
@@ -1569,7 +1630,7 @@ test("first installation redirects before a controller exists", async ({
     const page = await context.newPage();
     await mockGoogleSearchRoute(page);
 
-    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.goto("/health", { waitUntil: "domcontentloaded" });
     expect(
       await page.evaluate(() => {
         if (!("serviceWorker" in navigator)) {
@@ -1585,6 +1646,202 @@ test("first installation redirects before a controller exists", async ({
       page.goto(target, { waitUntil: "commit" }),
     ]);
     expect(await page.url()).toMatch(GOOGLE_REDIRECT);
+  } finally {
+    await context.close();
+  }
+});
+
+test("first fallback seeds the worker for the next offline redirect", async ({
+  browser,
+  browserName,
+}) => {
+  test.skip(
+    browserName === "webkit",
+    "Playwright WebKit does not support service worker lifecycle testing"
+  );
+  const context = await browser.newContext();
+  try {
+    const page = await context.newPage();
+    await mockGoogleSearchRoute(page);
+    const bangDataRequests: string[] = [];
+    context.on("request", (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (
+        pathname === "/bangs.bin" ||
+        (pathname.startsWith("/bangs-") && !pathname.startsWith("/bangs-meta-"))
+      ) {
+        bangDataRequests.push(pathname);
+      }
+    });
+
+    await page.goto("/health");
+    await navigateAndWaitForRedirect(
+      page,
+      "/?q=%21g%20first",
+      /google\.com\/search\?q=first/
+    );
+
+    const probe = await context.newPage();
+    await mockGoogleSearchRoute(probe);
+    await probe.goto("/health");
+    await probe.evaluate(async () => {
+      const registration = await navigator.serviceWorker.ready;
+      if (navigator.serviceWorker.controller) {
+        return;
+      }
+      registration.active?.postMessage({ type: "claim" });
+      await new Promise<void>((resolve) => {
+        navigator.serviceWorker.addEventListener(
+          "controllerchange",
+          () => resolve(),
+          {
+            once: true,
+          }
+        );
+      });
+    });
+    await expect
+      .poll(() =>
+        probe.evaluate(async () => {
+          for (const cacheName of await caches.keys()) {
+            const requests = await (await caches.open(cacheName)).keys();
+            if (
+              requests.some(({ url }) => {
+                const pathname = new URL(url).pathname;
+                return (
+                  pathname === "/bangs.bin" ||
+                  (pathname.startsWith("/bangs-") &&
+                    !pathname.startsWith("/bangs-meta-"))
+                );
+              })
+            ) {
+              return true;
+            }
+          }
+          return false;
+        })
+      )
+      .toBe(true);
+    expect(bangDataRequests).toHaveLength(1);
+
+    const origin = new URL(probe.url()).origin;
+    await context.route(`${origin}/**`, (route) => route.abort());
+    try {
+      await navigateAndWaitForRedirect(
+        probe,
+        "/?q=%21g%20second",
+        /google\.com\/search\?q=second/
+      );
+    } finally {
+      await context.unroute(`${origin}/**`);
+    }
+  } finally {
+    await context.close();
+  }
+});
+
+test("private hash redirect keeps the query out of origin requests", async ({
+  browser,
+}) => {
+  const context = await browser.newContext();
+  try {
+    const page = await context.newPage();
+    await page.addInitScript(() => {
+      Reflect.deleteProperty(Navigator.prototype, "serviceWorker");
+    });
+    await mockGoogleSearchRoute(page);
+    await page.goto("/health");
+    const origin = new URL(page.url()).origin;
+    const originRequests: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().startsWith(origin)) {
+        originRequests.push(request.url());
+      }
+    });
+
+    await navigateAndWaitForRedirect(page, "/#q=%21g%20hello", GOOGLE_REDIRECT);
+    expect(originRequests.length).toBeGreaterThan(0);
+    expect(originRequests.every((url) => !url.includes("hello"))).toBe(true);
+    expect(
+      originRequests.some((url) =>
+        ["/app.js", "/home"].includes(new URL(url).pathname)
+      )
+    ).toBe(false);
+    expect(new URL(page.url()).hash).toBe("");
+  } finally {
+    await context.close();
+  }
+});
+
+test("private hash redirect works from a controlled homepage", async ({
+  page,
+}) => {
+  await mockGoogleSearchRoute(page);
+  await ensureWarmController(page);
+  await openHome(page);
+  const origin = new URL(page.url()).origin;
+  const originRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().startsWith(origin)) {
+      originRequests.push(request.url());
+    }
+  });
+
+  await navigateAndWaitForRedirect(page, "/#q=%21g%20hello", GOOGLE_REDIRECT);
+  expect(originRequests.every((url) => !url.includes("hello"))).toBe(true);
+  expect(
+    originRequests.some((url) =>
+      ["/app.js", "/home"].includes(new URL(url).pathname)
+    )
+  ).toBe(false);
+  expect(new URL(page.url()).hash).toBe("");
+});
+
+test("redirect falls back when service workers are unavailable", async ({
+  browser,
+}) => {
+  const context = await browser.newContext();
+  try {
+    const page = await context.newPage();
+    await page.addInitScript(() => {
+      Reflect.deleteProperty(Navigator.prototype, "serviceWorker");
+    });
+    await mockGoogleSearchRoute(page);
+
+    expect(
+      await page
+        .goto("/health")
+        .then(() => page.evaluate(() => "serviceWorker" in navigator))
+    ).toBe(false);
+    await page.goto("/");
+    await expect(page).toHaveURL(/\/home$/);
+    await expect(page.locator("#gear-btn")).toBeVisible();
+    await navigateAndWaitForRedirect(page, "/?q=%21g%20hello", GOOGLE_REDIRECT);
+    expect(page.url()).toMatch(GOOGLE_REDIRECT);
+  } finally {
+    await context.close();
+  }
+});
+
+test("redirect falls back when service workers are unavailable during registration", async ({
+  browser,
+}) => {
+  const context = await browser.newContext();
+  try {
+    const page = await context.newPage();
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator.serviceWorker, "register", {
+        configurable: true,
+        value: () =>
+          Promise.reject(
+            new DOMException("Service Workers blocked", "SecurityError")
+          ),
+      });
+    });
+    await mockGoogleSearchRoute(page);
+
+    await navigateAndWaitForRedirect(page, "/?q=%21g%20hello", GOOGLE_REDIRECT);
+    expect(page.url()).toMatch(GOOGLE_REDIRECT);
   } finally {
     await context.close();
   }
@@ -1626,6 +1883,10 @@ test("controlled redirect works while offline", async ({
   );
   await mockGoogleSearchRoute(page);
   await ensureWarmController(page);
+  await page.waitForSelector("#gear-btn");
+  await expect(resolveRedirectViaWorker(page, "!g hello")).resolves.toMatch(
+    GOOGLE_REDIRECT
+  );
   const origin = new URL(page.url()).origin;
   await context.route(`${origin}/**`, (route) => route.abort());
   try {
@@ -1644,7 +1905,11 @@ test("settings catalog works on its first offline open", async ({
     browserName === "webkit",
     "Playwright WebKit does not support service worker lifecycle testing"
   );
+  const catalogResponse = page.waitForResponse(
+    (response) => response.url().includes("/bangs-meta-") && response.ok()
+  );
   await ensureWarmController(page);
+  await catalogResponse;
 
   await context.setOffline(true);
   try {
@@ -1692,7 +1957,7 @@ test("redirect falls back safely when IndexedDB cannot be opened", async ({
   }
 });
 
-test("worker activation creates its cache and removes the old cache", async ({
+test("worker retains the old cache until current assets are complete", async ({
   browserName,
   context,
   page,
@@ -1716,20 +1981,77 @@ test("worker activation creates its cache and removes the old cache", async ({
   const builtBangMetaAsset = workerSource.match(
     /\/bangs-meta-[a-f0-9]{12}\.bin/
   )?.[0];
+  const builtFallbackAsset = workerSource.match(
+    /\/fallback-[a-z0-9_-]{8,}\.js/i
+  )?.[0];
   expect(builtCacheName).toBeDefined();
   expect(builtBangDataAsset).toBeDefined();
   expect(builtBangMetaAsset).toBeDefined();
+  expect(builtFallbackAsset).toBeDefined();
   expect(indexSource).toContain(builtBangDataAsset!);
+  expect(indexSource).toContain(builtFallbackAsset!);
   const initialCacheName = "fb-e2e-initial";
   const lifecyclePage = await context.newPage();
   await lifecyclePage.goto("/health");
   await lifecyclePage.evaluate(
-    (cacheName) => caches.open(cacheName),
-    initialCacheName
+    async ({ bangDataAsset, cacheName }) => {
+      const cache = await caches.open(cacheName);
+      await Promise.all([
+        cache.put("/atomic-old-asset", new Response("old-cache")),
+        fetch(bangDataAsset).then((response) =>
+          cache.put(bangDataAsset, response)
+        ),
+      ]);
+    },
+    { cacheName: initialCacheName, bangDataAsset: builtBangDataAsset! }
   );
   await expect
     .poll(() => lifecyclePage.evaluate(() => caches.keys()))
     .toContain(initialCacheName);
+
+  await lifecyclePage.evaluate(async () => {
+    await navigator.serviceWorker.register("/sw.js");
+    await navigator.serviceWorker.ready;
+    if (!navigator.serviceWorker.controller) {
+      await new Promise<void>((resolve) => {
+        navigator.serviceWorker.addEventListener(
+          "controllerchange",
+          () => resolve(),
+          {
+            once: true,
+          }
+        );
+      });
+    }
+  });
+  expect(await lifecyclePage.evaluate(() => caches.keys())).toContain(
+    initialCacheName
+  );
+
+  await context.setOffline(true);
+  try {
+    await lifecyclePage.evaluate(() =>
+      fetch("/?q=%21g%20atomic", { redirect: "manual" })
+    );
+    await expect
+      .poll(() =>
+        lifecyclePage.evaluate(
+          async ({ assetPath, cacheName }) => {
+            const cache = await caches.open(cacheName);
+            return Boolean(await cache.match(assetPath));
+          },
+          { cacheName: builtCacheName!, assetPath: builtBangDataAsset! }
+        )
+      )
+      .toBe(true);
+    await expect(
+      lifecyclePage.evaluate(() =>
+        fetch("/atomic-old-asset").then((response) => response.text())
+      )
+    ).resolves.toBe("old-cache");
+  } finally {
+    await context.setOffline(false);
+  }
 
   await ensureWarmController(page);
   await expect
@@ -1743,6 +2065,17 @@ test("worker activation creates its cache and removes the old cache", async ({
           return Boolean(await cache.match(assetPath));
         },
         { cacheName: builtCacheName!, assetPath: builtBangDataAsset! }
+      )
+    )
+    .toBe(true);
+  await expect
+    .poll(() =>
+      lifecyclePage.evaluate(
+        async ({ assetPath, cacheName }) => {
+          const cache = await caches.open(cacheName);
+          return Boolean(await cache.match(assetPath));
+        },
+        { cacheName: builtCacheName!, assetPath: builtFallbackAsset! }
       )
     )
     .toBe(true);

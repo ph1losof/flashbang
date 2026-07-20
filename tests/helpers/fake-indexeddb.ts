@@ -23,10 +23,10 @@ type OpenRequest = IDBOpenDBRequest &
   };
 
 function clone<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
+  return structuredClone(value);
 }
 
-function makeRequest<T>(result: T): SuccessRequest<T> {
+function makeRequest<T>(result: T, onSettled?: () => void): SuccessRequest<T> {
   const req = {
     result,
     error: null,
@@ -35,36 +35,44 @@ function makeRequest<T>(result: T): SuccessRequest<T> {
   } as unknown as SuccessRequest<T>;
   queueMicrotask(() => {
     req.onsuccess?.call(req, new Event("success"));
+    onSettled?.();
   });
   return req;
 }
 
 class FakeObjectStore {
-  constructor(private readonly store: StoreRecord) {}
+  constructor(
+    private readonly store: StoreRecord,
+    private readonly transaction?: FakeTransaction
+  ) {}
+
+  private request<T>(result: T): IDBRequest<T> {
+    return this.transaction?.request(result) ?? makeRequest(result);
+  }
 
   clear(): IDBRequest<undefined> {
     this.store.records.clear();
-    return makeRequest(undefined);
+    return this.request(undefined);
   }
 
   delete(key: IDBValidKey): IDBRequest<undefined> {
     this.store.records.delete(String(key));
-    return makeRequest(undefined);
+    return this.request(undefined);
   }
 
   get(key: IDBValidKey): IDBRequest<unknown> {
     const value = this.store.records.get(String(key));
-    return makeRequest(value === undefined ? undefined : clone(value));
+    return this.request(value === undefined ? undefined : clone(value));
   }
 
   getAll(): IDBRequest<unknown[]> {
-    return makeRequest([...this.store.records.values()].map(clone));
+    return this.request([...this.store.records.values()].map(clone));
   }
 
   put(value: unknown): IDBRequest<IDBValidKey> {
     const key = (value as Record<string, unknown>)[this.store.keyPath];
     this.store.records.set(String(key), clone(value));
-    return makeRequest(String(key));
+    return this.request(String(key));
   }
 }
 
@@ -73,8 +81,33 @@ class FakeTransaction {
   oncomplete: ((this: IDBTransaction, ev: Event) => unknown) | null = null;
   onerror: ((this: IDBTransaction, ev: Event) => unknown) | null = null;
 
+  private completionQueued = false;
+  private finished = false;
+  private pending = 0;
+
   constructor(private readonly db: DbRecord) {
+    this.queueCompletion();
+  }
+
+  request<T>(result: T): SuccessRequest<T> {
+    this.pending++;
+    return makeRequest(result, () => {
+      this.pending--;
+      this.queueCompletion();
+    });
+  }
+
+  private queueCompletion(): void {
+    if (this.completionQueued || this.finished) {
+      return;
+    }
+    this.completionQueued = true;
     queueMicrotask(() => {
+      this.completionQueued = false;
+      if (this.pending !== 0 || this.finished) {
+        return;
+      }
+      this.finished = true;
       this.oncomplete?.call(
         this as unknown as IDBTransaction,
         new Event("complete")
@@ -87,7 +120,7 @@ class FakeTransaction {
     if (!store) {
       throw new Error(`Object store not found: ${name}`);
     }
-    return new FakeObjectStore(store) as unknown as IDBObjectStore;
+    return new FakeObjectStore(store, this) as unknown as IDBObjectStore;
   }
 }
 

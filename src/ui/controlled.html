@@ -1,0 +1,59 @@
+<!doctype html>
+<style>
+html {
+  background: #0a0a0f;
+}
+</style>
+<script>
+"use strict";
+(() => {
+  const query = location.hash.startsWith("#q=")
+    ? location.hash.substring(3).split("&", 1)[0]
+    : null;
+  if (!query) {
+    location.replace("/home");
+    return;
+  }
+
+  let fallbackStarted = false;
+  const fallback = () => {
+    if (fallbackStarted) {
+      return;
+    }
+    fallbackStarted = true;
+    Promise.all([
+      fetch("__BANG_DATA_ASSET__").then((response) => {
+        if (!response.ok) {
+          throw new Error(`Failed to load bang data: ${response.status}`);
+        }
+        return response.arrayBuffer();
+      }),
+      import("__FALLBACK_ASSET__"),
+    ])
+      .then(async ([data, { resolveFallback }]) => {
+        const { url } = await resolveFallback(query, data, true);
+        location.replace(url);
+      })
+      .catch(() => {
+        document.body.textContent =
+          "Flashbang could not resolve this query. Reload the page or enable Service Workers.";
+      });
+  };
+
+  const controller = navigator.serviceWorker.controller;
+  if (!controller) {
+    fallback();
+    return;
+  }
+
+  const channel = new MessageChannel();
+  channel.port1.onmessage = (event) => {
+    if (typeof event.data === "string") {
+      location.replace(event.data);
+    }
+  };
+  controller.postMessage({ type: "redirect", rawQuery: query }, [
+    channel.port2,
+  ]);
+})();
+</script>

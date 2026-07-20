@@ -1070,6 +1070,13 @@ export function redirectRaw(
   return [redir(url), _resolvedTrigger];
 }
 
+export function redirectRawUrl(
+  rawQuery: string,
+  settings: RedirectSettings
+): string {
+  return resolveRaw(rawQuery, settings);
+}
+
 function encodeForRedirect(query: string): string {
   for (let i = 0; i < query.length; i++) {
     const c = query.charCodeAt(i);

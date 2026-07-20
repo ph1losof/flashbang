@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>flashbang — query type benchmark</title>
+    <title>flashbang — Service Worker benchmark</title>
     <link rel="stylesheet" href="/styles.css">
     <link rel="icon" type="image/svg+xml" href="/icon.svg">
     <style>
@@ -95,7 +95,7 @@
         <span class="font-700 tracking-tight">bench</span>
       </h1>
       <p class="text-text-secondary text-[0.95rem] mb-8">
-        Service Worker redirect latency across all query types
+        Validated Service Worker fetch round-trip latency across redirect paths
       </p>
 
       <div
@@ -153,10 +153,12 @@
               <thead>
                 <tr>
                   <th>Query Type</th>
-                  <th>Median</th>
+                  <th>Median RTT</th>
+                  <th>Over baseline</th>
                   <th>Mean</th>
                   <th>p95</th>
-                  <th>p99</th>
+                  <th>MAD</th>
+                  <th>Median 95% CI</th>
                   <th>Min</th>
                   <th>Max</th>
                 </tr>
@@ -172,41 +174,61 @@
             id="summary"
           ></div>
         </div>
+
+        <div class="card mb-5 hidden" id="navigation-summary-card">
+          <h2 class="section-title">Top-Level Navigation Check</h2>
+          <div
+            class="text-[0.9rem] text-text-secondary leading-[1.7] py-2"
+            id="navigation-summary"
+          ></div>
+        </div>
       </div>
 
       <div class="card mb-5">
         <h2 class="section-title">Methodology</h2>
         <div class="text-[0.85rem] text-text-secondary leading-[1.7]">
           <p class="mb-3">
-            Each query type is benchmarked independently using
+            Redirect paths and a Service Worker no-op baseline are measured in
+            randomized, interleaved order using
             <code
               class="font-mono text-[0.85em] bg-bg-hover px-1.5 py-0.5 rounded"
               >fetch('/?q=...', { redirect: 'manual' })</code
             >
             which stops at the Service Worker&rsquo;s 302 redirect response
-            without following it. This measures browser-to-worker round-trip
-            latency without making a request to the redirect destination.
+            without following it. This is a client-to-worker fetch round trip,
+            not a top-level navigation measurement. The no-op row exposes
+            transport and scheduling overhead separately from redirect
+            processing.
+          </p>
+          <p class="mb-3">
+            A small popup also runs up to 100 paired
+            <strong class="text-text">top-level navigations</strong>. Each pair
+            compares a direct same-origin target with the real parser and 302
+            path to that same target. Their difference estimates redirect
+            overhead while excluding destination network time.
           </p>
           <ul class="my-2 ml-5">
             <li class="mb-1">
               <strong class="text-text">50 warmup iterations</strong>
-              per query type (discarded) to stabilize caches
+              per path (discarded), interleaved with all other paths
             </li>
             <li class="mb-1">
               <strong class="text-text">500 measured iterations</strong>
               by default (configurable 100&ndash;5,000)
             </li>
             <li class="mb-1">
-              <strong class="text-text">performance.now()</strong>
-              for high-resolution timing per iteration
+              <strong class="text-text">cross-origin-isolated timing</strong>
+              is required before any samples are accepted
             </li>
             <li class="mb-1">
-              <strong class="text-text">Isolated benchmark mode</strong>
-              prevents requests from changing frecency or cookies
+              <strong class="text-text">Validated benchmark mode</strong>
+              uses deterministic settings, prevents persistence changes, and
+              verifies that the worker handled every request
             </li>
             <li class="mb-1">
               Stats computed: <strong class="text-text">median</strong>, mean,
-              p95, p99, min, max
+              p95, median absolute deviation, median 95% confidence interval,
+              min, max
             </li>
           </ul>
           <p class="mb-3">

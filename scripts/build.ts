@@ -2,9 +2,16 @@ import { createHash } from "node:crypto";
 import { mkdir, rm } from "node:fs/promises";
 import { basename } from "node:path";
 import { brotliCompressSync, constants } from "node:zlib";
+import {
+  controlledPageHeaders,
+  pageHeaders,
+  SW_CSP,
+} from "../src/server/headers";
 import { ensureGeneratedBangData } from "./codegen";
+import { extractInlineScriptHashes } from "./inline-script-hash";
 import {
   assembleUIAssets,
+  buildControlledBootstrap,
   bundleUI,
   customSuggestUrlsEnabled,
   DIST_DIR,
@@ -41,7 +48,8 @@ export function createCacheVersion(
 
 export function precacheFileInputs(
   requiredAppAssets: readonly string[],
-  bangDataAsset = "/bangs.bin"
+  bangDataAsset = "/bangs.bin",
+  fallbackAsset = "/fallback.js"
 ): ReadonlyArray<readonly [assetPath: string, filePath: string]> {
   return [
     [bangDataAsset, `${DIST_DIR}${bangDataAsset}`],
@@ -49,6 +57,7 @@ export function precacheFileInputs(
     ["/bench", `${DIST_DIR}/bench.html`],
     ["/bench.js", `${DIST_DIR}/bench.js`],
     ["/app.js", `${DIST_DIR}/app.js`],
+    [fallbackAsset, `${DIST_DIR}${fallbackAsset}`],
     ["/icon.svg", `${DIST_DIR}/icon.svg`],
     ["/manifest.json", `${DIST_DIR}/manifest.json`],
     ...requiredAppAssets.map(
@@ -74,7 +83,10 @@ async function bundleServiceWorker(
   naming: string,
   cacheVersion: string,
   requiredAppAssets: readonly string[],
-  bangDataAsset: string
+  bangDataAsset: string,
+  fallbackAsset: string,
+  controlledHtml: string,
+  controlledHeaders: Record<string, string>
 ): Promise<void> {
   const result = await Bun.build({
     entrypoints: ["src/sw/sw.ts"],
@@ -85,8 +97,11 @@ async function bundleServiceWorker(
     format: "esm",
     define: {
       __BANG_DATA_ASSET__: JSON.stringify(bangDataAsset),
+      __FALLBACK_ASSET__: JSON.stringify(fallbackAsset),
       __CACHE_VERSION__: JSON.stringify(cacheVersion),
       __REQUIRED_APP_ASSETS__: JSON.stringify(requiredAppAssets),
+      __CONTROLLED_HTML__: JSON.stringify(controlledHtml),
+      __CONTROLLED_HEADERS__: JSON.stringify(controlledHeaders),
       __IS_DEV__: JSON.stringify(false),
     },
   });
@@ -121,7 +136,7 @@ async function main(): Promise<void> {
   await Bun.write(`${DIST_DIR}${bangMetaAsset}`, bangMetaBytes);
 
   console.log("=== Bundle app + bench (to discover chunks) ===");
-  const { appOutputs } = await bundleUI(
+  const { appOutputs, fallbackAsset } = await bundleUI(
     allowUnsafeCustomSuggestUrls,
     bangMetaAsset
   );
@@ -138,8 +153,30 @@ async function main(): Promise<void> {
   await generateCSS();
 
   console.log("=== Inline CSS + minify HTML ===");
-  await assembleUIAssets(allowUnsafeCustomSuggestUrls, bangDataAsset);
+  await assembleUIAssets(
+    allowUnsafeCustomSuggestUrls,
+    bangDataAsset,
+    fallbackAsset
+  );
   await rm(`${DIST_DIR}/styles.css`);
+
+  const [distIndex, distHome, distBench] = await Promise.all(
+    ["index.html", "home.html", "bench.html"].map((name) =>
+      Bun.file(`${DIST_DIR}/${name}`).text()
+    )
+  );
+  const scriptHashes = [distIndex, distHome, distBench].flatMap(
+    extractInlineScriptHashes
+  );
+  const controlledHtml = await buildControlledBootstrap(
+    bangDataAsset,
+    fallbackAsset
+  );
+  const controlledScriptHashes = extractInlineScriptHashes(controlledHtml);
+  const controlledHeaders = {
+    "Content-Type": "text/html; charset=utf-8",
+    ...controlledPageHeaders(controlledScriptHashes.join(" ")),
+  };
 
   console.log("=== Compute service worker cache version ===");
   // This fixed placeholder bundle captures SW implementation and bang-data
@@ -148,10 +185,13 @@ async function main(): Promise<void> {
     "sw-cache-input.js",
     "fb-cache-version-input",
     requiredAppAssets,
-    bangDataAsset
+    bangDataAsset,
+    fallbackAsset,
+    controlledHtml,
+    controlledHeaders
   );
   const cacheInputs: CacheVersionInput[] = await Promise.all(
-    precacheFileInputs(requiredAppAssets, bangDataAsset).map(
+    precacheFileInputs(requiredAppAssets, bangDataAsset, fallbackAsset).map(
       async ([assetPath, filePath]) => ({
         path: assetPath,
         bytes: await Bun.file(filePath).bytes(),
@@ -171,31 +211,13 @@ async function main(): Promise<void> {
     "sw.js",
     cacheVersion,
     requiredAppAssets,
-    bangDataAsset
+    bangDataAsset,
+    fallbackAsset,
+    controlledHtml,
+    controlledHeaders
   );
 
   console.log("=== Generate _headers with CSP ===");
-  function extractScriptHashes(html: string): string[] {
-    const hashes: string[] = [];
-    const re = /<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/gi;
-    for (const match of html.matchAll(re)) {
-      if (!match[1]) {
-        continue;
-      }
-      const hash = createHash("sha256").update(match[1]).digest("base64");
-      hashes.push(`'sha256-${hash}'`);
-    }
-    return hashes;
-  }
-  const distIndex = await Bun.file(`${DIST_DIR}/index.html`).text();
-  const distHome = await Bun.file(`${DIST_DIR}/home.html`).text();
-  const distBench = await Bun.file(`${DIST_DIR}/bench.html`).text();
-  const scriptHashes = [
-    ...extractScriptHashes(distIndex),
-    ...extractScriptHashes(distHome),
-    ...extractScriptHashes(distBench),
-  ];
-  const { pageHeaders, SW_CSP } = await import("../src/server/headers");
   const { "Content-Security-Policy": pageCsp, ...baseHeaders } = pageHeaders(
     scriptHashes.join(" ")
   );
@@ -223,6 +245,9 @@ async function main(): Promise<void> {
       "/bench.html",
       `  ${pageCspHeader}`,
       "",
+      "/bench",
+      `  ${pageCspHeader}`,
+      "",
       "/sw.js",
       `  ${swCspHeader}`,
       "",
@@ -230,6 +255,9 @@ async function main(): Promise<void> {
       "  Cache-Control: public, max-age=31536000, immutable",
       "",
       bangMetaAsset,
+      "  Cache-Control: public, max-age=31536000, immutable",
+      "",
+      fallbackAsset,
       "  Cache-Control: public, max-age=31536000, immutable",
       "",
       "/opensearch.xml",

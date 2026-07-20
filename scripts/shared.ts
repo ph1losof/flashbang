@@ -1,9 +1,11 @@
+import { basename } from "node:path";
 import { minify } from "@minify-html/node";
 import { $ } from "bun";
 
 const CUSTOM_SUGGEST_OPTION_MARKER = "<!-- custom-suggest-provider-option -->";
 const CUSTOM_SUGGEST_OPTION = '<option value="custom">Custom</option>';
 const BANG_DATA_ASSET_MARKER = "__BANG_DATA_ASSET__";
+const FALLBACK_ASSET_MARKER = "__FALLBACK_ASSET__";
 export const DIST_DIR = process.env.DIST_DIR || "dist";
 
 export function customSuggestUrlsEnabled(
@@ -32,11 +34,45 @@ export function configureBangDataAsset(
   return html.replaceAll(BANG_DATA_ASSET_MARKER, assetPath);
 }
 
+export function configureFallbackAsset(
+  html: string,
+  assetPath: string
+): string {
+  return html.replaceAll(FALLBACK_ASSET_MARKER, assetPath);
+}
+
+function configureRedirectAssets(
+  html: string,
+  bangDataAsset: string,
+  fallbackAsset: string
+): string {
+  return configureFallbackAsset(
+    configureBangDataAsset(html, bangDataAsset),
+    fallbackAsset
+  );
+}
+
+export async function buildControlledBootstrap(
+  bangDataAsset = "/bangs.bin",
+  fallbackAsset = "/fallback.js"
+): Promise<string> {
+  const source = configureRedirectAssets(
+    await Bun.file("src/ui/controlled.html").text(),
+    bangDataAsset,
+    fallbackAsset
+  );
+  return minify(Buffer.from(source), {
+    minify_css: true,
+    minify_js: true,
+  }).toString();
+}
+
 export async function bundleUI(
   allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled(),
-  bangMetaAsset = "/bangs-meta.bin"
+  bangMetaAsset = "/bangs-meta.bin",
+  fallbackNaming = "fallback-[hash].[ext]"
 ) {
-  const [appBuild, benchBuild] = await Promise.all([
+  const [appBuild, benchBuild, fallbackBuild] = await Promise.all([
     Bun.build({
       entrypoints: ["src/ui/app.ts"],
       outdir: DIST_DIR,
@@ -60,8 +96,16 @@ export async function bundleUI(
       target: "browser",
       format: "esm",
     }),
+    Bun.build({
+      entrypoints: ["src/ui/fallback.ts"],
+      outdir: DIST_DIR,
+      naming: fallbackNaming,
+      minify: true,
+      target: "browser",
+      format: "esm",
+    }),
   ]);
-  const builds = [appBuild, benchBuild];
+  const builds = [appBuild, benchBuild, fallbackBuild];
   const failed = builds.filter((build) => !build.success);
   if (failed.length > 0) {
     throw new AggregateError(
@@ -69,9 +113,15 @@ export async function bundleUI(
       "Failed to bundle UI"
     );
   }
+  const fallbackEntry = fallbackBuild.outputs.find(
+    (output) => output.kind === "entry-point"
+  );
+  if (!fallbackEntry) {
+    throw new Error("Fallback build did not emit an entry point");
+  }
   return {
     appOutputs: appBuild.outputs,
-    benchOutputs: benchBuild.outputs,
+    fallbackAsset: `/${basename(fallbackEntry.path)}`,
   };
 }
 
@@ -88,7 +138,8 @@ export async function generateCSS(quiet = false): Promise<void> {
 export async function buildHTMLAssets(
   css: string,
   allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled(),
-  bangDataAsset = "/bangs.bin"
+  bangDataAsset = "/bangs.bin",
+  fallbackAsset = "/fallback.js"
 ): Promise<void> {
   const inlineCSS = (src: string) =>
     src.replace(
@@ -96,9 +147,10 @@ export async function buildHTMLAssets(
       `<style>${css}</style>`
     );
 
-  const indexHtml = configureBangDataAsset(
+  const indexHtml = configureRedirectAssets(
     await Bun.file("src/ui/index.html").text(),
-    bangDataAsset
+    bangDataAsset,
+    fallbackAsset
   );
   await Bun.write(
     `${DIST_DIR}/index.html`,
@@ -129,10 +181,16 @@ export async function buildHTMLAssets(
 
 export async function assembleUIAssets(
   allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled(),
-  bangDataAsset = "/bangs.bin"
+  bangDataAsset = "/bangs.bin",
+  fallbackAsset = "/fallback.js"
 ): Promise<void> {
   const css = await Bun.file(`${DIST_DIR}/styles.css`).text();
-  await buildHTMLAssets(css, allowUnsafeCustomSuggestUrls, bangDataAsset);
+  await buildHTMLAssets(
+    css,
+    allowUnsafeCustomSuggestUrls,
+    bangDataAsset,
+    fallbackAsset
+  );
   await copyStaticAssets();
 }
 

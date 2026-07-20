@@ -33,3 +33,18 @@ export function pageHeaders(scriptSrc: string): Record<string, string> {
     ...BASE_HEADERS,
   };
 }
+
+export function controlledPageHeaders(
+  scriptSrc: string
+): Record<string, string> {
+  return {
+    "Content-Security-Policy": [
+      "default-src 'self'",
+      `script-src 'self'${scriptSrc ? ` ${scriptSrc}` : ""}`,
+      "style-src 'unsafe-inline'",
+      "frame-ancestors 'none'",
+      "base-uri 'none'",
+    ].join("; "),
+    ...BASE_HEADERS,
+  };
+}

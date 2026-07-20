@@ -378,11 +378,15 @@ function readCookieValue(header: string, name: string): string | null {
   const pLen = prefix.length;
   let i = header.indexOf(prefix);
   while (i !== -1) {
-    if (
-      i === 0 ||
-      (header.charCodeAt(i - 2) === 59 && header.charCodeAt(i - 1) === 32)
-    ) {
-      // preceded by '; ' (59=';', 32=' ')
+    let separator = i - 1;
+    while (separator >= 0) {
+      const code = header.charCodeAt(separator);
+      if (code !== 32 && code !== 9) {
+        break;
+      }
+      separator--;
+    }
+    if (separator < 0 || header.charCodeAt(separator) === 59) {
       const end = header.indexOf(";", i + pLen);
       return end === -1
         ? header.substring(i + pLen)

@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { normalize } from "node:path";
 import {
   handleOpenSearchRequest,
@@ -6,12 +5,13 @@ import {
 } from "../src/server/handlers";
 import { pageHeaders, SW_HEADERS } from "../src/server/headers";
 import { readPathname } from "../src/shared/raw-url";
+import { extractInlineScriptHashes } from "./inline-script-hash";
 
 let securityHeaders = pageHeaders("");
 const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const REVALIDATE_CACHE_CONTROL = "public, max-age=0, must-revalidate";
 const HASHED_ASSET_RE =
-  /^\/(?:chunk-[a-z0-9_-]{8,}\.js|bangs(?:-meta)?-[a-f0-9]{8,}\.bin)$/i;
+  /^\/(?:chunk-[a-z0-9_-]{8,}\.js|fallback-[a-z0-9_-]{8,}\.js|bangs(?:-meta)?-[a-f0-9]{8,}\.bin)$/i;
 const DIST_DIR = process.env.DIST_DIR || "dist";
 const DIST_PREFIX = `${DIST_DIR}/`;
 
@@ -58,20 +58,6 @@ export function cacheControlForAsset(assetPath: string): string {
   return HASHED_ASSET_RE.test(assetPath)
     ? IMMUTABLE_CACHE_CONTROL
     : REVALIDATE_CACHE_CONTROL;
-}
-
-export function extractInlineScriptHashes(html: string): string[] {
-  const hashes: string[] = [];
-  for (const match of html.matchAll(
-    /<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/gi
-  )) {
-    if (!match[1]) {
-      continue;
-    }
-    const hash = createHash("sha256").update(match[1]).digest("base64");
-    hashes.push(`'sha256-${hash}'`);
-  }
-  return hashes;
 }
 
 export function staticAssetHeaders(
@@ -186,10 +172,7 @@ async function main(): Promise<void> {
       }
 
       if (pathname === "/bench") {
-        return serveCompressed(staticManifest, req, "/bench.html", {
-          "Cross-Origin-Opener-Policy": "same-origin",
-          "Cross-Origin-Embedder-Policy": "credentialless",
-        })!;
+        return serveCompressed(staticManifest, req, "/bench.html")!;
       }
 
       const path = pathname === "/" ? "/index.html" : pathname;

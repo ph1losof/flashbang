@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { resetDB } from "../src/shared/idb";
+import { REDIRECT_SETTINGS_SNAPSHOT_KEY } from "../src/shared/constants";
+import { openDB, resetDB } from "../src/shared/idb";
 import { DB, SETTINGS_SCHEMA_VERSION } from "../src/ui/db";
 import { resolveSuggestProvider } from "../src/ui/suggest-provider";
-import { installFakeIndexedDb } from "./helpers/fake-indexeddb";
+import { installFakeIndexedDb, reqToPromise } from "./helpers/fake-indexeddb";
 
 let restoreIndexedDb: (() => void) | null = null;
 
@@ -17,7 +18,74 @@ afterEach(() => {
   restoreIndexedDb = null;
 });
 
+async function seedRedirectSnapshot(): Promise<void> {
+  const db = await openDB();
+  await reqToPromise(
+    db
+      .transaction("settings", "readwrite")
+      .objectStore("settings")
+      .put({
+        key: REDIRECT_SETTINGS_SNAPSHOT_KEY,
+        snapshot: {
+          custom: {},
+          defaultBang: "g",
+          luckyProvider: "default",
+          luckyUrl: null,
+        },
+        version: 1,
+      })
+  );
+}
+
+async function hasRedirectSnapshot(): Promise<boolean> {
+  const db = await openDB();
+  return Boolean(
+    await reqToPromise(
+      db
+        .transaction("settings", "readonly")
+        .objectStore("settings")
+        .get(REDIRECT_SETTINGS_SNAPSHOT_KEY)
+    )
+  );
+}
+
 describe("custom bang import and export", () => {
+  test("atomically invalidates snapshots on every redirect settings write", async () => {
+    const db = new DB();
+
+    await seedRedirectSnapshot();
+    await db.setSetting("default-bang", "ddg");
+    expect(await hasRedirectSnapshot()).toBe(false);
+
+    await seedRedirectSnapshot();
+    await db.addCustomBang({
+      trigger: "old",
+      name: "Old",
+      url: "https://example.com/old?q={}",
+    });
+    expect(await hasRedirectSnapshot()).toBe(false);
+
+    await seedRedirectSnapshot();
+    await db.updateCustomBang("old", {
+      trigger: "new",
+      name: "New",
+      url: "https://example.com/new?q={}",
+    });
+    expect(await hasRedirectSnapshot()).toBe(false);
+
+    await seedRedirectSnapshot();
+    await db.removeCustomBang("new");
+    expect(await hasRedirectSnapshot()).toBe(false);
+
+    await seedRedirectSnapshot();
+    await db.importAll({
+      schemaVersion: SETTINGS_SCHEMA_VERSION,
+      settings: { defaultBang: "g" },
+      customBangs: [],
+    });
+    expect(await hasRedirectSnapshot()).toBe(false);
+  });
+
   test("exports the current settings schema version", async () => {
     const db = new DB();
 

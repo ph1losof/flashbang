@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { extractInlineScriptHashes } from "../scripts/inline-script-hash";
 import {
   acceptsBrotli,
   cacheControlForAsset,
-  extractInlineScriptHashes,
   staticAssetHeaders,
 } from "../scripts/start";
 
@@ -24,6 +24,9 @@ describe("production static caching", () => {
       "public, max-age=31536000, immutable"
     );
     expect(cacheControlForAsset("/bangs-meta-0123456789ab.bin")).toBe(
+      "public, max-age=31536000, immutable"
+    );
+    expect(cacheControlForAsset("/fallback-0123456789ab.js")).toBe(
       "public, max-age=31536000, immutable"
     );
     for (const path of [

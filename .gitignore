@@ -1,5 +1,6 @@
 dist/
 dist-e2e/
+dist-*/
 data/*
 test-results/
 profiles/
