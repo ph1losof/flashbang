@@ -38,6 +38,7 @@ const TEST_BANGS: Record<string, UrlParts> = {
   g: ["https://www.google.com/search?q=", ""],
   gh: ["https://github.com/search?q=", "&type=repositories"],
   mdn: ["https://developer.mozilla.org/en-US/search?q=", "&topic=api&topic=js"],
+  so: ["https://stackoverflow.com/search?q=", ""],
   w: ["https://en.wikipedia.org/wiki/Special:Search?search=", ""],
   yt: ["https://www.youtube.com/results?search_query=", ""],
 };
@@ -850,6 +851,97 @@ describe("snap — suffix query @trigger patterns", () => {
     const r = redirect("headphones @zzz", settings());
     expect(r.status).toBe(302);
     expect(loc(r)).toBe("https://www.google.com/search?q=headphones+@zzz");
+  });
+});
+
+describe("snap chains", () => {
+  test("prefix chains preserve target order", () => {
+    expect(redirectUrl("@gh,so,mdn,w service workers", settings())).toBe(
+      "https://www.google.com/search?q=service+workers+(site:github.com+OR+site:stackoverflow.com+OR+site:developer.mozilla.org+OR+site:en.wikipedia.org)"
+    );
+  });
+
+  test("suffix chains use the snap prefix once", () => {
+    expect(redirectUrl("service workers @gh,so,mdn,w", settings())).toBe(
+      "https://www.google.com/search?q=service+workers+(site:github.com+OR+site:stackoverflow.com+OR+site:developer.mozilla.org+OR+site:en.wikipedia.org)"
+    );
+  });
+
+  test("raw chains accept literal and percent-encoded commas", () => {
+    const expected =
+      "https://www.google.com/search?q=workers+(site:github.com+OR+site:stackoverflow.com)";
+    expect(loc(redirectRaw("@gh,so+workers", settings()))).toBe(expected);
+    expect(loc(redirectRaw("%40gh%2Cso+workers", settings()))).toBe(expected);
+    expect(loc(redirectRaw("workers+%40gh%2cso", settings()))).toBe(expected);
+  });
+
+  test("chains support custom bangs and custom snap paths", () => {
+    const docsSnap = compileSnapTarget("docs.example.com/reference")!;
+    const custom: Record<string, CustomUrlParts> = {
+      docs: ["https://search.example.com?q=", "", docsSnap],
+      docsalias: ["https://other.example.com?q=", "", docsSnap],
+    };
+    expect(redirectUrl("@docs,docsalias,gh arrays", settings({ custom }))).toBe(
+      "https://www.google.com/search?q=arrays+(site:docs.example.com/reference+OR+site:github.com)"
+    );
+  });
+
+  test("duplicate normalized targets are removed in first-seen order", () => {
+    const custom: Record<string, CustomUrlParts> = {
+      github: splitUrl("https://github.com/search?q={}"),
+    };
+    expect(redirectUrl("@gh,github,so,gh query", settings({ custom }))).toBe(
+      "https://www.google.com/search?q=query+(site:github.com+OR+site:stackoverflow.com)"
+    );
+  });
+
+  test("a chain containing only one unique target uses one site filter", () => {
+    expect(redirectUrl("@gh,gh query", settings())).toBe(
+      "https://www.google.com/search?q=query+site:github.com"
+    );
+  });
+
+  test("eight targets are accepted", () => {
+    expect(redirectUrl("@b,ddg,g,gh,mdn,so,w,yt query", settings())).toBe(
+      "https://www.google.com/search?q=query+(site:bing.com+OR+site:duckduckgo.com+OR+site:google.com+OR+site:github.com+OR+site:developer.mozilla.org+OR+site:stackoverflow.com+OR+site:en.wikipedia.org+OR+site:youtube.com)"
+    );
+  });
+
+  test("more than eight targets fall back with the original query", () => {
+    expect(redirectUrl("@b,ddg,g,gh,mdn,so,w,yt,gh query", settings())).toBe(
+      "https://www.google.com/search?q=%40b%2Cddg%2Cg%2Cgh%2Cmdn%2Cso%2Cw%2Cyt%2Cgh+query"
+    );
+  });
+
+  test("every trigger must be valid and segments cannot be empty", () => {
+    expect(redirectUrl("@gh,missing query", settings())).toBe(
+      "https://www.google.com/search?q=%40gh%2Cmissing+query"
+    );
+    expect(redirectUrl("@gh,,so query", settings())).toBe(
+      "https://www.google.com/search?q=%40gh%2C%2Cso+query"
+    );
+  });
+
+  test("a bare chain searches its site expression", () => {
+    expect(redirectUrl("@gh,so", settings())).toBe(
+      "https://www.google.com/search?q=(site:github.com+OR+site:stackoverflow.com)"
+    );
+  });
+
+  test("configured snap prefixes work for chains", () => {
+    const customSyntax = settings({
+      syntax: compileTriggerSyntax("$", "~"),
+    });
+    expect(redirectUrl("~gh,so query", customSyntax)).toBe(
+      "https://www.google.com/search?q=query+(site:github.com+OR+site:stackoverflow.com)"
+    );
+    expect(redirectUrl("@gh,so query", customSyntax)).toBe(
+      "https://www.google.com/search?q=%40gh%2Cso+query"
+    );
+  });
+
+  test("chains report the first trigger for frecency", () => {
+    expect(redirectRawTrigger("@gh,so+query", settings())).toBe("gh");
   });
 });
 

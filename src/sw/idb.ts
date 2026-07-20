@@ -67,7 +67,8 @@ export function readRedirectSettings(
   }
 
   if (!redirectSettingsPromise) {
-    redirectSettingsPromise = (async () => {
+    let current: Promise<RedirectSettings>;
+    current = (async () => {
       try {
         await redirectSettingsInvalidationPromise;
         const [settings] = await Promise.all([
@@ -84,8 +85,11 @@ export function readRedirectSettings(
 
       return cachedRedirect as RedirectSettings;
     })().finally(() => {
-      redirectSettingsPromise = null;
+      if (redirectSettingsPromise === current) {
+        redirectSettingsPromise = null;
+      }
     });
+    redirectSettingsPromise = current;
   }
 
   return redirectSettingsPromise;
@@ -140,11 +144,23 @@ function persistFrecencySnapshot(
 }
 
 export function invalidateCache(): Promise<void> {
+  const pending = [
+    redirectSettingsInvalidationPromise,
+    redirectSettingsPromise,
+  ].filter(
+    (promise): promise is Promise<void> | Promise<RedirectSettings> =>
+      promise !== null
+  );
   cachedRedirect = null;
   redirectSettingsPromise = null;
+  redirectSettingsRetryAt = 0;
   resetDB();
-  const invalidating = deleteRedirectSettingsSnapshot().catch(() => {
+  const invalidating = Promise.allSettled(pending).then(async () => {
+    cachedRedirect = null;
     resetDB();
+    await deleteRedirectSettingsSnapshot().catch(() => {
+      resetDB();
+    });
   });
   let current: Promise<void>;
   current = invalidating.finally(() => {

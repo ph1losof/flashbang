@@ -104,23 +104,30 @@ function resolveRedirectViaWorker(
   invalidate = false
 ): Promise<string> {
   return page.evaluate(
-    ({ invalidateCache, redirectQuery }) =>
-      new Promise<string>((resolve, reject) => {
-        const controller = navigator.serviceWorker.controller;
-        if (!controller) {
-          reject(new Error("service worker controller not found"));
-          return;
-        }
+    async ({ invalidateCache, redirectQuery }) => {
+      const controller = navigator.serviceWorker.controller;
+      if (!controller) {
+        throw new Error("service worker controller not found");
+      }
+      if (invalidateCache) {
+        await new Promise<void>((resolve) => {
+          const channel = new MessageChannel();
+          channel.port1.addEventListener("message", () => resolve(), {
+            once: true,
+          });
+          channel.port1.start();
+          controller.postMessage({ type: "invalidate" }, [channel.port2]);
+        });
+      }
+      return new Promise<string>((resolve) => {
         navigator.serviceWorker.addEventListener(
           "message",
           (event) => resolve(event.data.url),
           { once: true }
         );
-        if (invalidateCache) {
-          controller.postMessage({ type: "invalidate" });
-        }
         controller.postMessage({ type: "redirect", query: redirectQuery });
-      }),
+      });
+    },
     { invalidateCache: invalidate, redirectQuery: query }
   );
 }
@@ -542,6 +549,21 @@ test("homepage bang finder supports suffix bang and snap selection", async ({
   await input.press("Control+y");
   await expect(selectedBang).toContainText("@gh");
   await expect(input).toHaveValue("Hello World");
+});
+
+test("homepage bang finder limits chain suggestions to snaps", async ({
+  page,
+}) => {
+  await openHome(page);
+  const input = page.locator("#bang-command-input");
+  const results = page.locator("#bang-command-results");
+
+  await input.fill("!gh,");
+  await expect(results).toBeHidden();
+
+  await input.fill("@gh,g");
+  await expect(results).toBeVisible();
+  await expect(results.locator("code").first()).toContainText("@gh,g");
 });
 
 test("compact address-bar setup exposes browser instructions and copyable URLs", async ({
@@ -1495,8 +1517,11 @@ test("warm redirect uses lucky URL for trailing bare bang", async ({
   page,
 }) => {
   await ensureWarmController(page);
-  await openHome(page);
-  const resolved = await resolveRedirectViaWorker(page, "hello !");
+  await openSettingsModal(page);
+  const writeCount = await settingsWriteCount(page);
+  await page.selectOption("#lucky-provider", "google");
+  await waitForSettingsWrite(page, writeCount);
+  const resolved = await resolveRedirectViaWorker(page, "hello !", true);
   const redirected = new URL(resolved);
   expect(redirected.hostname).toBe("www.google.com");
   expect(redirected.pathname).toBe("/search");

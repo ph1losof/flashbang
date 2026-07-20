@@ -75,6 +75,7 @@ flashbang/
 │   │   ├── idb.ts             # Shared IndexedDB open helper
 │   │   ├── raw-query.ts       # Raw query string parsing
 │   │   ├── raw-url.ts         # Raw URL pathname and origin parsing
+│   │   ├── snap-chain.ts      # Snap-chain limits and partial-segment parsing
 │   │   ├── snap-target.ts     # Alternate snap target validation and compilation
 │   │   ├── suggest-cookie.ts  # Unified suggestion cookie codec
 │   │   ├── trigger-prefix.ts  # Configurable bang/snap prefix codec

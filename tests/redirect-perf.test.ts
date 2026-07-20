@@ -29,6 +29,10 @@ function settings(): RedirectSettings {
       tw: ["https://twitter.com/", ""],
       tr: CAPTURE_URL,
       docs: ["https://search.example.com?q=", "", SNAP_TARGET],
+      gh: ["https://github.com/search?q=", ""],
+      mdn: ["https://developer.mozilla.org/search?q=", ""],
+      so: ["https://stackoverflow.com/search?q=", ""],
+      w: ["https://en.wikipedia.org/search?q=", ""],
     },
     luckyUrl: LUCKY_URL,
   };
@@ -71,6 +75,16 @@ describe("redirect performance regression", () => {
 
   test("suffix snap redirect stays under 0.005ms", () => {
     const ms = benchRedirectRaw("kittens+@g");
+    expect(ms).toBeLessThan(0.005);
+  });
+
+  test("four-target prefix snap chain stays under 0.005ms", () => {
+    const ms = benchRedirectRaw("@gh,so,mdn,w+service+workers");
+    expect(ms).toBeLessThan(0.005);
+  });
+
+  test("four-target suffix snap chain stays under 0.005ms", () => {
+    const ms = benchRedirectRaw("service+workers+@gh,so,mdn,w");
     expect(ms).toBeLessThan(0.005);
   });
 

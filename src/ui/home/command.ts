@@ -1,3 +1,4 @@
+import { parsePartialSnapChain } from "../../shared/snap-chain";
 import {
   DEFAULT_BANG_PREFIX,
   DEFAULT_SNAP_PREFIX,
@@ -55,10 +56,41 @@ export function setupBangCommand(db: DB): BangCommandController {
   }
 
   function commandParts(): {
+    chainPrefix?: string;
     marker: TriggerPrefix;
     search: string;
+    selectedTriggers?: readonly string[];
     terms: string;
   } | null {
+    function parts(
+      marker: TriggerPrefix,
+      search: string,
+      terms: string
+    ): {
+      chainPrefix?: string;
+      marker: TriggerPrefix;
+      search: string;
+      selectedTriggers?: readonly string[];
+      terms: string;
+    } | null {
+      if (search.includes(",")) {
+        if (marker !== snapPrefix) {
+          return null;
+        }
+        const chain = parsePartialSnapChain(search);
+        return chain
+          ? {
+              marker,
+              search: chain.partial,
+              terms,
+              chainPrefix: chain.chainPrefix,
+              selectedTriggers: chain.selectedTriggers,
+            }
+          : null;
+      }
+      return { marker, search: search.toLowerCase(), terms };
+    }
+
     const value = input.value.trimStart();
     if (!value) {
       return null;
@@ -66,9 +98,7 @@ export function setupBangCommand(db: DB): BangCommandController {
     const leadingMarker = value.charAt(0);
     if (leadingMarker === bangPrefix || leadingMarker === snapPrefix) {
       const search = value.substring(1);
-      return /\s/.test(search)
-        ? null
-        : { marker: leadingMarker, search: search.toLowerCase(), terms: "" };
+      return /\s/.test(search) ? null : parts(leadingMarker, search, "");
     }
 
     const bangIndex = value.lastIndexOf(` ${bangPrefix}`);
@@ -79,11 +109,7 @@ export function setupBangCommand(db: DB): BangCommandController {
       const search = value.substring(markerIndex + 2);
       return /\s/.test(search)
         ? null
-        : {
-            marker,
-            search: search.toLowerCase(),
-            terms: value.substring(0, markerIndex).trim(),
-          };
+        : parts(marker, search, value.substring(0, markerIndex).trim());
     }
 
     const search = value.toLowerCase().trim();
@@ -118,19 +144,31 @@ export function setupBangCommand(db: DB): BangCommandController {
     renderSelection(previous);
   }
 
-  function select(entry: BangMeta, marker: TriggerPrefix, terms: string): void {
-    selectedCommand = { marker, trigger: entry.trigger };
-    selectedBadgeText.textContent = `${marker}${entry.trigger}`;
+  function select(
+    entry: BangMeta,
+    marker: TriggerPrefix,
+    terms: string,
+    trigger = entry.trigger
+  ): void {
+    selectedCommand = { marker, trigger };
+    selectedBadgeText.textContent = `${marker}${trigger}`;
+    let kind = "bang";
+    if (marker === snapPrefix) {
+      kind = trigger.includes(",") ? "snap chain" : "snap";
+    }
     selectedBadge.setAttribute(
       "aria-label",
-      `Remove ${marker}${entry.trigger} ${entry.name} bang`
+      `Remove ${marker}${trigger} ${kind}`
     );
-    selectedBadge.title = `Remove ${marker}${entry.trigger}`;
+    selectedBadge.title = `Remove ${marker}${trigger}`;
     selectedBadge.classList.remove("hidden");
     selectedBadge.classList.add("flex");
     input.style.paddingLeft = `${selectedBadge.offsetWidth + 16}px`;
     input.value = terms;
-    input.placeholder = `Search with ${entry.name}`;
+    input.placeholder =
+      kind === "snap chain"
+        ? "Search this snap chain"
+        : `Search with ${entry.name}`;
     closeResults();
     input.focus();
   }
@@ -159,9 +197,15 @@ export function setupBangCommand(db: DB): BangCommandController {
       closeResults();
       return;
     }
-    visible = parts.search
-      ? searchBangs(entries, parts.search, 7)
-      : entries.slice(0, 7);
+    const resultLimit = 7 + (parts.selectedTriggers?.length ?? 0);
+    const matches = parts.search
+      ? searchBangs(entries, parts.search, resultLimit)
+      : entries.slice(0, resultLimit);
+    visible = parts.selectedTriggers
+      ? matches
+          .filter((entry) => !parts.selectedTriggers?.includes(entry.trigger))
+          .slice(0, 7)
+      : matches;
     selected = visible.length > 0 ? 0 : -1;
     optionElements = [];
 
@@ -187,7 +231,7 @@ export function setupBangCommand(db: DB): BangCommandController {
           el(
             "code",
             "command-badge min-w-16 rounded-md px-2 py-0.5 text-center font-mono text-xs font-semibold",
-            `${parts.marker}${entry.trigger}`
+            `${parts.marker}${parts.chainPrefix ?? ""}${entry.trigger}`
           ),
           el("span", "min-w-0 flex-1 truncate text-sm font-medium", entry.name),
           el(
@@ -200,7 +244,12 @@ export function setupBangCommand(db: DB): BangCommandController {
           setSelection(index);
         });
         row.addEventListener("click", () =>
-          select(entry, parts.marker, parts.terms)
+          select(
+            entry,
+            parts.marker,
+            parts.terms,
+            `${parts.chainPrefix ?? ""}${entry.trigger}`
+          )
         );
         return row;
       });
@@ -349,7 +398,12 @@ export function setupBangCommand(db: DB): BangCommandController {
       if (parts) {
         event.preventDefault();
         event.stopPropagation();
-        select(visible[selected], parts.marker, parts.terms);
+        select(
+          visible[selected],
+          parts.marker,
+          parts.terms,
+          `${parts.chainPrefix ?? ""}${visible[selected].trigger}`
+        );
       }
     }
   });

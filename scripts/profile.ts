@@ -683,12 +683,29 @@ const SUGGEST_ITERS = iterations(100_000);
 const SUGGEST_PREFIX_ITERS = iterations(20_000);
 const emptyFrecency: Record<string, number> = Object.create(null);
 const emptyCustom: string[] = [];
+const snapChainSelected = ["gh", "so"] as const;
 
 const trieSuggestRunStats = bench(
   SUGGEST_ITERS,
   (i) => {
     const p = suggestPartials[i % suggestPartials.length];
     void bangSuggestions(`!${p}`, "", p, emptyFrecency, emptyCustom);
+  },
+  1_000
+);
+const snapChainSuggestStats = bench(
+  SUGGEST_ITERS,
+  () => {
+    void bangSuggestions(
+      "@gh,so,m",
+      "",
+      "m",
+      emptyFrecency,
+      emptyCustom,
+      "@",
+      "gh,so,",
+      snapChainSelected
+    );
   },
   1_000
 );
@@ -700,6 +717,9 @@ console.log(`  p90:    ${fmt(trieSuggestRunStats.p90)}/suggest`);
 console.log(`  p99:    ${fmt(trieSuggestRunStats.p99)}/suggest`);
 console.log(
   `  Spread: ${fmt(trieSuggestRunStats.min)}..${fmt(trieSuggestRunStats.max)} (cv ${trieSuggestRunStats.cvPct.toFixed(1)}%)`
+);
+console.log(
+  `  Snap chain: ${fmt(snapChainSuggestStats.p50)} median, ${fmt(snapChainSuggestStats.p90)} p90`
 );
 
 const WALK_PREFIX_ITERS = iterations(500_000);
@@ -848,6 +868,8 @@ const queries = [
   { label: "Custom capture", raw: "!tr+japanese+hello+world" },
   { label: "Built-in ad snap", raw: "@hn+kittens" },
   { label: "Custom target snap", raw: "@docs+kittens" },
+  { label: "Prefix snap chain", raw: "@gh,so,mdn,w+service+workers" },
+  { label: "Suffix snap chain", raw: "service+workers+@gh,so,mdn,w" },
 ];
 
 const REDIRECT_ITERS = iterations(500_000);
@@ -870,6 +892,8 @@ const bangRedirect = redirectStats.get("Prefix bang");
 const nonBangRedirect = redirectStats.get("No bang (default)");
 const prefixSnapRedirect = redirectStats.get("Prefix snap");
 const suffixSnapRedirect = redirectStats.get("Suffix snap");
+const prefixSnapChainRedirect = redirectStats.get("Prefix snap chain");
+const suffixSnapChainRedirect = redirectStats.get("Suffix snap chain");
 const builtInCaptureRedirect = redirectStats.get("Built-in capture");
 const customCaptureRedirect = redirectStats.get("Custom capture");
 const builtInAdSnapRedirect = redirectStats.get("Built-in ad snap");
@@ -880,6 +904,8 @@ if (
     nonBangRedirect &&
     prefixSnapRedirect &&
     suffixSnapRedirect &&
+    prefixSnapChainRedirect &&
+    suffixSnapChainRedirect &&
     builtInCaptureRedirect &&
     customCaptureRedirect &&
     builtInAdSnapRedirect &&
@@ -1540,6 +1566,18 @@ const summaryRows: ProfileMetric[] = [
     suffixSnapRedirect
   ),
   metric(
+    "redirect.prefix-snap-chain",
+    "Full redirect (prefix snap chain)",
+    "Per redirect",
+    prefixSnapChainRedirect
+  ),
+  metric(
+    "redirect.suffix-snap-chain",
+    "Full redirect (suffix snap chain)",
+    "Per redirect",
+    suffixSnapChainRedirect
+  ),
+  metric(
     "redirect.capture-built-in",
     "Built-in capture redirect",
     "Per redirect",
@@ -1568,6 +1606,12 @@ const summaryRows: ProfileMetric[] = [
     "bangSuggestions pipeline",
     "Per suggest",
     trieSuggestRunStats
+  ),
+  metric(
+    "suggest.snap-chain",
+    "Snap-chain suggestions",
+    "Per suggest",
+    snapChainSuggestStats
   ),
   metric(
     "suggest.handler-bang",

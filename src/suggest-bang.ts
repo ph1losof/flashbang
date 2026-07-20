@@ -105,6 +105,22 @@ function effectiveScore(
   );
 }
 
+function includesTrigger(
+  triggers: readonly string[] | null,
+  trigger: string
+): boolean {
+  if (!triggers) {
+    return false;
+  }
+  let i = 0;
+  while (i < triggers.length) {
+    if (triggers[i++] === trigger) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function walkPrefix(partial: string): [number, string] | null {
   let node = ROOT;
   let pos = 0;
@@ -171,7 +187,8 @@ function topK(
   subtree: number,
   frecent: Record<string, number>,
   customMatches: Candidate[],
-  hasFrecent: boolean
+  hasFrecent: boolean,
+  excluded: readonly string[] | null
 ): number {
   let minIdx = -1;
   let threshold = -1;
@@ -216,19 +233,37 @@ function topK(
     const terminalIndex = NODES[nodeOff + NODE_TERMINAL_INDEX];
 
     if (terminalIndex >= 0) {
-      const score = hasFrecent
-        ? effectiveScore(
-            TERM_R[terminalIndex],
-            frecent,
-            readTerminalTrigger(terminalIndex)
-          )
-        : TERM_R[terminalIndex];
-      if (resultLen < TOP_K || score > threshold) {
-        if (resultLen < TOP_K) {
-          RESULT_IDX[resultLen] = terminalIndex;
-          RESULT_SCORE[resultLen] = score;
-          resultLen++;
-          if (resultLen === TOP_K) {
+      let trigger: string | undefined;
+      let isExcluded = false;
+      if (excluded) {
+        trigger = readTerminalTrigger(terminalIndex);
+        isExcluded = includesTrigger(excluded, trigger);
+      }
+      if (!isExcluded) {
+        const score = hasFrecent
+          ? effectiveScore(
+              TERM_R[terminalIndex],
+              frecent,
+              trigger ?? readTerminalTrigger(terminalIndex)
+            )
+          : TERM_R[terminalIndex];
+        if (resultLen < TOP_K || score > threshold) {
+          if (resultLen < TOP_K) {
+            RESULT_IDX[resultLen] = terminalIndex;
+            RESULT_SCORE[resultLen] = score;
+            resultLen++;
+            if (resultLen === TOP_K) {
+              minIdx = 0;
+              for (let i = 1; i < TOP_K; i++) {
+                if (RESULT_SCORE[i] < RESULT_SCORE[minIdx]) {
+                  minIdx = i;
+                }
+              }
+              threshold = RESULT_SCORE[minIdx];
+            }
+          } else {
+            RESULT_IDX[minIdx] = terminalIndex;
+            RESULT_SCORE[minIdx] = score;
             minIdx = 0;
             for (let i = 1; i < TOP_K; i++) {
               if (RESULT_SCORE[i] < RESULT_SCORE[minIdx]) {
@@ -237,16 +272,6 @@ function topK(
             }
             threshold = RESULT_SCORE[minIdx];
           }
-        } else {
-          RESULT_IDX[minIdx] = terminalIndex;
-          RESULT_SCORE[minIdx] = score;
-          minIdx = 0;
-          for (let i = 1; i < TOP_K; i++) {
-            if (RESULT_SCORE[i] < RESULT_SCORE[minIdx]) {
-              minIdx = i;
-            }
-          }
-          threshold = RESULT_SCORE[minIdx];
         }
       }
     }
@@ -291,17 +316,18 @@ export function profileTopKCount(
   frecent: Record<string, number>,
   hasFrecent: boolean
 ): number {
-  return topK(subtree, frecent, [], hasFrecent);
+  return topK(subtree, frecent, [], hasFrecent, null);
 }
 
 export function responseFromCandidates(
   query: string,
   prefix: string,
   candidates: Candidate[],
-  triggerChar = "!"
+  triggerChar = "!",
+  chainPrefix = ""
 ): Response {
   const len = candidates.length;
-  const prefixBang = `${prefix}${triggerChar}`;
+  const prefixBang = `${prefix}${triggerChar}${chainPrefix}`;
   const completions = new Array<string>(len);
   const descriptions = new Array<string>(len);
   const urls = new Array<string>(len);
@@ -341,9 +367,10 @@ function responseFromRanked(
   prefix: string,
   customMatches: Candidate[],
   resultLen: number,
-  triggerChar = "!"
+  triggerChar = "!",
+  chainPrefix = ""
 ): Response {
-  const prefixBang = `${prefix}${triggerChar}`;
+  const prefixBang = `${prefix}${triggerChar}${chainPrefix}`;
   const completions = new Array<string>(resultLen);
   const descriptions = new Array<string>(resultLen);
   const urls = new Array<string>(resultLen);
@@ -386,9 +413,19 @@ export function bangSuggestions(
   partial: string,
   frecent: Record<string, number>,
   custom: string[],
-  triggerChar = "!"
+  triggerChar = "!",
+  chainPrefix = "",
+  selectedTriggers: readonly string[] = []
 ): Response {
   const result = walkPrefix(partial);
+  let excluded: readonly string[] | null = null;
+  let selectedIndex = 0;
+  while (selectedIndex < selectedTriggers.length) {
+    if (selectedTriggers[selectedIndex++].startsWith(partial)) {
+      excluded = selectedTriggers;
+      break;
+    }
+  }
   let hasFrecent = false;
   for (const _ in frecent) {
     hasFrecent = true;
@@ -400,6 +437,9 @@ export function bangSuggestions(
   if (custom.length > 0) {
     const upperBound = `${partial}\uFFFF`;
     for (const trigger of custom) {
+      if (includesTrigger(excluded, trigger)) {
+        continue;
+      }
       if (!trigger.startsWith(partial)) {
         if (trigger > upperBound) {
           break;
@@ -422,16 +462,23 @@ export function bangSuggestions(
     if (customMatches.length > TOP_K) {
       customMatches.length = TOP_K;
     }
-    return responseFromCandidates(query, prefix, customMatches, triggerChar);
+    return responseFromCandidates(
+      query,
+      prefix,
+      customMatches,
+      triggerChar,
+      chainPrefix
+    );
   }
 
   const [subtree] = result;
-  const resultLen = topK(subtree, frecent, customMatches, hasFrecent);
+  const resultLen = topK(subtree, frecent, customMatches, hasFrecent, excluded);
   return responseFromRanked(
     query,
     prefix,
     customMatches,
     resultLen,
-    triggerChar
+    triggerChar,
+    chainPrefix
   );
 }
