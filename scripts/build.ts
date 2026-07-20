@@ -8,6 +8,7 @@ import {
   SW_CSP,
 } from "../src/server/headers";
 import { ensureGeneratedBangData } from "./codegen";
+import { extractInlineScriptHashes } from "./inline-script-hash";
 import {
   assembleUIAssets,
   buildControlledBootstrap,
@@ -18,19 +19,6 @@ import {
 } from "./shared";
 
 const PRELIMINARY_SW_PATH = `${DIST_DIR}/sw-cache-input.js`;
-
-function extractScriptHashes(html: string): string[] {
-  const hashes: string[] = [];
-  const re = /<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/gi;
-  for (const match of html.matchAll(re)) {
-    if (match[1]) {
-      hashes.push(
-        `'sha256-${createHash("sha256").update(match[1]).digest("base64")}'`
-      );
-    }
-  }
-  return hashes;
-}
 
 export interface CacheVersionInput {
   bytes: Uint8Array;
@@ -60,16 +48,16 @@ export function createCacheVersion(
 
 export function precacheFileInputs(
   requiredAppAssets: readonly string[],
-  bangDataAsset = "/bangs.bin"
+  bangDataAsset = "/bangs.bin",
+  fallbackAsset = "/fallback.js"
 ): ReadonlyArray<readonly [assetPath: string, filePath: string]> {
   return [
     [bangDataAsset, `${DIST_DIR}${bangDataAsset}`],
-    ["/index.html", `${DIST_DIR}/index.html`],
     ["/home", `${DIST_DIR}/home.html`],
     ["/bench", `${DIST_DIR}/bench.html`],
     ["/bench.js", `${DIST_DIR}/bench.js`],
     ["/app.js", `${DIST_DIR}/app.js`],
-    ["/fallback.js", `${DIST_DIR}/fallback.js`],
+    [fallbackAsset, `${DIST_DIR}${fallbackAsset}`],
     ["/icon.svg", `${DIST_DIR}/icon.svg`],
     ["/manifest.json", `${DIST_DIR}/manifest.json`],
     ...requiredAppAssets.map(
@@ -96,6 +84,7 @@ async function bundleServiceWorker(
   cacheVersion: string,
   requiredAppAssets: readonly string[],
   bangDataAsset: string,
+  fallbackAsset: string,
   controlledHtml: string,
   controlledHeaders: Record<string, string>
 ): Promise<void> {
@@ -108,6 +97,7 @@ async function bundleServiceWorker(
     format: "esm",
     define: {
       __BANG_DATA_ASSET__: JSON.stringify(bangDataAsset),
+      __FALLBACK_ASSET__: JSON.stringify(fallbackAsset),
       __CACHE_VERSION__: JSON.stringify(cacheVersion),
       __REQUIRED_APP_ASSETS__: JSON.stringify(requiredAppAssets),
       __CONTROLLED_HTML__: JSON.stringify(controlledHtml),
@@ -146,10 +136,9 @@ async function main(): Promise<void> {
   await Bun.write(`${DIST_DIR}${bangMetaAsset}`, bangMetaBytes);
 
   console.log("=== Bundle app + bench (to discover chunks) ===");
-  const { appOutputs } = await bundleUI(
+  const { appOutputs, fallbackAsset } = await bundleUI(
     allowUnsafeCustomSuggestUrls,
-    bangMetaAsset,
-    bangDataAsset
+    bangMetaAsset
   );
   const requiredAppAssets = [
     ...requiredAppAssetPaths(appOutputs),
@@ -164,7 +153,11 @@ async function main(): Promise<void> {
   await generateCSS();
 
   console.log("=== Inline CSS + minify HTML ===");
-  await assembleUIAssets(allowUnsafeCustomSuggestUrls, bangDataAsset);
+  await assembleUIAssets(
+    allowUnsafeCustomSuggestUrls,
+    bangDataAsset,
+    fallbackAsset
+  );
   await rm(`${DIST_DIR}/styles.css`);
 
   const [distIndex, distHome, distBench] = await Promise.all(
@@ -173,10 +166,13 @@ async function main(): Promise<void> {
     )
   );
   const scriptHashes = [distIndex, distHome, distBench].flatMap(
-    extractScriptHashes
+    extractInlineScriptHashes
   );
-  const controlledHtml = await buildControlledBootstrap(bangDataAsset);
-  const controlledScriptHashes = extractScriptHashes(controlledHtml);
+  const controlledHtml = await buildControlledBootstrap(
+    bangDataAsset,
+    fallbackAsset
+  );
+  const controlledScriptHashes = extractInlineScriptHashes(controlledHtml);
   const controlledHeaders = {
     "Content-Type": "text/html; charset=utf-8",
     ...controlledPageHeaders(controlledScriptHashes.join(" ")),
@@ -190,11 +186,12 @@ async function main(): Promise<void> {
     "fb-cache-version-input",
     requiredAppAssets,
     bangDataAsset,
+    fallbackAsset,
     controlledHtml,
     controlledHeaders
   );
   const cacheInputs: CacheVersionInput[] = await Promise.all(
-    precacheFileInputs(requiredAppAssets, bangDataAsset).map(
+    precacheFileInputs(requiredAppAssets, bangDataAsset, fallbackAsset).map(
       async ([assetPath, filePath]) => ({
         path: assetPath,
         bytes: await Bun.file(filePath).bytes(),
@@ -215,6 +212,7 @@ async function main(): Promise<void> {
     cacheVersion,
     requiredAppAssets,
     bangDataAsset,
+    fallbackAsset,
     controlledHtml,
     controlledHeaders
   );
@@ -257,6 +255,9 @@ async function main(): Promise<void> {
       "  Cache-Control: public, max-age=31536000, immutable",
       "",
       bangMetaAsset,
+      "  Cache-Control: public, max-age=31536000, immutable",
+      "",
+      fallbackAsset,
       "  Cache-Control: public, max-age=31536000, immutable",
       "",
       "/opensearch.xml",

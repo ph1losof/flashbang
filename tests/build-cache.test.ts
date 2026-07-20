@@ -7,6 +7,7 @@ import {
 import {
   configureBangDataAsset,
   configureCustomSuggestOption,
+  configureFallbackAsset,
   customSuggestUrlsEnabled,
 } from "../scripts/shared";
 
@@ -49,7 +50,6 @@ describe("build cache version", () => {
   test("maps every concrete core and chunk precache input", () => {
     expect(precacheFileInputs(["/chunk-abc12345.js"])).toEqual([
       ["/bangs.bin", "dist/bangs.bin"],
-      ["/index.html", "dist/index.html"],
       ["/home", "dist/home.html"],
       ["/bench", "dist/bench.html"],
       ["/bench.js", "dist/bench.js"],
@@ -66,6 +66,16 @@ describe("build cache version", () => {
       "/bangs-0123456789ab.bin",
       "dist/bangs-0123456789ab.bin",
     ]);
+  });
+
+  test("maps a content-hashed fallback asset", () => {
+    expect(
+      precacheFileInputs(
+        [],
+        "/bangs-0123456789ab.bin",
+        "/fallback-abcdef123456.js"
+      )[5]
+    ).toEqual(["/fallback-abcdef123456.js", "dist/fallback-abcdef123456.js"]);
   });
 
   test("requires every app dependency regardless of output size", () => {
@@ -116,5 +126,14 @@ describe("bang data asset injection", () => {
         "/bangs-0123456789ab.bin"
       )
     ).toBe('<link href="/bangs-0123456789ab.bin">');
+  });
+
+  test("replaces the generated fallback path marker", () => {
+    expect(
+      configureFallbackAsset(
+        '<script src="__FALLBACK_ASSET__"></script>',
+        "/fallback-0123456789ab.js"
+      )
+    ).toBe('<script src="/fallback-0123456789ab.js"></script>');
   });
 });

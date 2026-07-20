@@ -188,8 +188,10 @@ describe("sw/idb redirect settings", () => {
   });
 
   test("returns safe defaults when IndexedDB is unavailable", async () => {
+    let attempts = 0;
     (globalThis as { indexedDB?: unknown }).indexedDB = {
       open() {
+        attempts++;
         throw new Error("boom");
       },
     };
@@ -203,6 +205,7 @@ describe("sw/idb redirect settings", () => {
     expect(settings.defaultUrl[0]).toContain("google.com/search?q=");
     expect(settings.luckyUrl?.[0]).toContain("duckduckgo.com/?q=");
     expect(settings.custom).toEqual(Object.create(null));
+    expect(attempts).toBe(1);
   });
 
   test("compiles custom capture bangs once while loading settings", async () => {

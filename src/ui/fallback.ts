@@ -1,10 +1,14 @@
+import { resetDB } from "../shared/idb";
 import { initializeBangData } from "../sw/bang-data";
-import { readRedirectSettings } from "../sw/idb";
 import {
   type RedirectSettings,
   redirectRawUrl,
   redirectUrl,
 } from "../sw/redirect";
+import {
+  defaultRedirectSettings,
+  loadRedirectSettings,
+} from "../sw/redirect-settings";
 
 export async function resolveFallback(
   query: string,
@@ -12,7 +16,13 @@ export async function resolveFallback(
   raw = false
 ): Promise<{ settings: RedirectSettings; url: string }> {
   initializeBangData(bangData);
-  const settings = await readRedirectSettings();
+  let settings: RedirectSettings;
+  try {
+    settings = (await loadRedirectSettings()).settings;
+  } catch {
+    resetDB();
+    settings = defaultRedirectSettings();
+  }
   return {
     settings,
     url: raw ? redirectRawUrl(query, settings) : redirectUrl(query, settings),

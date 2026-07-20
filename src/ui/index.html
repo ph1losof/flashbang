@@ -50,7 +50,7 @@
             }
             return response.arrayBuffer();
           }),
-          import("/fallback.js"),
+          import("__FALLBACK_ASSET__"),
         ])
           .then(async ([data, { resolveFallback }]) => {
             const { settings, url } = await resolveFallback(
@@ -103,8 +103,6 @@
           { type: "redirect", rawQuery: query },
           [channel.port2]
         );
-      } else if (privateQuery) {
-        fallback();
       } else if (query) {
         fallback();
       } else if ("serviceWorker" in navigator) {

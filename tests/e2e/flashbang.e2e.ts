@@ -1674,11 +1674,22 @@ test("first fallback seeds the worker for the next offline redirect", async ({
     const probe = await context.newPage();
     await mockGoogleSearchRoute(probe);
     await probe.goto("/health");
-    await probe.waitForFunction(
-      () =>
-        "serviceWorker" in navigator &&
-        navigator.serviceWorker.controller !== null
-    );
+    await probe.evaluate(async () => {
+      const registration = await navigator.serviceWorker.ready;
+      if (navigator.serviceWorker.controller) {
+        return;
+      }
+      registration.active?.postMessage({ type: "claim" });
+      await new Promise<void>((resolve) => {
+        navigator.serviceWorker.addEventListener(
+          "controllerchange",
+          () => resolve(),
+          {
+            once: true,
+          }
+        );
+      });
+    });
     await expect
       .poll(() =>
         probe.evaluate(async () => {
@@ -1928,7 +1939,7 @@ test("redirect falls back safely when IndexedDB cannot be opened", async ({
   }
 });
 
-test("worker activation creates its cache and removes the old cache", async ({
+test("worker retains the old cache until current assets are complete", async ({
   browserName,
   context,
   page,
@@ -1952,20 +1963,77 @@ test("worker activation creates its cache and removes the old cache", async ({
   const builtBangMetaAsset = workerSource.match(
     /\/bangs-meta-[a-f0-9]{12}\.bin/
   )?.[0];
+  const builtFallbackAsset = workerSource.match(
+    /\/fallback-[a-z0-9_-]{8,}\.js/i
+  )?.[0];
   expect(builtCacheName).toBeDefined();
   expect(builtBangDataAsset).toBeDefined();
   expect(builtBangMetaAsset).toBeDefined();
+  expect(builtFallbackAsset).toBeDefined();
   expect(indexSource).toContain(builtBangDataAsset!);
+  expect(indexSource).toContain(builtFallbackAsset!);
   const initialCacheName = "fb-e2e-initial";
   const lifecyclePage = await context.newPage();
   await lifecyclePage.goto("/health");
   await lifecyclePage.evaluate(
-    (cacheName) => caches.open(cacheName),
-    initialCacheName
+    async ({ bangDataAsset, cacheName }) => {
+      const cache = await caches.open(cacheName);
+      await Promise.all([
+        cache.put("/atomic-old-asset", new Response("old-cache")),
+        fetch(bangDataAsset).then((response) =>
+          cache.put(bangDataAsset, response)
+        ),
+      ]);
+    },
+    { cacheName: initialCacheName, bangDataAsset: builtBangDataAsset! }
   );
   await expect
     .poll(() => lifecyclePage.evaluate(() => caches.keys()))
     .toContain(initialCacheName);
+
+  await lifecyclePage.evaluate(async () => {
+    await navigator.serviceWorker.register("/sw.js");
+    await navigator.serviceWorker.ready;
+    if (!navigator.serviceWorker.controller) {
+      await new Promise<void>((resolve) => {
+        navigator.serviceWorker.addEventListener(
+          "controllerchange",
+          () => resolve(),
+          {
+            once: true,
+          }
+        );
+      });
+    }
+  });
+  expect(await lifecyclePage.evaluate(() => caches.keys())).toContain(
+    initialCacheName
+  );
+
+  await context.setOffline(true);
+  try {
+    await lifecyclePage.evaluate(() =>
+      fetch("/?q=%21g%20atomic", { redirect: "manual" })
+    );
+    await expect
+      .poll(() =>
+        lifecyclePage.evaluate(
+          async ({ assetPath, cacheName }) => {
+            const cache = await caches.open(cacheName);
+            return Boolean(await cache.match(assetPath));
+          },
+          { cacheName: builtCacheName!, assetPath: builtBangDataAsset! }
+        )
+      )
+      .toBe(true);
+    await expect(
+      lifecyclePage.evaluate(() =>
+        fetch("/atomic-old-asset").then((response) => response.text())
+      )
+    ).resolves.toBe("old-cache");
+  } finally {
+    await context.setOffline(false);
+  }
 
   await ensureWarmController(page);
   await expect
@@ -1979,6 +2047,17 @@ test("worker activation creates its cache and removes the old cache", async ({
           return Boolean(await cache.match(assetPath));
         },
         { cacheName: builtCacheName!, assetPath: builtBangDataAsset! }
+      )
+    )
+    .toBe(true);
+  await expect
+    .poll(() =>
+      lifecyclePage.evaluate(
+        async ({ assetPath, cacheName }) => {
+          const cache = await caches.open(cacheName);
+          return Boolean(await cache.match(assetPath));
+        },
+        { cacheName: builtCacheName!, assetPath: builtFallbackAsset! }
       )
     )
     .toBe(true);

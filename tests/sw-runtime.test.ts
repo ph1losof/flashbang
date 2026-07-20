@@ -15,6 +15,7 @@ let skipWaitingCalls = 0;
 let claimCalls = 0;
 let cacheDeleteCalls: string[] = [];
 let cachePutCalls: string[] = [];
+let cacheEntries = new Map<string, Map<string, Response>>();
 let fetchCalls: string[] = [];
 let fetchImpl: (input: RequestInfo | URL) => Promise<Response> = () =>
   Promise.resolve(new Response("ok"));
@@ -46,7 +47,20 @@ async function seedDb(data: {
   }
 }
 
-function setupSwGlobals(requiredAppAssets: readonly string[] = []) {
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") {
+    return new URL(input, "https://flashbang.local").href;
+  }
+  if (input instanceof URL) {
+    return input.href;
+  }
+  return input.url;
+}
+
+function setupSwGlobals(
+  requiredAppAssets: readonly string[] = [],
+  preserveCaches = false
+) {
   handlers = {};
   skipWaitingCalls = 0;
   claimCalls = 0;
@@ -54,9 +68,18 @@ function setupSwGlobals(requiredAppAssets: readonly string[] = []) {
   cachePutCalls = [];
   fetchCalls = [];
   fetchImpl = () => Promise.resolve(new Response("ok"));
+  if (!preserveCaches) {
+    cacheEntries = new Map([
+      ["fb-old-cache", new Map()],
+      ["fb-test-cache", new Map()],
+      ["flashbang-dev", new Map()],
+      ["other-cache", new Map()],
+    ]);
+  }
 
   const globals = globalThis as unknown as Record<string, unknown>;
   globals.__BANG_DATA_ASSET__ = "/bangs.bin";
+  globals.__FALLBACK_ASSET__ = "/fallback.js";
   globals.__CACHE_VERSION__ = "test-cache";
   globals.__REQUIRED_APP_ASSETS__ = [...requiredAppAssets];
   globals.__CONTROLLED_HTML__ =
@@ -84,31 +107,41 @@ function setupSwGlobals(requiredAppAssets: readonly string[] = []) {
         return Promise.resolve();
       },
     },
+    location: new URL("https://flashbang.local/sw.js"),
   };
 
   (globalThis as unknown as { caches: unknown }).caches = {
     delete(name: string) {
       cacheDeleteCalls.push(name);
-      return Promise.resolve(true);
+      return Promise.resolve(cacheEntries.delete(name));
     },
     keys() {
-      return Promise.resolve([
-        "fb-old-cache",
-        "fb-test-cache",
-        "flashbang-dev",
-        "other-cache",
-      ]);
+      return Promise.resolve([...cacheEntries.keys()]);
     },
-    match() {
-      return Promise.resolve(null);
+    match(request: RequestInfo | URL) {
+      const url = requestUrl(request);
+      for (const entries of cacheEntries.values()) {
+        const response = entries.get(url);
+        if (response) {
+          return Promise.resolve(response.clone());
+        }
+      }
+      return Promise.resolve(undefined);
     },
-    open() {
+    open(name: string) {
+      let entries = cacheEntries.get(name);
+      if (!entries) {
+        entries = new Map();
+        cacheEntries.set(name, entries);
+      }
       return Promise.resolve({
-        match() {
-          return Promise.resolve(null);
+        match(request: RequestInfo | URL) {
+          return Promise.resolve(entries.get(requestUrl(request))?.clone());
         },
-        put(request: Request) {
-          cachePutCalls.push(new URL(request.url).pathname);
+        put(request: RequestInfo | URL, response: Response) {
+          const url = requestUrl(request);
+          cachePutCalls.push(new URL(url).pathname);
+          entries.set(url, response.clone());
           return Promise.resolve();
         },
       });
@@ -193,8 +226,11 @@ function createFetchEvent(url: string, clientId = "", mode?: RequestMode) {
   };
 }
 
-async function loadSwRuntime(requiredAppAssets: readonly string[] = []) {
-  setupSwGlobals(requiredAppAssets);
+async function loadSwRuntime(
+  requiredAppAssets: readonly string[] = [],
+  preserveCaches = false
+) {
+  setupSwGlobals(requiredAppAssets, preserveCaches);
   await import(`../src/sw/sw.ts?test=${Date.now()}-${Math.random()}`);
 }
 
@@ -240,8 +276,7 @@ describe("sw runtime with real modules", () => {
     await handlers.activate?.(activateEvt.event);
     await Promise.all(activateEvt.waits);
     expect(claimCalls).toBe(1);
-    expect(cacheDeleteCalls).toEqual(["fb-old-cache", "flashbang-dev"]);
-    expect(cacheDeleteCalls).not.toContain("other-cache");
+    expect(cacheDeleteCalls).toEqual([]);
 
     const fetchEvt = createFetchEvent("https://flashbang.local/home");
     await handlers.fetch?.(fetchEvt.event);
@@ -251,14 +286,21 @@ describe("sw runtime with real modules", () => {
     expect(swIdb.getTopFrecencyRecord()).toEqual({ g: 2 });
     expect([...new Set(fetchCalls)].toSorted()).toEqual([
       "/app.js",
-      "/bench",
-      "/bench.js",
       "/chunk-catalog123.js",
       "/fallback.js",
       "/home",
       "/icon.svg",
       "/manifest.json",
     ]);
+    expect(cacheDeleteCalls).toEqual(["fb-old-cache", "flashbang-dev"]);
+    expect(cacheDeleteCalls).not.toContain("other-cache");
+
+    await loadSwRuntime(["/chunk-catalog123.js"], true);
+    const restartFetchEvt = createFetchEvent("https://flashbang.local/home");
+    await handlers.fetch?.(restartFetchEvt.event);
+    await Promise.all(restartFetchEvt.waits);
+    await restartFetchEvt.response();
+    expect(fetchCalls).toEqual([]);
   });
 
   test("seeds bang data and redirect settings without a worker fetch", async () => {
@@ -310,7 +352,11 @@ describe("sw runtime with real modules", () => {
   test("serves the root bootstrap from memory without starting precache", async () => {
     await loadSwRuntime(["/chunk-catalog123.js"]);
 
-    const fetchEvt = createFetchEvent("https://flashbang.local/");
+    const fetchEvt = createFetchEvent(
+      "https://flashbang.local/",
+      "",
+      "navigate"
+    );
     await handlers.fetch?.(fetchEvt.event);
     const response = await fetchEvt.response();
 
@@ -320,6 +366,42 @@ describe("sw runtime with real modules", () => {
     );
     expect(fetchEvt.waits).toHaveLength(0);
     expect(fetchCalls).toEqual([]);
+  });
+
+  test("only serves the root bootstrap for same-origin navigations", async () => {
+    await loadSwRuntime();
+
+    const crossOrigin = createFetchEvent(
+      "https://example.com/",
+      "",
+      "navigate"
+    );
+    await handlers.fetch?.(crossOrigin.event);
+    await Promise.all(crossOrigin.waits);
+    const response = await crossOrigin.response();
+    expect(await response.text()).toBe("ok");
+  });
+
+  test("lets health checks pass through without warming or precaching", async () => {
+    await loadSwRuntime(["/chunk-catalog123.js"]);
+
+    const health = createFetchEvent("https://flashbang.local/health");
+    await handlers.fetch?.(health.event);
+    expect(health.waits).toHaveLength(0);
+    expect(fetchCalls).toEqual([]);
+  });
+
+  test("shares one runtime warm operation across concurrent asset requests", async () => {
+    await loadSwRuntime();
+
+    const first = createFetchEvent("https://flashbang.local/app.js");
+    const second = createFetchEvent("https://flashbang.local/icon.svg");
+    await handlers.fetch?.(first.event);
+    await handlers.fetch?.(second.event);
+
+    expect(first.waits[0]).toBe(second.waits[0]);
+    await Promise.all([...first.waits, ...second.waits]);
+    await Promise.all([first.response(), second.response()]);
   });
 
   test("does not block installation when deferred app precaching fails", async () => {
@@ -344,6 +426,17 @@ describe("sw runtime with real modules", () => {
     await Promise.all(fetchEvt.waits);
     await fetchEvt.response();
     expect(fetchCalls).toContain("/chunk-catalog123.js");
+    expect(cacheDeleteCalls).toEqual([]);
+
+    fetchImpl = () => Promise.resolve(new Response("ok"));
+    const retryEvt = createFetchEvent("https://flashbang.local/home");
+    await handlers.fetch?.(retryEvt.event);
+    await Promise.all(retryEvt.waits);
+    await retryEvt.response();
+    expect(
+      fetchCalls.filter((path) => path === "/chunk-catalog123.js")
+    ).toHaveLength(2);
+    expect(cacheDeleteCalls).toEqual(["fb-old-cache", "flashbang-dev"]);
   });
 
   test("message redirect and invalidate paths work end-to-end", async () => {
@@ -532,5 +625,19 @@ describe("sw runtime with real modules", () => {
         "credentialless"
       );
     }
+  });
+
+  test("caches benchmark assets only after they are requested", async () => {
+    await loadSwRuntime();
+
+    for (let i = 0; i < 2; i++) {
+      const fetchEvt = createFetchEvent("https://flashbang.local/bench");
+      await handlers.fetch?.(fetchEvt.event);
+      await Promise.all(fetchEvt.waits);
+      expect((await fetchEvt.response()).status).toBe(200);
+    }
+
+    expect(fetchCalls.filter((path) => path === "/bench")).toHaveLength(1);
+    expect(cachePutCalls).toContain("/bench");
   });
 });

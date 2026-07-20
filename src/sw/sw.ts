@@ -25,6 +25,7 @@ import {
 
 declare const __CACHE_VERSION__: string;
 declare const __BANG_DATA_ASSET__: string;
+declare const __FALLBACK_ASSET__: string;
 declare const __REQUIRED_APP_ASSETS__: string[];
 declare const __CONTROLLED_HTML__: string;
 declare const __CONTROLLED_HEADERS__: Record<string, string>;
@@ -39,16 +40,17 @@ const BANG_DATA_ASSET = __BANG_DATA_ASSET__;
 const APP_ASSETS = [
   "/home",
   "/app.js",
-  "/fallback.js",
+  __FALLBACK_ASSET__,
   "/icon.svg",
   "/manifest.json",
   ...__REQUIRED_APP_ASSETS__,
 ];
 
-const DEFERRED_ASSETS = [...APP_ASSETS, "/bench", "/bench.js"];
+const DEFERRED_ASSETS = APP_ASSETS;
 const PRECACHE_CONCURRENCY = 4;
 let deferredPrecachePromise: Promise<void> | null = null;
 let bangDataPromise: Promise<void> | null = null;
+let runtimeWarmPromise: Promise<void> | null = null;
 const BENCHMARK_SETTINGS: RedirectSettings = {
   custom: Object.assign(Object.create(null), {
     custom: ["https://benchmark.example/search?q=", ""],
@@ -70,6 +72,18 @@ const swallowError = () => {
 
 const BENCHMARK_TARGET_PATH = "/__flashbang-bench-target";
 const BENCHMARK_TARGET_HTML = `<!doctype html><meta charset="utf-8"><title>flashbang benchmark target</title><script>opener?.postMessage({type:"flashbang-benchmark-navigation",token:new URLSearchParams(location.search).get("fb-bench"),sequence:Number(new URLSearchParams(location.search).get("fb-seq"))},location.origin)</script>`;
+const APP_ORIGIN = self.location.origin;
+const ROOT_URL = `${APP_ORIGIN}/`;
+const INDEX_URL = `${APP_ORIGIN}/index.html`;
+
+function isManagedCache(name: string): boolean {
+  return name.startsWith(CACHE_PREFIX) || LEGACY_CACHE_NAMES.has(name);
+}
+
+function isAppPath(rawUrl: string, path: string): boolean {
+  const absolute = `${APP_ORIGIN}${path}`;
+  return rawUrl === absolute || rawUrl.startsWith(`${absolute}?`);
+}
 
 function rawQueryParameter(rawUrl: string, name: string): string | null {
   const marker = `${name}=`;
@@ -90,11 +104,22 @@ async function loadBangData(): Promise<void> {
   const cache = await caches.open(CACHE_NAME);
   let response = await cache.match(request);
   if (!response) {
-    response = await fetch(request);
-    if (!response.ok) {
-      throw new Error(
-        `Failed to load ${BANG_DATA_ASSET}: ${response.status} ${response.statusText}`
-      );
+    for (const cacheName of await caches.keys()) {
+      if (cacheName === CACHE_NAME || !isManagedCache(cacheName)) {
+        continue;
+      }
+      response = await (await caches.open(cacheName)).match(request);
+      if (response) {
+        break;
+      }
+    }
+    if (!response) {
+      response = await fetch(request);
+      if (!response.ok) {
+        throw new Error(
+          `Failed to load ${BANG_DATA_ASSET}: ${response.status} ${response.statusText}`
+        );
+      }
     }
     await cache.put(request, response.clone());
   }
@@ -130,9 +155,22 @@ function seedRuntime(
 }
 
 function warmRuntime(): Promise<void> {
-  return ensureBangData()
-    .then(() => readRedirectSettings())
-    .then(() => undefined);
+  if (isBangDataInitialized() && getCachedSettings()) {
+    return RESOLVED_PROMISE;
+  }
+  if (!runtimeWarmPromise) {
+    const warming = ensureBangData()
+      .then(() => readRedirectSettings())
+      .then(() => undefined);
+    let current: Promise<void>;
+    current = warming.catch(swallowError).finally(() => {
+      if (runtimeWarmPromise === current) {
+        runtimeWarmPromise = null;
+      }
+    });
+    runtimeWarmPromise = current;
+  }
+  return runtimeWarmPromise;
 }
 
 async function precacheAssets(
@@ -153,6 +191,9 @@ async function precacheAssets(
       }
       const assetPath = assetPaths[idx];
       const req = new Request(assetPath);
+      if (await cache.match(req)) {
+        continue;
+      }
       const res = await fetch(req);
       if (!res.ok) {
         throw new Error(
@@ -164,18 +205,22 @@ async function precacheAssets(
   }
 
   const workers = Math.min(PRECACHE_CONCURRENCY, assetPaths.length);
-  await Promise.all(Array.from({ length: workers }, () => work()));
+  const results = await Promise.allSettled(
+    Array.from({ length: workers }, () => work())
+  );
+  const failure = results.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected"
+  );
+  if (failure) {
+    throw failure.reason;
+  }
 }
 
 async function deleteOldCaches(cacheName: string): Promise<void> {
   const keys = await caches.keys();
   await Promise.all(
     keys
-      .filter(
-        (k) =>
-          (k.startsWith(CACHE_PREFIX) || LEGACY_CACHE_NAMES.has(k)) &&
-          k !== cacheName
-      )
+      .filter((k) => isManagedCache(k) && k !== cacheName)
       .map((k) => caches.delete(k))
   );
 }
@@ -184,10 +229,34 @@ function ensureDeferredPrecache(): Promise<void> {
   if (deferredPrecachePromise) {
     return deferredPrecachePromise;
   }
-  deferredPrecachePromise = precacheAssets(CACHE_NAME, DEFERRED_ASSETS).catch(
-    swallowError
+  const warming = precacheAssets(CACHE_NAME, DEFERRED_ASSETS).then(() =>
+    deleteOldCaches(CACHE_NAME)
   );
+  let current: Promise<void>;
+  current = warming.catch(() => {
+    if (deferredPrecachePromise === current) {
+      deferredPrecachePromise = null;
+    }
+  });
+  deferredPrecachePromise = current;
   return deferredPrecachePromise;
+}
+
+async function cacheOnUse(request: Request): Promise<Response> {
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(request);
+  if (cached) {
+    return cached;
+  }
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      await cache.put(request, response.clone()).catch(swallowError);
+    }
+    return response;
+  } catch {
+    return new Response("Offline", { status: 503 });
+  }
 }
 
 function findQueryValueStart(raw: string): number {
@@ -210,42 +279,46 @@ function findQueryValueStart(raw: string): number {
 
 function queueBangSideEffects(e: FetchEvent, trigger: string): void {
   e.waitUntil(
-    RESOLVED_PROMISE.then(() => {
-      const usage = trackBangUsage(trigger);
-      if (typeof cookieStore === "undefined" || !usage.topChanged) {
-        return usage.persistence;
-      }
+    loadFrecency()
+      .then(() => {
+        const usage = trackBangUsage(trigger);
+        if (typeof cookieStore === "undefined" || !usage.topChanged) {
+          return usage.persistence;
+        }
 
-      if (!hasTopFrecency()) {
-        return usage.persistence;
-      }
-      const frecency = getTopFrecencyRecord();
-      const cookieSync = cookieStore
-        .get("suggest")
-        .then((cookie) => {
-          if (!cookie?.value) {
-            return;
-          }
-          const parsed = parseSuggestCookieValue(cookie.value, true);
-          return cookieStore.set({
-            name: "suggest",
-            value: encodeSuggestCookieValue(
-              parsed.provider,
-              parsed.trigger,
-              parsed.customUrl || "",
-              parsed.custom,
-              frecency,
-              parsed.bangPrefix,
-              parsed.snapPrefix
-            ),
-            path: "/",
-            expires: Date.now() + COOKIE_MAX_AGE_S * 1000,
-            sameSite: "lax",
-          });
-        })
-        .catch(swallowError);
-      return Promise.all([usage.persistence, cookieSync]).then(() => undefined);
-    }).catch(swallowError)
+        if (!hasTopFrecency()) {
+          return usage.persistence;
+        }
+        const frecency = getTopFrecencyRecord();
+        const cookieSync = cookieStore
+          .get("suggest")
+          .then((cookie) => {
+            if (!cookie?.value) {
+              return;
+            }
+            const parsed = parseSuggestCookieValue(cookie.value, true);
+            return cookieStore.set({
+              name: "suggest",
+              value: encodeSuggestCookieValue(
+                parsed.provider,
+                parsed.trigger,
+                parsed.customUrl || "",
+                parsed.custom,
+                frecency,
+                parsed.bangPrefix,
+                parsed.snapPrefix
+              ),
+              path: "/",
+              expires: Date.now() + COOKIE_MAX_AGE_S * 1000,
+              sameSite: "lax",
+            });
+          })
+          .catch(swallowError);
+        return Promise.all([usage.persistence, cookieSync]).then(
+          () => undefined
+        );
+      })
+      .catch(swallowError)
   );
 }
 
@@ -254,13 +327,7 @@ self.addEventListener("install", (e: ExtendableEvent) => {
 });
 
 self.addEventListener("activate", (e: ExtendableEvent) => {
-  e.waitUntil(
-    Promise.all([deleteOldCaches(CACHE_NAME), self.clients.claim()]).then(
-      () => {
-        /* no-op */
-      }
-    )
-  );
+  e.waitUntil(self.clients.claim());
 });
 
 self.addEventListener("message", (e: ExtendableMessageEvent) => {
@@ -485,7 +552,10 @@ self.addEventListener("fetch", (e: FetchEvent) => {
     }
   }
 
-  if (raw.endsWith("/") || raw.endsWith("/index.html")) {
+  if (
+    e.request.mode === "navigate" &&
+    (raw === ROOT_URL || raw === INDEX_URL)
+  ) {
     e.respondWith(
       new Response(__CONTROLLED_HTML__, {
         headers: __CONTROLLED_HEADERS__,
@@ -494,33 +564,33 @@ self.addEventListener("fetch", (e: FetchEvent) => {
     return;
   }
 
+  if (isAppPath(raw, "/health")) {
+    return;
+  }
+
   // Private redirects should not install or compete with UI assets. Root is
   // handled above because the worker cannot see its URL fragment.
   if (!(isBangDataInitialized() && getCachedSettings())) {
-    e.waitUntil(warmRuntime().catch(swallowError));
+    e.waitUntil(warmRuntime());
   }
   if (!deferredPrecachePromise) {
     e.waitUntil(ensureDeferredPrecache());
   }
 
-  if (raw.endsWith("/bench") || raw.endsWith("/bench.html")) {
+  if (isAppPath(raw, "/bench") || isAppPath(raw, "/bench.html")) {
     e.respondWith(
-      caches
-        .match(new Request("/bench"))
-        .then(
-          (r) =>
-            r ||
-            fetch("/bench").catch(
-              () => new Response("Offline", { status: 503 })
-            )
-        )
-        .then((r) => {
-          const h = new Headers(r.headers);
-          h.set("Cross-Origin-Opener-Policy", "same-origin");
-          h.set("Cross-Origin-Embedder-Policy", "credentialless");
-          return new Response(r.body, { status: r.status, headers: h });
-        })
+      cacheOnUse(new Request("/bench")).then((r) => {
+        const h = new Headers(r.headers);
+        h.set("Cross-Origin-Opener-Policy", "same-origin");
+        h.set("Cross-Origin-Embedder-Policy", "credentialless");
+        return new Response(r.body, { status: r.status, headers: h });
+      })
     );
+    return;
+  }
+
+  if (isAppPath(raw, "/bench.js")) {
+    e.respondWith(cacheOnUse(e.request));
     return;
   }
 

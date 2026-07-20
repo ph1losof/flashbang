@@ -1,50 +1,22 @@
 import {
-  type CaptureUrlParts,
-  type CustomBangRecord,
-  compileCaptureUrl,
-} from "../shared/capture-template";
-import {
-  DEFAULT_LUCKY_URL,
-  DEFAULT_URL,
   FRECENCY_HALF_LIFE_MS,
-  LUCKY_TRIGGER_PROVIDERS,
-  LUCKY_URLS,
   MAX_FRECENCY_ENTRIES,
 } from "../shared/constants";
 import {
   parseFrecencyCompact,
   serializeFrecencyCompact,
 } from "../shared/frecency-serial";
-import { hashFNV1a } from "../shared/hash";
 import { idbWrap, openDB, resetDB } from "../shared/idb";
-import { compileSnapTarget, type SnapTargetParts } from "../shared/snap-target";
-import { resolveTriggerPrefixes } from "../shared/trigger-prefix";
-import { lookupBang } from "./bang-data";
 import {
   buildTopFrecency,
   type TopFrecencyEntry,
   updateTopFrecencyOnIncrement,
 } from "./frecency";
+import type { RedirectSettings } from "./redirect";
 import {
-  type CustomUrlParts,
-  compileTriggerSyntax,
-  type RedirectSettings,
-  type UrlParts,
-} from "./redirect";
-
-function splitUrl(url: string): UrlParts {
-  const idx = url.indexOf("{}");
-  return idx === -1
-    ? [url, null]
-    : [url.substring(0, idx), url.substring(idx + 2)];
-}
-
-function attachSnapTarget(
-  entry: UrlParts | CaptureUrlParts,
-  snap: SnapTargetParts | null
-): CustomUrlParts {
-  return snap ? ([...entry, snap] as CustomUrlParts) : entry;
-}
+  defaultRedirectSettings,
+  loadRedirectSettings,
+} from "./redirect-settings";
 
 const FRECENCY_COOKIE_ENTRIES = 8;
 
@@ -91,90 +63,12 @@ export function readRedirectSettings(): Promise<RedirectSettings> {
   if (!redirectSettingsPromise) {
     redirectSettingsPromise = (async () => {
       try {
-        const db = await openDB();
-        const tx = db.transaction(["settings", "custom-bangs"], "readonly");
-        const [settings, all] = await Promise.all([
-          idbWrap<Array<{ key: string; value?: string }>>(
-            tx.objectStore("settings").getAll()
-          ),
-          idbWrap<CustomBangRecord[]>(tx.objectStore("custom-bangs").getAll()),
-        ]);
-        const settingsMap = Object.fromEntries(
-          settings.map((s) => [s.key, s.value])
-        );
-        hydrateFrecency(settingsMap.frecency);
-        const defaultBang = settingsMap["default-bang"] || "g";
-        const custom: Record<string, CustomUrlParts> = Object.create(null);
-        for (const e of all) {
-          const snap = e.snap ? compileSnapTarget(e.snap) : null;
-          if (e.regex) {
-            const advanced = compileCaptureUrl(e.url, e.regex, e.encoding);
-            if (advanced) {
-              custom[e.trigger] = attachSnapTarget(advanced, snap);
-            }
-          } else {
-            custom[e.trigger] = attachSnapTarget(splitUrl(e.url), snap);
-          }
-        }
-
-        const customDefault = custom[defaultBang];
-        let defaultEntry: UrlParts | null;
-        if (customDefault) {
-          defaultEntry =
-            customDefault.length < 5 ? (customDefault as UrlParts) : null;
-        } else {
-          defaultEntry = lookupBang(defaultBang, hashFNV1a(defaultBang));
-        }
-        const defaultUrl = defaultEntry || splitUrl(DEFAULT_URL);
-        const effectiveDefaultBang = defaultEntry ? defaultBang : "g";
-        const [bangPrefix, snapPrefix] = resolveTriggerPrefixes(
-          settingsMap["bang-prefix"],
-          settingsMap["snap-prefix"]
-        );
-
-        const luckyProvider = settingsMap["lucky-provider"] ?? "default";
-        let luckyUrl: UrlParts | null;
-        switch (luckyProvider) {
-          case "none":
-            luckyUrl = null;
-            break;
-          case "google":
-            luckyUrl = splitUrl(LUCKY_URLS.google);
-            break;
-          case "ddg":
-            luckyUrl = splitUrl(LUCKY_URLS.ddg);
-            break;
-          case "kagi":
-            luckyUrl = splitUrl(LUCKY_URLS.kagi);
-            break;
-          case "custom":
-            luckyUrl = settingsMap["lucky-url"]
-              ? splitUrl(settingsMap["lucky-url"])
-              : null;
-            break;
-          default:
-            luckyUrl = splitUrl(
-              LUCKY_URLS[LUCKY_TRIGGER_PROVIDERS[effectiveDefaultBang]] ||
-                DEFAULT_LUCKY_URL
-            );
-            break;
-        }
-
-        const syntax = compileTriggerSyntax(bangPrefix, snapPrefix);
-        cachedRedirect = {
-          defaultUrl,
-          custom,
-          luckyUrl,
-          ...(syntax ? { syntax } : {}),
-        };
+        const loaded = await loadRedirectSettings();
+        hydrateFrecency(loaded.frecency);
+        cachedRedirect = loaded.settings;
         redirectSettingsRetryAt = 0;
       } catch {
-        await loadFrecency();
-        cachedRedirect = {
-          defaultUrl: splitUrl(DEFAULT_URL),
-          custom: Object.create(null),
-          luckyUrl: splitUrl(DEFAULT_LUCKY_URL),
-        };
+        cachedRedirect = defaultRedirectSettings();
         redirectSettingsRetryAt = Date.now() + 5_000;
         resetDB();
       }

@@ -3,6 +3,10 @@ import { type Page, test } from "@playwright/test";
 const GOOGLE = "https://www.google.com";
 const COLD_RUNS = Number(process.env.PROFILE_COLD_RUNS ?? 12);
 const WARM_RUNS = Number(process.env.PROFILE_WARM_RUNS ?? 30);
+const NETWORK_DELAY_MS = Math.max(
+  0,
+  Number(process.env.PROFILE_NETWORK_DELAY_MS) || 0
+);
 
 interface Timing {
   bangDataRequests: number;
@@ -37,6 +41,58 @@ async function mockGoogle(page: Page): Promise<void> {
   });
 }
 
+async function conditionColdNetwork(
+  page: Page,
+  baseURL: string
+): Promise<void> {
+  if (NETWORK_DELAY_MS === 0) {
+    return;
+  }
+  const origin = new URL(baseURL).origin;
+  await page.context().route(`${origin}/**`, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, NETWORK_DELAY_MS));
+    await route.continue();
+  });
+}
+
+async function waitForSeededRuntime(page: Page): Promise<void> {
+  await page.goto("/health");
+  await page.evaluate(async () => {
+    const registration = await navigator.serviceWorker.ready;
+    if (navigator.serviceWorker.controller) {
+      return;
+    }
+    registration.active?.postMessage({ type: "claim" });
+    await new Promise<void>((resolve) => {
+      navigator.serviceWorker.addEventListener(
+        "controllerchange",
+        () => resolve(),
+        {
+          once: true,
+        }
+      );
+    });
+  });
+  await page.waitForFunction(async () => {
+    for (const cacheName of await caches.keys()) {
+      const requests = await (await caches.open(cacheName)).keys();
+      if (
+        requests.some(({ url }) => {
+          const pathname = new URL(url).pathname;
+          return (
+            pathname === "/bangs.bin" ||
+            (pathname.startsWith("/bangs-") &&
+              !pathname.startsWith("/bangs-meta-"))
+          );
+        })
+      ) {
+        return true;
+      }
+    }
+    return false;
+  });
+}
+
 async function measure(
   page: Page,
   path = "/#q=%21g%20profile"
@@ -56,7 +112,7 @@ async function measure(
     ) {
       bangDataRequests++;
     }
-    if (pathname === "/fallback.js") {
+    if (pathname === "/fallback.js" || pathname.startsWith("/fallback-")) {
       fallbackRequested = true;
     }
     if (request.url().startsWith(`${GOOGLE}/search?`)) {
@@ -82,6 +138,7 @@ async function measure(
 }
 
 test("private hash redirect and public path performance profile", async ({
+  baseURL,
   browser,
   browserName,
 }) => {
@@ -90,6 +147,9 @@ test("private hash redirect and public path performance profile", async ({
     "Run with PROFILE_PRIVATE_REDIRECT=true"
   );
   test.setTimeout(120_000);
+  if (!baseURL) {
+    throw new Error("Private redirect profile requires a configured baseURL");
+  }
 
   const cold: Timing[] = [];
   for (let i = 0; i < COLD_RUNS; i++) {
@@ -98,6 +158,7 @@ test("private hash redirect and public path performance profile", async ({
     await page.addInitScript(() => {
       Reflect.deleteProperty(Navigator.prototype, "serviceWorker");
     });
+    await conditionColdNetwork(page, baseURL);
     await mockGoogle(page);
     cold.push(await measure(page));
     await context.close();
@@ -108,9 +169,10 @@ test("private hash redirect and public path performance profile", async ({
   for (let i = 0; i < COLD_RUNS; i++) {
     const context = await browser.newContext();
     const page = await context.newPage();
+    await conditionColdNetwork(page, baseURL);
     await mockGoogle(page);
     firstInstall.push(await measure(page));
-    await page.waitForTimeout(50);
+    await waitForSeededRuntime(page);
     postInstall.push(await measure(page));
     await context.close();
   }
@@ -168,6 +230,7 @@ test("private hash redirect and public path performance profile", async ({
       controlledWarm: summarize(warm),
       documentFloor: summarize(documentFloor),
       firstInstall: summarize(firstInstall),
+      networkDelayMs: NETWORK_DELAY_MS,
       postInstall: summarize(postInstall),
       publicWarm: summarize(publicWarm),
     })
