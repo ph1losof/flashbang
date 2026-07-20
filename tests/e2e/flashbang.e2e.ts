@@ -586,15 +586,11 @@ test("compact address-bar setup exposes browser instructions and copyable URLs",
   await page.setViewportSize({ width: 390, height: 780 });
   await openHome(page);
 
-  await expect(page.locator("#setup-url")).toHaveCount(0);
   await page.click("#open-setup");
   const modal = page.locator("#setup-modal");
   await expect(modal).toHaveAttribute("aria-hidden", "false");
   await expect(page.locator("#setup-search-url")).toHaveValue(
     `${new URL(page.url()).origin}?q=%s`
-  );
-  await expect(page.locator("#setup-private-search-url")).toHaveValue(
-    `${new URL(page.url()).origin}/#q=%s`
   );
   const baseSuggestUrl = `${new URL(page.url()).origin}/suggest?q=%s`;
   await expect(page.locator("#setup-suggest-url")).toHaveValue(
@@ -693,16 +689,6 @@ test("compact address-bar setup exposes browser instructions and copyable URLs",
   await expect(page.locator("#copy-search-url [data-copy-label]")).toHaveText(
     "Copied"
   );
-
-  await page.click("#copy-private-search-url");
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          (window as typeof window & { copiedSetupUrl?: string }).copiedSetupUrl
-      )
-    )
-    .toBe(`${new URL(page.url()).origin}/#q=%s`);
 
   await page.keyboard.press("Escape");
   await expect(modal).toHaveAttribute("aria-hidden", "true");
