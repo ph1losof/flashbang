@@ -1883,6 +1883,10 @@ test("controlled redirect works while offline", async ({
   );
   await mockGoogleSearchRoute(page);
   await ensureWarmController(page);
+  await page.waitForSelector("#gear-btn");
+  await expect(resolveRedirectViaWorker(page, "!g hello")).resolves.toMatch(
+    GOOGLE_REDIRECT
+  );
   const origin = new URL(page.url()).origin;
   await context.route(`${origin}/**`, (route) => route.abort());
   try {
