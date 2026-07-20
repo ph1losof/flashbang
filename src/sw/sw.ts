@@ -332,6 +332,9 @@ self.addEventListener("activate", (e: ExtendableEvent) => {
 });
 
 self.addEventListener("message", (e: ExtendableMessageEvent) => {
+  if (e.origin !== self.location.origin) {
+    return;
+  }
   if (
     e.data?.type === "seed-runtime" &&
     e.data.asset === BANG_DATA_ASSET &&

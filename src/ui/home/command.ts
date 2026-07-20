@@ -73,7 +73,10 @@ export function setupBangCommand(db: DB): BangCommandController {
       selectedTriggers?: readonly string[];
       terms: string;
     } | null {
-      if (marker === snapPrefix && search.includes(",")) {
+      if (search.includes(",")) {
+        if (marker !== snapPrefix) {
+          return null;
+        }
         const chain = parsePartialSnapChain(search);
         return chain
           ? {

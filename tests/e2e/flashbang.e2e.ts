@@ -551,6 +551,21 @@ test("homepage bang finder supports suffix bang and snap selection", async ({
   await expect(input).toHaveValue("Hello World");
 });
 
+test("homepage bang finder limits chain suggestions to snaps", async ({
+  page,
+}) => {
+  await openHome(page);
+  const input = page.locator("#bang-command-input");
+  const results = page.locator("#bang-command-results");
+
+  await input.fill("!gh,");
+  await expect(results).toBeHidden();
+
+  await input.fill("@gh,g");
+  await expect(results).toBeVisible();
+  await expect(results.locator("code").first()).toContainText("@gh,g");
+});
+
 test("compact address-bar setup exposes browser instructions and copyable URLs", async ({
   browserName,
   page,

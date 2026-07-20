@@ -184,13 +184,15 @@ function createExtendableEvent() {
 function createMessageEvent(
   data: unknown,
   source?: { id?: string; postMessage: (message: unknown) => void },
-  reply?: (message: unknown) => void
+  reply?: (message: unknown) => void,
+  origin = "https://flashbang.local"
 ) {
   const waits: Promise<unknown>[] = [];
   return {
     waits,
     event: {
       data,
+      origin,
       ports: reply ? [{ postMessage: reply }] : [],
       source,
       waitUntil(promise: Promise<unknown>) {
@@ -308,6 +310,25 @@ describe("sw runtime with real modules", () => {
   test("seeds bang data and redirect settings without a worker fetch", async () => {
     await loadSwRuntime();
     const bangData = await Bun.file("src/generated/bangs.bin").arrayBuffer();
+    const foreignSeedEvt = createMessageEvent(
+      {
+        type: "seed-runtime",
+        asset: "/bangs.bin",
+        bangData,
+        redirectSettings: {
+          custom: Object.create(null),
+          defaultUrl: ["https://foreign.example/?q=", ""],
+          luckyUrl: null,
+        },
+      },
+      undefined,
+      undefined,
+      "https://foreign.example"
+    );
+    await handlers.message?.(foreignSeedEvt.event);
+    expect(foreignSeedEvt.waits).toHaveLength(0);
+    expect(cachePutCalls).toEqual([]);
+
     const staleSeedEvt = createMessageEvent({
       type: "seed-runtime",
       asset: "/bangs-stale.bin",
