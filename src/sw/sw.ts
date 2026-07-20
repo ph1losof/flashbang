@@ -5,7 +5,22 @@ import {
   encodeSuggestCookieValue,
   parseSuggestCookieValue,
 } from "../shared/suggest-cookie";
-import { initializeBangData, isBangDataInitialized } from "./bang-data";
+import {
+  initializeBangData,
+  isBangDataInitialized,
+  isBangDataUnavailable,
+} from "./bang-data";
+import {
+  createHotBootState,
+  decodeHotBootRecord,
+  encodeHotBootRecord,
+  getResolvedHotTrigger,
+  HOT_BOOT_SENTINEL,
+  type HotBootRecord,
+  hotBootSettingsNeedPublish,
+  NO_HOT_BOOT,
+  resolveHotRedirect,
+} from "./hot-redirect";
 import {
   getCachedSettings,
   getTopFrecencyRecord,
@@ -22,6 +37,7 @@ import {
   redirectRawUrl,
   redirectUrl,
 } from "./redirect";
+import { prepareRedirectSettings } from "./redirect-settings";
 
 declare const __CACHE_VERSION__: string;
 declare const __BANG_DATA_ASSET__: string;
@@ -66,9 +82,71 @@ let benchmarkState: {
   token: string;
 } | null = null;
 const RESOLVED_PROMISE: Promise<void> = Promise.resolve();
+const NO_HOT_BOOT_PROMISE: Promise<HotBootRecord | null> =
+  Promise.resolve(null);
+const navigationPreload = self.registration?.navigationPreload;
+let hotBootGeneration = 0;
+let currentHotBoot: HotBootRecord | null = null;
+const initialHotBootGeneration = hotBootGeneration;
+let hotBootPromise: Promise<HotBootRecord | null> = navigationPreload
+  ? navigationPreload
+      .getState()
+      .then((state) => {
+        const raw = state.headerValue ?? "";
+        const record = state.enabled
+          ? null
+          : decodeHotBootRecord(raw, CACHE_NAME);
+        if (hotBootGeneration !== initialHotBootGeneration) {
+          return currentHotBoot;
+        }
+        currentHotBoot = record;
+        return record;
+      })
+      .catch(() => currentHotBoot)
+  : NO_HOT_BOOT_PROMISE;
+let hotBootMutation: Promise<void> = RESOLVED_PROMISE;
+const hotBootUpdateTokens = new Set<string>();
 const swallowError = () => {
   /* best-effort */
 };
+
+function queueHotBootMutation(operation: () => Promise<void>): Promise<void> {
+  const next = hotBootMutation.then(operation, operation);
+  hotBootMutation = next.catch(swallowError);
+  return next;
+}
+
+async function disableHotBoot(): Promise<void> {
+  hotBootGeneration++;
+  currentHotBoot = null;
+  hotBootPromise = NO_HOT_BOOT_PROMISE;
+  if (!navigationPreload) {
+    return;
+  }
+  await navigationPreload.setHeaderValue(HOT_BOOT_SENTINEL);
+  await navigationPreload.disable();
+}
+
+async function publishHotBoot(includeSettings = false): Promise<void> {
+  if (!navigationPreload || hotBootUpdateTokens.size > 0) {
+    return;
+  }
+  const snapshot = await prepareRedirectSettings();
+  const state = createHotBootState(snapshot);
+  let settings: RedirectSettings | undefined;
+  if (includeSettings && isBangDataInitialized()) {
+    settings =
+      getCachedSettings() ??
+      (await readRedirectSettings(Promise.resolve(snapshot)));
+  }
+  const record = encodeHotBootRecord(CACHE_NAME, state, snapshot, settings);
+  await navigationPreload.disable();
+  await navigationPreload.setHeaderValue(record);
+  const decoded = decodeHotBootRecord(record, CACHE_NAME);
+  hotBootGeneration++;
+  currentHotBoot = decoded;
+  hotBootPromise = Promise.resolve(decoded);
+}
 
 const BENCHMARK_TARGET_PATH = "/__flashbang-bench-target";
 const BENCHMARK_TARGET_HTML = `<!doctype html><meta charset="utf-8"><title>flashbang benchmark target</title><script>opener?.postMessage({type:"flashbang-benchmark-navigation",token:new URLSearchParams(location.search).get("fb-bench"),sequence:Number(new URLSearchParams(location.search).get("fb-seq"))},location.origin)</script>`;
@@ -151,7 +229,12 @@ function seedRuntime(
     .open(CACHE_NAME)
     .then((cache) => cache.put(new Request(BANG_DATA_ASSET), response))
     .catch(swallowError);
-  return Promise.all([persistData, loadFrecency()]).then(() => undefined);
+  const publishSettings = hotBootSettingsNeedPublish(currentHotBoot)
+    ? queueHotBootMutation(() => publishHotBoot(true)).catch(swallowError)
+    : RESOLVED_PROMISE;
+  return Promise.all([persistData, loadFrecency(), publishSettings]).then(
+    () => undefined
+  );
 }
 
 function warmRuntime(): Promise<void> {
@@ -162,7 +245,11 @@ function warmRuntime(): Promise<void> {
     const warming = Promise.all([
       ensureBangData(),
       readRedirectSettings(),
-    ]).then(() => undefined);
+    ]).then(async () => {
+      if (hotBootSettingsNeedPublish(currentHotBoot)) {
+        await queueHotBootMutation(() => publishHotBoot(true));
+      }
+    });
     let current: Promise<void>;
     current = warming.catch(swallowError).finally(() => {
       if (runtimeWarmPromise === current) {
@@ -328,7 +415,14 @@ self.addEventListener("install", (e: ExtendableEvent) => {
 });
 
 self.addEventListener("activate", (e: ExtendableEvent) => {
-  e.waitUntil(self.clients.claim());
+  e.waitUntil(
+    self.clients.claim().then(() =>
+      queueHotBootMutation(async () => {
+        await disableHotBoot();
+        await publishHotBoot();
+      }).catch(swallowError)
+    )
+  );
 });
 
 self.addEventListener("message", (e: ExtendableMessageEvent) => {
@@ -399,8 +493,63 @@ self.addEventListener("message", (e: ExtendableMessageEvent) => {
     });
     return;
   }
+  if (
+    e.data?.type === "hot-boot-begin" &&
+    typeof e.data.token === "string" &&
+    e.data.token
+  ) {
+    const token = e.data.token;
+    const update = queueHotBootMutation(async () => {
+      hotBootUpdateTokens.add(token);
+      try {
+        await disableHotBoot();
+        await invalidateCache();
+      } catch (error) {
+        hotBootUpdateTokens.delete(token);
+        throw error;
+      }
+    });
+    e.waitUntil(update);
+    if (e.ports[0]) {
+      e.waitUntil(
+        update.then(
+          () => e.ports[0].postMessage(true),
+          () => e.ports[0].postMessage(false)
+        )
+      );
+    }
+    return;
+  }
+  if (
+    e.data?.type === "hot-boot-end" &&
+    typeof e.data.token === "string" &&
+    e.data.token
+  ) {
+    const token = e.data.token;
+    const update = queueHotBootMutation(async () => {
+      hotBootUpdateTokens.delete(token);
+      await invalidateCache();
+      await publishHotBoot(true);
+    });
+    e.waitUntil(update);
+    if (e.ports[0]) {
+      e.waitUntil(
+        update.then(
+          () => e.ports[0].postMessage(true),
+          () => e.ports[0].postMessage(false)
+        )
+      );
+    }
+    return;
+  }
   if (e.data?.type === "invalidate") {
-    const invalidation = invalidateCache();
+    hotBootPromise = NO_HOT_BOOT_PROMISE;
+    const cacheInvalidation = invalidateCache();
+    const invalidation = queueHotBootMutation(async () => {
+      await disableHotBoot();
+      await cacheInvalidation;
+      await publishHotBoot(true);
+    });
     e.waitUntil(invalidation);
     if (e.ports[0]) {
       e.waitUntil(
@@ -549,14 +698,54 @@ self.addEventListener("fetch", (e: FetchEvent) => {
         }
       } else {
         e.respondWith(
-          ensureBangData().then(() => {
-            const cached = getCachedSettings();
-            if (cached) {
-              return respondToRedirect(e, rawQ, cached);
+          hotBootPromise.then((hotBoot) => {
+            if (e.request.mode === "navigate") {
+              const hotUrl = resolveHotRedirect(
+                rawQ,
+                hotBoot?.state ?? NO_HOT_BOOT
+              );
+              if (hotUrl) {
+                queueBangSideEffects(e, getResolvedHotTrigger());
+                return Response.redirect(hotUrl, 302);
+              }
+              const settings = hotBoot?.settings;
+              if (settings) {
+                try {
+                  return respondToRedirect(e, rawQ, settings);
+                } catch (error) {
+                  if (!isBangDataUnavailable(error)) {
+                    throw error;
+                  }
+                }
+              }
             }
-            return readRedirectSettings().then((settings) =>
-              respondToRedirect(e, rawQ, settings)
-            );
+            const loading =
+              hotBootUpdateTokens.size > 0
+                ? invalidateCache().then(ensureBangData)
+                : ensureBangData();
+            return loading.then(() => {
+              const cached = getCachedSettings();
+              if (cached) {
+                if (hotBootSettingsNeedPublish(currentHotBoot)) {
+                  e.waitUntil(
+                    queueHotBootMutation(() => publishHotBoot(true)).catch(
+                      swallowError
+                    )
+                  );
+                }
+                return respondToRedirect(e, rawQ, cached);
+              }
+              return readRedirectSettings().then((settings) => {
+                if (hotBootSettingsNeedPublish(currentHotBoot)) {
+                  e.waitUntil(
+                    queueHotBootMutation(() => publishHotBoot(true)).catch(
+                      swallowError
+                    )
+                  );
+                }
+                return respondToRedirect(e, rawQ, settings);
+              });
+            });
           })
         );
       }

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { compileCaptureUrl } from "../src/shared/capture-template";
 import { compileSnapTarget } from "../src/shared/snap-target";
+import { createHotBootState, resolveHotRedirect } from "../src/sw/hot-redirect";
 import type { UrlParts } from "../src/sw/redirect";
 import {
   compileTriggerSyntax,
@@ -52,7 +53,29 @@ function benchRedirectRaw(raw: string, s = settings()): number {
   return (performance.now() - t0) / ITERS;
 }
 
+function benchHotRedirect(raw: string): number {
+  const state = createHotBootState({
+    custom: Object.create(null),
+    defaultBang: "g",
+    luckyProvider: "default",
+    luckyUrl: null,
+    syntax: compileTriggerSyntax(";", "@"),
+  });
+  for (let i = 0; i < WARMUP; i++) {
+    resolveHotRedirect(raw, state);
+  }
+  const t0 = performance.now();
+  for (let i = 0; i < ITERS; i++) {
+    resolveHotRedirect(raw, state);
+  }
+  return (performance.now() - t0) / ITERS;
+}
+
 describe("redirect performance regression", () => {
+  test("cold-start hot bang resolution stays under 0.001ms", () => {
+    expect(benchHotRedirect("%3Bgh+service+workers")).toBeLessThan(0.001);
+  });
+
   test("prefix bang redirect stays under 0.005ms", () => {
     const ms = benchRedirectRaw("!g+kittens+are+cute");
     expect(ms).toBeLessThan(0.005);

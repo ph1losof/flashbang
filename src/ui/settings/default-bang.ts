@@ -9,7 +9,6 @@ import {
 } from "../bang-catalog";
 import type { DB } from "../db";
 import { $, el } from "../dom";
-import { notifySW } from "../sw-bridge";
 import type { RunWrite } from "./write";
 
 interface DefaultBangOptions {
@@ -241,7 +240,6 @@ export async function setupDefaultBangSetting({
       key: "default-bang",
       onCommit: () => {
         committedBang = value;
-        notifySW("invalidate");
         onCommit(value);
         flashAnim(input);
         status.textContent = bang.name;

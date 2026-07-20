@@ -4,6 +4,7 @@ dist-*/
 data/*
 test-results/
 profiles/
+benchmark-results/
 !data/bangs.json
 !data/custom-bangs.json
 node_modules/

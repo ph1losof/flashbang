@@ -7,7 +7,6 @@ import {
 import type { DB } from "../db";
 import { $ } from "../dom";
 import { isFirefoxUserAgent } from "../firefox-suggest";
-import { notifySW } from "../sw-bridge";
 import { setupFirefoxSuggestions } from "./firefox";
 import type { SettingsWriter } from "./write";
 
@@ -235,7 +234,7 @@ export function setupProviderSettings({
   });
   const luckyControl = setupProviderControl({
     db,
-    onChange: () => notifySW("invalidate"),
+    onChange: () => undefined,
     onProviderSettled: updateDefaultDisplays,
     select: luckySelect,
     setting: "lucky",

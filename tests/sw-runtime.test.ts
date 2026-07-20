@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { REDIRECT_SETTINGS_SNAPSHOT_KEY } from "../src/shared/constants";
+import {
+  decodeHotBootRecord,
+  HOT_BOOT_SENTINEL,
+  parseHotBootRecord,
+  resolveHotRedirect,
+} from "../src/sw/hot-redirect";
+import { redirectRawUrl } from "../src/sw/redirect";
 import { loadTestBangData } from "./helpers/bang-data";
 import { installFakeIndexedDb, reqToPromise } from "./helpers/fake-indexeddb";
 
@@ -18,6 +25,7 @@ let cacheDeleteCalls: string[] = [];
 let cachePutCalls: string[] = [];
 let cacheEntries = new Map<string, Map<string, Response>>();
 let fetchCalls: string[] = [];
+let navigationPreloadWrites: string[] = [];
 let fetchImpl: (input: RequestInfo | URL) => Promise<Response> = () =>
   Promise.resolve(new Response("ok"));
 
@@ -61,7 +69,8 @@ function requestUrl(input: RequestInfo | URL): string {
 
 function setupSwGlobals(
   requiredAppAssets: readonly string[] = [],
-  preserveCaches = false
+  preserveCaches = false,
+  navigationPreloadState?: NavigationPreloadState
 ) {
   handlers = {};
   skipWaitingCalls = 0;
@@ -69,6 +78,7 @@ function setupSwGlobals(
   cacheDeleteCalls = [];
   cachePutCalls = [];
   fetchCalls = [];
+  navigationPreloadWrites = [];
   fetchImpl = () => Promise.resolve(new Response("ok"));
   if (!preserveCaches) {
     cacheEntries = new Map([
@@ -110,6 +120,26 @@ function setupSwGlobals(
       },
     },
     location: new URL("https://flashbang.local/sw.js"),
+    ...(navigationPreloadState
+      ? {
+          registration: {
+            navigationPreload: {
+              disable() {
+                navigationPreloadState.enabled = false;
+                return Promise.resolve();
+              },
+              getState() {
+                return Promise.resolve({ ...navigationPreloadState });
+              },
+              setHeaderValue(value: string) {
+                navigationPreloadState.headerValue = value;
+                navigationPreloadWrites.push(value);
+                return Promise.resolve();
+              },
+            },
+          },
+        }
+      : {}),
   };
 
   (globalThis as unknown as { caches: unknown }).caches = {
@@ -232,9 +262,10 @@ function createFetchEvent(url: string, clientId = "", mode?: RequestMode) {
 
 async function loadSwRuntime(
   requiredAppAssets: readonly string[] = [],
-  preserveCaches = false
+  preserveCaches = false,
+  navigationPreloadState?: NavigationPreloadState
 ) {
-  setupSwGlobals(requiredAppAssets, preserveCaches);
+  setupSwGlobals(requiredAppAssets, preserveCaches, navigationPreloadState);
   await import(`../src/sw/sw.ts?test=${Date.now()}-${Math.random()}`);
 }
 
@@ -518,6 +549,100 @@ describe("sw runtime with real modules", () => {
     expect(String((postedAfterInvalidate[0] as { url: string }).url)).toContain(
       "duckduckgo.com"
     );
+  });
+
+  test("publishes and safely updates registration hot-boot metadata", async () => {
+    await seedDb({
+      settings: [
+        { key: "bang-prefix", value: ";" },
+        { key: "snap-prefix", value: "@" },
+      ],
+    });
+    const state: NavigationPreloadState = {
+      enabled: false,
+      headerValue: "true",
+    };
+    await loadSwRuntime([], false, state);
+
+    const activate = createExtendableEvent();
+    await handlers.activate?.(activate.event);
+    await Promise.all(activate.waits);
+    const initial = parseHotBootRecord(state.headerValue, "fb-test-cache");
+    expect(initial).toBeGreaterThanOrEqual(0);
+    expect(resolveHotRedirect(";gh+test", initial)).toContain("github.com");
+
+    const token = "settings-write-1";
+    const beginReplies: unknown[] = [];
+    const begin = createMessageEvent(
+      { type: "hot-boot-begin", token },
+      undefined,
+      (message) => beginReplies.push(message)
+    );
+    await handlers.message?.(begin.event);
+    await Promise.all(begin.waits);
+    expect(beginReplies).toEqual([true]);
+    expect(state.headerValue).toBe(HOT_BOOT_SENTINEL);
+
+    await seedDb({
+      customBangs: [{ trigger: "gh", url: "https://custom.example/?q={}" }],
+    });
+    const endReplies: unknown[] = [];
+    const end = createMessageEvent(
+      { type: "hot-boot-end", token },
+      undefined,
+      (message) => endReplies.push(message)
+    );
+    await handlers.message?.(end.event);
+    await Promise.all(end.waits);
+    expect(endReplies).toEqual([true]);
+    const updated = decodeHotBootRecord(state.headerValue, "fb-test-cache")!;
+    expect(resolveHotRedirect(";gh+test", updated.state)).toBeNull();
+    expect(redirectRawUrl(";gh+test", updated.settings!)).toBe(
+      "https://custom.example/?q=test"
+    );
+    expect(navigationPreloadWrites).toContain(HOT_BOOT_SENTINEL);
+  });
+
+  test("keeps hot-boot metadata disabled until concurrent writes finish", async () => {
+    const state: NavigationPreloadState = {
+      enabled: false,
+      headerValue: "true",
+    };
+    await loadSwRuntime([], false, state);
+    const activate = createExtendableEvent();
+    await handlers.activate?.(activate.event);
+    await Promise.all(activate.waits);
+
+    for (const token of ["write-a", "write-b"]) {
+      const begin = createMessageEvent(
+        { type: "hot-boot-begin", token },
+        undefined,
+        () => undefined
+      );
+      await handlers.message?.(begin.event);
+      await Promise.all(begin.waits);
+    }
+    expect(state.headerValue).toBe(HOT_BOOT_SENTINEL);
+
+    const endA = createMessageEvent(
+      { type: "hot-boot-end", token: "write-a" },
+      undefined,
+      () => undefined
+    );
+    await handlers.message?.(endA.event);
+    await Promise.all(endA.waits);
+    expect(state.headerValue).toBe(HOT_BOOT_SENTINEL);
+
+    const endB = createMessageEvent(
+      { type: "hot-boot-end", token: "write-b" },
+      undefined,
+      () => undefined
+    );
+    await handlers.message?.(endB.event);
+    await Promise.all(endB.waits);
+    expect(
+      parseHotBootRecord(state.headerValue, "fb-test-cache")
+    ).toBeGreaterThan(0);
   });
 
   test("fetch q= path redirects without deferred app precaching", async () => {

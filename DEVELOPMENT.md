@@ -72,6 +72,7 @@ flashbang/
 │   │   ├── custom-trigger.ts  # Custom trigger validation and reserved names
 │   │   ├── frecency-serial.ts # Compact frecency serialization
 │   │   ├── hash.ts            # Shared FNV-1a hash
+│   │   ├── hot-boot.ts        # Hot-boot metadata protocol constants
 │   │   ├── idb.ts             # Shared IndexedDB open helper
 │   │   ├── raw-query.ts       # Raw query string parsing
 │   │   ├── raw-url.ts         # Raw URL pathname and origin parsing
@@ -83,6 +84,7 @@ flashbang/
 │   │   └── trie.ts            # Radix trie lookup
 │   ├── generated/             # Output of codegen (gitignored, generated from data/bangs.json)
 │   │   ├── bangs.bin          # packed trigger→URL data for Service Worker
+│   │   ├── bangs-hot.js       # generated top-relevance cold-start redirect tier
 │   │   ├── bangs-sparse.js    # advanced bang and snap override lookups
 │   │   ├── bangs-meta.bin     # packed trigger/name/domain catalog for UI
 │   │   ├── bangs-trie.js      # radix trie for prefix-matched bang suggestions
@@ -93,6 +95,7 @@ flashbang/
 │   │   ├── redirect.ts        # Bang/snap parsing & redirect logic (zero-copy raw + decoded paths)
 │   │   ├── idb.ts             # IndexedDB access, settings cache & in-memory frecency
 │   │   ├── frecency.ts        # Top-K frecency helpers used by SW
+│   │   ├── hot-redirect.ts     # Registration-metadata hot-tier redirects
 │   │   └── sw.ts              # Service Worker lifecycle & fetch handler
 │   └── ui/
 │       ├── index.html         # Initial registration and fallback HTML template
@@ -246,7 +249,7 @@ On **self-hosted** (Docker/Railway via `start.ts`), the Bun server sets headers 
 `bun run build` bundles the app:
 
 1. **Bundle UI + fallback + bench** — Bun bundles `src/ui/app.ts` (with code splitting) to `dist/app.js` plus lazy chunks, the private/restricted-browser redirect fallback to a content-hashed `dist/fallback-*.js`, and `src/ui/bench/index.ts` to `dist/bench.js`. Every app chunk and the standalone fallback are marked as required offline dependencies regardless of size; benchmark assets are cached only when opened.
-2. **Bundle Service Worker** — Bun minifies `src/ui/controlled.html` and embeds it with its CSP headers into the Service Worker so controlled root navigations avoid Cache Storage and network reads. It then bundles `src/sw/sw.ts` and the sparse generated lookups into `dist/sw.js`, and copies `bangs.bin` and `bangs-meta.bin` to content-hashed production paths. The lookup and fallback paths are injected into the worker and private bootstrap; the metadata path is injected into the UI bundle and included in deferred precaching. Content-hashed assets receive immutable cache headers. Hashes of the binaries, versioned assets, and a preliminary Service Worker bundle determine the injected cache version. Installation activates without lookup data; the fallback begins its IndexedDB snapshot read as soon as its module evaluates, overlapping settings I/O with the bang-data request. First-page fallback transfers its initialized buffer and compiled redirect settings to the worker, while ordinary controlled pages warm binary data, settings, and frecency concurrently. Previous caches remain available until all required current assets have been cached successfully.
+2. **Bundle Service Worker** — Bun minifies `src/ui/controlled.html` and embeds it with its CSP headers into the Service Worker so controlled root navigations avoid Cache Storage and network reads. It then bundles `src/sw/sw.ts` and the sparse generated lookups into `dist/sw.js`, and copies `bangs.bin` and `bangs-meta.bin` to content-hashed production paths. The lookup and fallback paths are injected into the worker and private bootstrap; the metadata path is injected into the UI bundle and included in deferred precaching. Content-hashed assets receive immutable cache headers. Hashes of the binaries, versioned assets, and a preliminary Service Worker bundle determine the injected cache version. Installation activates without lookup data; the fallback begins its IndexedDB snapshot read as soon as its module evaluates, overlapping settings I/O with the bang-data request. First-page fallback transfers its initialized buffer and compiled redirect settings to the worker, while ordinary controlled pages warm binary data, settings, and frecency concurrently. Once settings are materialized, the worker persists a bounded h3 registration record containing default/lucky URLs, syntax, and all simple custom definitions; cold redirects run those settings through the canonical redirect parser and load `bangs.bin` only when a built-in, regex, or advanced lookup is actually required. Previous caches remain available until all required current assets have been cached successfully.
 3. **Generate CSS** — UnoCSS scans `src/ui/**/*.ts`, `src/ui/home/index.html`, and `src/ui/bench/index.html`, emitting atomic utility classes
 4. **Inline & minify HTML** — CSS is inlined into `<style>`, HTML is minified with `@minify-html/node`
 5. **Generate static-host headers** — Writes `dist/_headers` with shared security headers, per-page inline-script hashes, the stricter Service Worker CSP, and the OpenSearch content type
