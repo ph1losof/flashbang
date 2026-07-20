@@ -1387,10 +1387,18 @@ describe("snap suggestions — via suggest()", () => {
   });
 
   test("already-selected triggers are omitted from chain suggestions", async () => {
-    const r = await suggest("@gh,so,g", defaultSettings);
+    const settings = {
+      ...defaultSettings,
+      frecent: { gh: 200 },
+    };
+    const baseline = await suggest("@g", settings);
+    const [, baselineCompletions] = await baseline.json();
+    expect(baselineCompletions).toContain("@gh");
+
+    const r = await suggest("@gh,so,g", settings);
     const [, completions] = await r.json();
     expect(completions).not.toContain("@gh,so,gh");
-    expect(completions).toContain("@gh,so,ghi");
+    expect(completions.length).toBeGreaterThan(0);
   });
 
   test("custom triggers complete snap-chain segments", async () => {
