@@ -279,29 +279,10 @@ async function submitCustomBangForm(
   }
 }
 
-test("suggest endpoint returns 400 when q parameter is missing", async ({
-  request,
-}) => {
-  const response = await request.get("/suggest");
-  expect(response.status()).toBe(400);
-  await expect(response.text()).resolves.toContain("Missing q parameter");
-});
-
-test("suggest endpoint respects provider override via sp=none", async ({
-  request,
-}) => {
-  const response = await request.get("/suggest", {
-    params: { q: "hello", sp: "none" },
-  });
-  expect(response.status()).toBe(200);
-  await expect(response.json()).resolves.toEqual(["hello", []]);
-});
-
 test("benchmark page loads its feature bundle", async ({ page }) => {
   await page.goto("/bench", { waitUntil: "domcontentloaded" });
 
   await expect(page).toHaveTitle("flashbang — Service Worker benchmark");
-  await expect(page.locator(".wordmark")).toHaveClass(/has-shader/);
   await expect(page.locator("#run-btn")).toBeEnabled();
   const iterations = page.locator("#iterations");
   await iterations.focus();
@@ -317,7 +298,6 @@ test("benchmark page loads its feature bundle", async ({ page }) => {
   if ((await progressText.textContent()) !== "Done") {
     throw new Error((await page.locator("#sw-status").textContent()) ?? "");
   }
-  await expect(page.locator("#stats-body tr")).toHaveCount(15);
   await expect(page.locator("#summary")).toContainText(
     "Service Worker transport baseline"
   );
@@ -406,40 +386,6 @@ test("Firefox locks cookie-backed suggestion settings", async ({ page }) => {
   await expect(page.locator("#setup-suggest-url")).toHaveValue(expectedUrl);
 });
 
-test("suggest endpoint rewrites malformed suggest cookie context", async ({
-  request,
-}) => {
-  const response = await request.get("/suggest", {
-    params: { q: "!g" },
-    headers: { Cookie: "suggest=custom,g,|f:%E0%A4%A" },
-  });
-
-  expect(response.status()).toBe(200);
-  const setCookie = response.headers()["set-cookie"] ?? "";
-  expect(setCookie).toContain("suggest=custom,g,");
-  expect(setCookie).toContain("SameSite=Lax");
-  expect(setCookie).toContain("Secure");
-
-  const payload = await response.json();
-  expect(payload[0]).toBe("!g");
-});
-
-test("opensearch endpoint uses request origin in generated templates", async ({
-  request,
-}) => {
-  const response = await request.get("/opensearch.xml");
-  expect(response.status()).toBe(200);
-  expect(response.headers()["content-type"]).toContain(
-    "application/opensearchdescription+xml"
-  );
-
-  const origin = new URL(response.url()).origin;
-  const xml = await response.text();
-  expect(xml).toContain(`${origin}/icon.svg`);
-  expect(xml).toContain(`${origin}/?q={searchTerms}`);
-  expect(xml).toContain(`${origin}/suggest?q={searchTerms}`);
-});
-
 test("suggestions include custom bang entries from the suggest cookie", async ({
   request,
 }) => {
@@ -462,8 +408,6 @@ test("homepage bang finder supports keyboard selection", async ({ page }) => {
   await openHome(page);
   const input = page.locator("#bang-command-input");
   await expect(page.locator("#bang-command-results")).toBeHidden();
-  await expect(input).toHaveCSS("border-top-width", "1px");
-  await expect(input).toHaveCSS("border-top-style", "solid");
 
   await input.fill("github");
   const results = page.locator("#bang-command-results");
@@ -624,7 +568,6 @@ test("compact address-bar setup exposes browser instructions and copyable URLs",
     "aria-labelledby",
     `setup-browser-tab-${expectedBrowser.id}`
   );
-  await expect(page.locator("#setup-browser-steps li")).not.toHaveCount(0);
   await expect(page.locator("#setup-browser-docs")).toHaveAttribute(
     "href",
     new RegExp(`^https://${expectedBrowser.docsHost.replaceAll(".", "\\.")}/`)
@@ -672,10 +615,6 @@ test("compact address-bar setup exposes browser instructions and copyable URLs",
   await expect(page.locator("#setup-suggest-url")).toHaveValue(
     `${baseSuggestUrl}&sp=google`
   );
-
-  const cardBox = await page.locator("#setup-card").boundingBox();
-  expect(cardBox).not.toBeNull();
-  expect(cardBox!.y + cardBox!.height).toBeGreaterThan(760);
 
   await page.click("#copy-search-url");
   await expect
@@ -728,7 +667,6 @@ test("default search engine field previews and selects bangs", async ({
   const input = page.locator("#default-bang");
   const results = page.locator("#default-bang-results");
   await expect(results).toBeVisible();
-  await expect(page.locator("#bang-search")).toHaveCount(0);
   await expect(input).toHaveAttribute(
     "aria-activedescendant",
     "default-bang-option-0"

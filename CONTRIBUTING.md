@@ -91,7 +91,7 @@ Add tests for new logic and user-facing behavior. Look at existing tests for pat
 - `tests/custom-trigger.test.ts` — custom trigger validation and reserved names
 - `tests/development-docs.test.ts` — `DEVELOPMENT.md` project-tree paths, types, and tracked-file completeness
 - `tests/ui-db.test.ts` and `tests/sw-idb.test.ts` — custom-bang persistence and Service Worker compilation
-- `tests/e2e/flashbang.e2e.ts` — settings, Suggest/OpenSearch endpoints, warm/cold/offline redirects, Service Worker updates, and custom bang browser flows
+- `tests/e2e/flashbang.e2e.ts` — settings, Suggest endpoint, warm/cold/offline redirects, Service Worker updates, and custom bang browser flows
 
 ## Code style
 
