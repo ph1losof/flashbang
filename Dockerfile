@@ -29,6 +29,7 @@ COPY --from=builder /app/src/shared/constants.ts src/shared/constants.ts
 COPY --from=builder /app/src/shared/frecency-serial.ts src/shared/frecency-serial.ts
 COPY --from=builder /app/src/shared/raw-query.ts src/shared/raw-query.ts
 COPY --from=builder /app/src/shared/raw-url.ts src/shared/raw-url.ts
+COPY --from=builder /app/src/shared/snap-chain.ts src/shared/snap-chain.ts
 COPY --from=builder /app/src/shared/suggest-cookie.ts src/shared/suggest-cookie.ts
 COPY --from=builder /app/src/shared/template.ts src/shared/template.ts
 COPY --from=builder /app/src/shared/trigger-prefix.ts src/shared/trigger-prefix.ts
