@@ -17,6 +17,7 @@ ENV ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=$ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS
 
 WORKDIR /app
 COPY --from=builder /app/dist dist
+COPY --from=builder /app/scripts/inline-script-hash.ts scripts/inline-script-hash.ts
 COPY --from=builder /app/scripts/start.ts scripts/start.ts
 COPY --from=builder /app/src/suggest.ts src/suggest.ts
 COPY --from=builder /app/src/suggest-bang.ts src/suggest-bang.ts

@@ -1901,7 +1901,11 @@ test("settings catalog works on its first offline open", async ({
     browserName === "webkit",
     "Playwright WebKit does not support service worker lifecycle testing"
   );
+  const catalogResponse = page.waitForResponse(
+    (response) => response.url().includes("/bangs-meta-") && response.ok()
+  );
   await ensureWarmController(page);
+  await catalogResponse;
 
   await context.setOffline(true);
   try {
