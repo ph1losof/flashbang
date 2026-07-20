@@ -55,11 +55,12 @@ describe("service worker hot redirects", () => {
   test("round-trips a versioned build-specific boot record", () => {
     const state = createHotBootState(snapshot());
     const record = encodeHotBootRecord("fb-test", state);
+    expect(record.startsWith("h1|fb-test|")).toBe(true);
     expect(record.length).toBeLessThan(32);
     expect(parseHotBootRecord(record, "fb-test")).toBe(state);
     expect(parseHotBootRecord(record, "fb-other")).toBe(NO_HOT_BOOT);
     expect(parseHotBootRecord("true", "fb-test")).toBe(NO_HOT_BOOT);
-    expect(parseHotBootRecord("h2|fb-test|not-valid!", "fb-test")).toBe(
+    expect(parseHotBootRecord("h3|fb-test|not-valid!", "fb-test")).toBe(
       NO_HOT_BOOT
     );
     expect(
