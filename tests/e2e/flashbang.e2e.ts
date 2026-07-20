@@ -1875,7 +1875,7 @@ test("rich hot boot redirects without IndexedDB or bang data", async ({
         return state.headerValue;
       })
     )
-    .toMatch(/^h3\|fb-[^|]+\|[^|]+\|/);
+    .toMatch(/^h1\|fb-[^|]+\|[^|]+\|/);
 
   await page.evaluate(async () => {
     for (const name of await caches.keys()) {
