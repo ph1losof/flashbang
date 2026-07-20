@@ -387,6 +387,7 @@ describe("parseCookie", () => {
     expect(padded.provider).toBe("ddg");
     expect(padded.trigger).toBe("g");
     expect(leading.provider).toBe("google");
+    expect(leading.trigger).toBe("g");
   });
 
   test("legacy suggest context is normalized on next response", () => {

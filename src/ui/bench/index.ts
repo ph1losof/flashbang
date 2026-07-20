@@ -429,6 +429,13 @@ async function prepareBenchmarkPage(): Promise<void> {
   try {
     await ensureSW();
     if (!crossOriginIsolated) {
+      const reloadKey = "flashbang-benchmark-isolation-reload";
+      if (sessionStorage.getItem(reloadKey)) {
+        throw new Error(
+          "Cross-origin isolation is unavailable after reloading"
+        );
+      }
+      sessionStorage.setItem(reloadKey, "1");
       location.reload();
       return;
     }

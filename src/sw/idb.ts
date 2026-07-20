@@ -225,7 +225,9 @@ function hydrateFrecency(stored: string | undefined): void {
   }
   frecencyCounts = loaded;
   frecencyLoaded = true;
-  shouldPersist = applyDecay() || pruneFrecency() || shouldPersist;
+  const decayed = applyDecay();
+  const pruned = pruneFrecency();
+  shouldPersist = decayed || pruned || shouldPersist;
   topFrecency = buildTopFrecency(frecencyCounts, FRECENCY_COOKIE_ENTRIES);
   if (shouldPersist) {
     void persistFrecencySnapshot(frecencyCounts, lastDecayTs);
