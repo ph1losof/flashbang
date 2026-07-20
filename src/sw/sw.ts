@@ -12,13 +12,13 @@ import {
 } from "./bang-data";
 import {
   createHotBootState,
+  decodeHotBootRecord,
   encodeHotBootRecord,
-  getHotBootSettings,
   getResolvedHotTrigger,
   HOT_BOOT_SENTINEL,
+  type HotBootRecord,
   hotBootSettingsNeedPublish,
   NO_HOT_BOOT,
-  parseHotBootRecord,
   resolveHotRedirect,
 } from "./hot-redirect";
 import {
@@ -82,18 +82,27 @@ let benchmarkState: {
   token: string;
 } | null = null;
 const RESOLVED_PROMISE: Promise<void> = Promise.resolve();
-const NO_HOT_BOOT_PROMISE = Promise.resolve(NO_HOT_BOOT);
+const NO_HOT_BOOT_PROMISE: Promise<HotBootRecord | null> =
+  Promise.resolve(null);
 const navigationPreload = self.registration?.navigationPreload;
-let hotBootPromise: Promise<number> = navigationPreload
+let hotBootGeneration = 0;
+let currentHotBoot: HotBootRecord | null = null;
+const initialHotBootGeneration = hotBootGeneration;
+let hotBootPromise: Promise<HotBootRecord | null> = navigationPreload
   ? navigationPreload
       .getState()
       .then((state) => {
         const raw = state.headerValue ?? "";
-        return state.enabled
-          ? NO_HOT_BOOT
-          : parseHotBootRecord(raw, CACHE_NAME);
+        const record = state.enabled
+          ? null
+          : decodeHotBootRecord(raw, CACHE_NAME);
+        if (hotBootGeneration !== initialHotBootGeneration) {
+          return currentHotBoot;
+        }
+        currentHotBoot = record;
+        return record;
       })
-      .catch(() => NO_HOT_BOOT)
+      .catch(() => currentHotBoot)
   : NO_HOT_BOOT_PROMISE;
 let hotBootMutation: Promise<void> = RESOLVED_PROMISE;
 const hotBootUpdateTokens = new Set<string>();
@@ -108,8 +117,9 @@ function queueHotBootMutation(operation: () => Promise<void>): Promise<void> {
 }
 
 async function disableHotBoot(): Promise<void> {
+  hotBootGeneration++;
+  currentHotBoot = null;
   hotBootPromise = NO_HOT_BOOT_PROMISE;
-  parseHotBootRecord(HOT_BOOT_SENTINEL, CACHE_NAME);
   if (!navigationPreload) {
     return;
   }
@@ -132,7 +142,10 @@ async function publishHotBoot(includeSettings = false): Promise<void> {
   const record = encodeHotBootRecord(CACHE_NAME, state, snapshot, settings);
   await navigationPreload.disable();
   await navigationPreload.setHeaderValue(record);
-  hotBootPromise = Promise.resolve(parseHotBootRecord(record, CACHE_NAME));
+  const decoded = decodeHotBootRecord(record, CACHE_NAME);
+  hotBootGeneration++;
+  currentHotBoot = decoded;
+  hotBootPromise = Promise.resolve(decoded);
 }
 
 const BENCHMARK_TARGET_PATH = "/__flashbang-bench-target";
@@ -216,7 +229,7 @@ function seedRuntime(
     .open(CACHE_NAME)
     .then((cache) => cache.put(new Request(BANG_DATA_ASSET), response))
     .catch(swallowError);
-  const publishSettings = hotBootSettingsNeedPublish()
+  const publishSettings = hotBootSettingsNeedPublish(currentHotBoot)
     ? queueHotBootMutation(() => publishHotBoot(true)).catch(swallowError)
     : RESOLVED_PROMISE;
   return Promise.all([persistData, loadFrecency(), publishSettings]).then(
@@ -233,7 +246,7 @@ function warmRuntime(): Promise<void> {
       ensureBangData(),
       readRedirectSettings(),
     ]).then(async () => {
-      if (hotBootSettingsNeedPublish()) {
+      if (hotBootSettingsNeedPublish(currentHotBoot)) {
         await queueHotBootMutation(() => publishHotBoot(true));
       }
     });
@@ -687,13 +700,15 @@ self.addEventListener("fetch", (e: FetchEvent) => {
         e.respondWith(
           hotBootPromise.then((hotBoot) => {
             if (e.request.mode === "navigate") {
-              const hotUrl = resolveHotRedirect(rawQ, hotBoot);
+              const hotUrl = resolveHotRedirect(
+                rawQ,
+                hotBoot?.state ?? NO_HOT_BOOT
+              );
               if (hotUrl) {
                 queueBangSideEffects(e, getResolvedHotTrigger());
                 return Response.redirect(hotUrl, 302);
               }
-              const settings =
-                hotBoot === NO_HOT_BOOT ? null : getHotBootSettings();
+              const settings = hotBoot?.settings;
               if (settings) {
                 try {
                   return respondToRedirect(e, rawQ, settings);
@@ -711,7 +726,7 @@ self.addEventListener("fetch", (e: FetchEvent) => {
             return loading.then(() => {
               const cached = getCachedSettings();
               if (cached) {
-                if (hotBootSettingsNeedPublish()) {
+                if (hotBootSettingsNeedPublish(currentHotBoot)) {
                   e.waitUntil(
                     queueHotBootMutation(() => publishHotBoot(true)).catch(
                       swallowError
@@ -721,7 +736,7 @@ self.addEventListener("fetch", (e: FetchEvent) => {
                 return respondToRedirect(e, rawQ, cached);
               }
               return readRedirectSettings().then((settings) => {
-                if (hotBootSettingsNeedPublish()) {
+                if (hotBootSettingsNeedPublish(currentHotBoot)) {
                   e.waitUntil(
                     queueHotBootMutation(() => publishHotBoot(true)).catch(
                       swallowError

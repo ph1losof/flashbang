@@ -1346,23 +1346,62 @@ function generateHotBangs(bangs: readonly Bang[]): string {
 
   const prefixes: string[] = [];
   const suffixes: string[] = [];
-  const cases: string[] = [];
+  const lookupGroups = new Map<
+    number,
+    Map<number, Array<{ id: number; trigger: string }>>
+  >();
   for (let i = 0; i < hot.length; i++) {
     const bang = hot[i];
     const placeholder = bang.url.indexOf("{}");
     prefixes.push(bang.url.substring(0, placeholder));
     suffixes.push(bang.url.substring(placeholder + 2));
-    cases.push(
-      `case ${hashFNV1a(bang.trigger)}:return e-s===${bang.trigger.length}&&q.startsWith(${JSON.stringify(bang.trigger)},s)?${i}:-1;`
-    );
+    let byFirst = lookupGroups.get(bang.trigger.length);
+    if (!byFirst) {
+      byFirst = new Map();
+      lookupGroups.set(bang.trigger.length, byFirst);
+    }
+    const first = bang.trigger.charCodeAt(0);
+    const entries = byFirst.get(first) ?? [];
+    entries.push({ id: i, trigger: bang.trigger });
+    byFirst.set(first, entries);
   }
+
+  const lookupCases = [...lookupGroups]
+    .sort(([left], [right]) => left - right)
+    .map(([length, byFirst]) => {
+      if (length === 1) {
+        const cases = [...byFirst].map(
+          ([first, entries]) => `case ${first}:return ${entries[0].id};`
+        );
+        return `case 1:switch(q.charCodeAt(s)){${cases.join("")}default:return -1}`;
+      }
+      if (length === 2) {
+        const cases = [...byFirst]
+          .flatMap(([, entries]) => entries)
+          .map(
+            ({ id, trigger }) =>
+              `case ${trigger.charCodeAt(0) * 65536 + trigger.charCodeAt(1)}:return ${id};`
+          );
+        return `case 2:switch(q.charCodeAt(s)*65536+q.charCodeAt(s+1)){${cases.join("")}default:return -1}`;
+      }
+      const cases = [...byFirst].map(([first, entries]) => {
+        const checks = entries
+          .map(
+            ({ id, trigger }) =>
+              `if(q.startsWith(${JSON.stringify(trigger)},s))return ${id};`
+          )
+          .join("");
+        return `case ${first}:${checks}return -1;`;
+      });
+      return `case ${length}:switch(q.charCodeAt(s)){${cases.join("")}default:return -1}`;
+    });
 
   return (
     `export const HOT_BANG_COUNT=${hot.length};` +
     `export const HOT_TRIGGERS=${JSON.stringify(hot.map((bang) => bang.trigger))};` +
     `export const HOT_PREFIXES=${JSON.stringify(prefixes)};` +
     `export const HOT_SUFFIXES=${JSON.stringify(suffixes)};` +
-    `export function lookupHotBang(q,s,e,h){switch(h>>>0){${cases.join("")}default:return -1}}`
+    `export function lookupHotBang(q,s,e){switch(e-s){${lookupCases.join("")}default:return -1}}`
   );
 }
 
@@ -1412,7 +1451,7 @@ async function writeGeneratedDeclarations(outDir: string): Promise<void> {
         "export declare const HOT_TRIGGERS: readonly string[];",
         "export declare const HOT_PREFIXES: readonly string[];",
         "export declare const HOT_SUFFIXES: readonly string[];",
-        "export declare function lookupHotBang(rawQuery: string, start: number, end: number, hash: number): number;",
+        "export declare function lookupHotBang(rawQuery: string, start: number, end: number): number;",
         "",
       ].join("\n")
     ),

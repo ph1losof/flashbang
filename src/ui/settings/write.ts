@@ -96,6 +96,9 @@ export function createSettingsWriter(
       key === "custom-bangs" ||
       key === "bang-prefix" ||
       key === "snap-prefix" ||
+      key === "default-bang" ||
+      key === "lucky-provider" ||
+      key === "lucky-url" ||
       key === "import";
     const wasIdle = pendingWrites === 0;
     pendingWrites++;

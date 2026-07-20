@@ -4,9 +4,8 @@ import { compileCaptureUrl } from "../src/shared/capture-template";
 import { TRIGGER_PREFIXES } from "../src/shared/trigger-prefix";
 import {
   createHotBootState,
+  decodeHotBootRecord,
   encodeHotBootRecord,
-  getHotBootDefaultBang,
-  getHotBootSettings,
   getResolvedHotTrigger,
   hotBootSettingsNeedPublish,
   MAX_HOT_BOOT_RECORD_LENGTH,
@@ -63,11 +62,13 @@ describe("service worker hot redirects", () => {
     expect(parseHotBootRecord("h2|fb-test|not-valid!", "fb-test")).toBe(
       NO_HOT_BOOT
     );
-    expect(hotBootSettingsNeedPublish()).toBe(true);
+    expect(
+      hotBootSettingsNeedPublish(decodeHotBootRecord(record, "fb-test"))
+    ).toBe(true);
     expect(parseHotBootRecord(`${record}|not-base64!`, "fb-test")).toBe(
       NO_HOT_BOOT
     );
-    expect(getHotBootSettings()).toBeNull();
+    expect(decodeHotBootRecord(`${record}|not-base64!`, "fb-test")).toBeNull();
   });
 
   test("round-trips materialized settings and every simple custom entry", () => {
@@ -97,18 +98,18 @@ describe("service worker hot redirects", () => {
     );
 
     expect(record.length).toBeLessThan(MAX_HOT_BOOT_RECORD_LENGTH);
-    expect(parseHotBootRecord(record, "fb-test")).toBe(state);
-    expect(getHotBootDefaultBang()).toBe("sp");
-    expect(hotBootSettingsNeedPublish()).toBe(false);
-    const decoded = getHotBootSettings()!;
-    expect(decoded.custom.regex).toBeUndefined();
-    expect(redirectRawUrl("regular+query", decoded)).toBe(
+    const decoded = decodeHotBootRecord(record, "fb-test")!;
+    expect(decoded.state).toBe(state);
+    expect(decoded.defaultBang).toBe("sp");
+    expect(hotBootSettingsNeedPublish(decoded)).toBe(false);
+    expect(decoded.settings!.custom.regex).toBeUndefined();
+    expect(redirectRawUrl("regular+query", decoded.settings!)).toBe(
       "https://startpage.com/do/metasearch.pl?query=regular+query"
     );
-    expect(redirectRawUrl(";path+alice", decoded)).toBe(
+    expect(redirectRawUrl(";path+alice", decoded.settings!)).toBe(
       "https://example.com/users/alice"
     );
-    expect(redirectRawUrl("@docs+service+workers", decoded)).toBe(
+    expect(redirectRawUrl("@docs+service+workers", decoded.settings!)).toBe(
       "https://startpage.com/do/metasearch.pl?query=service+workers+site:docs.example"
     );
   });
@@ -130,9 +131,50 @@ describe("service worker hot redirects", () => {
       settings(custom)
     );
     expect(record.endsWith("|-")).toBe(true);
-    expect(parseHotBootRecord(record, "fb-test")).toBe(state);
-    expect(getHotBootSettings()).toBeNull();
-    expect(hotBootSettingsNeedPublish()).toBe(false);
+    const decoded = decodeHotBootRecord(record, "fb-test")!;
+    expect(decoded.state).toBe(state);
+    expect(decoded.settings).toBeNull();
+    expect(hotBootSettingsNeedPublish(decoded)).toBe(false);
+    expect(
+      decodeHotBootRecord(
+        `${record}${"a".repeat(MAX_HOT_BOOT_RECORD_LENGTH)}`,
+        "fb-test"
+      )
+    ).toBeNull();
+  });
+
+  test("normalizes a snapped custom default and rejects unsafe URLs", () => {
+    const custom = Object.assign(Object.create(null), {
+      docs: [
+        "https://docs.example/search?q=",
+        "",
+        ["+site:docs.example", "https://docs.example"],
+      ],
+    }) as Record<string, CustomUrlParts>;
+    const sourceSnapshot = snapshot(custom);
+    sourceSnapshot.defaultBang = "docs";
+    const sourceSettings = settings(custom);
+    sourceSettings.defaultUrl = custom.docs as RedirectSettings["defaultUrl"];
+    const state = createHotBootState(sourceSnapshot);
+    const record = encodeHotBootRecord(
+      "fb-test",
+      state,
+      sourceSnapshot,
+      sourceSettings
+    );
+    const decoded = decodeHotBootRecord(record, "fb-test")!;
+    expect(decoded.settings?.defaultUrl).toEqual([
+      "https://docs.example/search?q=",
+      "",
+    ]);
+
+    sourceSettings.defaultUrl = ["javascript:alert(1)", null];
+    expect(
+      decodeHotBootRecord(
+        encodeHotBootRecord("fb-test", state, sourceSnapshot, sourceSettings),
+        "fb-test"
+      )
+    ).toBeNull();
   });
 
   test("matches the full resolver for every generated hot bang", () => {

@@ -23,9 +23,13 @@ export { HOT_BOOT_SENTINEL };
 export const NO_HOT_BOOT = -1;
 
 let resolvedHotId = -1;
-let bootSettings: RedirectSettings | null = null;
-let bootDefaultBang = "";
-let bootPayloadComplete = false;
+
+export interface HotBootRecord {
+  defaultBang: string;
+  payloadComplete: boolean;
+  settings: RedirectSettings | null;
+  state: number;
+}
 
 function isBangMarker(code: number): boolean {
   return (
@@ -90,11 +94,21 @@ function decodeBase64Url(value: string): string | null {
   }
 }
 
+function isHttpUrl(value: string): boolean {
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 function isUrlParts(value: unknown): value is UrlParts {
   return (
     Array.isArray(value) &&
     value.length === 2 &&
     typeof value[0] === "string" &&
+    isHttpUrl(value[0]) &&
     (value[1] === null || typeof value[1] === "string")
   );
 }
@@ -104,7 +118,8 @@ function isSnapTarget(value: unknown): value is readonly [string, string] {
     Array.isArray(value) &&
     value.length === 2 &&
     typeof value[0] === "string" &&
-    typeof value[1] === "string"
+    typeof value[1] === "string" &&
+    isHttpUrl(value[1])
   );
 }
 
@@ -114,6 +129,7 @@ function isSimpleCustom(value: unknown): value is CustomUrlParts {
     (Array.isArray(value) &&
       value.length === 3 &&
       typeof value[0] === "string" &&
+      isHttpUrl(value[0]) &&
       (value[1] === null || typeof value[1] === "string") &&
       isSnapTarget(value[2]))
   );
@@ -204,7 +220,7 @@ function encodeBootSettings(
   return encodeBase64Url(
     JSON.stringify([
       snapshot.defaultBang,
-      settings.defaultUrl,
+      [settings.defaultUrl[0], settings.defaultUrl[1]],
       settings.luckyUrl,
       markers,
       custom,
@@ -238,12 +254,19 @@ export function encodeHotBootRecord(
 }
 
 export function parseHotBootRecord(raw: string, cacheName: string): number {
-  bootSettings = null;
-  bootDefaultBang = "";
-  bootPayloadComplete = false;
+  return decodeHotBootRecord(raw, cacheName)?.state ?? NO_HOT_BOOT;
+}
+
+export function decodeHotBootRecord(
+  raw: string,
+  cacheName: string
+): HotBootRecord | null {
+  if (raw.length > MAX_HOT_BOOT_RECORD_LENGTH) {
+    return null;
+  }
   const prefix = `${HOT_BOOT_VERSION}|${cacheName}|`;
   if (!raw.startsWith(prefix)) {
-    return NO_HOT_BOOT;
+    return null;
   }
   const payloadStart = raw.indexOf("|", prefix.length);
   const packed = parseBase36(
@@ -252,34 +275,30 @@ export function parseHotBootRecord(raw: string, cacheName: string): number {
     payloadStart === -1 ? raw.length : payloadStart
   );
   if (packed < 0 || !isBangMarker(Math.floor(packed / MASK_BASE))) {
-    return NO_HOT_BOOT;
+    return null;
   }
+  let defaultBang = "";
+  let settings: RedirectSettings | null = null;
+  let payloadComplete = false;
   if (payloadStart !== -1) {
-    bootPayloadComplete = true;
+    payloadComplete = true;
     const encoded = raw.substring(payloadStart + 1);
     if (encoded !== "-") {
       const decoded = decodeBootSettings(encoded);
       if (!decoded) {
-        bootPayloadComplete = false;
-        return NO_HOT_BOOT;
+        return null;
       }
-      bootDefaultBang = decoded.defaultBang;
-      bootSettings = decoded.settings;
+      defaultBang = decoded.defaultBang;
+      settings = decoded.settings;
     }
   }
-  return packed;
+  return { defaultBang, payloadComplete, settings, state: packed };
 }
 
-export function getHotBootDefaultBang(): string {
-  return bootDefaultBang;
-}
-
-export function getHotBootSettings(): RedirectSettings | null {
-  return bootSettings;
-}
-
-export function hotBootSettingsNeedPublish(): boolean {
-  return !bootPayloadComplete;
+export function hotBootSettingsNeedPublish(
+  record: HotBootRecord | null
+): boolean {
+  return !record?.payloadComplete;
 }
 
 export function getResolvedHotTrigger(): string {
@@ -312,7 +331,6 @@ export function resolveHotRedirect(
     return null;
   }
 
-  let hash = 2166136261 >>> 0;
   let separator = triggerStart;
   let separatorWidth = 0;
   for (; separator < length; separator++) {
@@ -329,17 +347,12 @@ export function resolveHotRedirect(
       separatorWidth = 3;
       break;
     }
-    if (code >= 65 && code <= 90) {
-      return null;
-    }
-    hash ^= code;
-    hash = Math.imul(hash, 16777619);
   }
   if (separatorWidth === 0) {
     return null;
   }
 
-  const id = lookupHotBang(rawQuery, triggerStart, separator, hash >>> 0);
+  const id = lookupHotBang(rawQuery, triggerStart, separator);
   if (id < 0 || (state & (1 << id)) !== 0) {
     return null;
   }

@@ -1821,6 +1821,104 @@ test("redirect survives a service worker restart", async ({
   expect(page.url()).toMatch(GOOGLE_REDIRECT);
 });
 
+test("rich hot boot redirects without IndexedDB or bang data", async ({
+  browser,
+  browserName,
+  context,
+  page,
+}) => {
+  test.skip(
+    browserName !== "chromium",
+    "Playwright only exposes service worker handles in Chromium"
+  );
+  await mockCustomHostRoute(page);
+  await context.route("https://startpage.com/**", (route) =>
+    route.fulfill({ body: "ok", contentType: "text/plain", status: 200 })
+  );
+  await ensureWarmController(page);
+  await seedCustomBangs(page, [
+    {
+      trigger: "mine",
+      name: "Metadata custom",
+      url: `${CUSTOM_HOST}/search?q={}`,
+    },
+  ]);
+  await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("flashbang", 1);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction("settings", "readwrite");
+      tx.objectStore("settings").put({ key: "default-bang", value: "sp" });
+      tx.objectStore("settings").delete("redirect-settings-snapshot");
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+    db.close();
+    await new Promise<void>((resolve) => {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => resolve();
+      navigator.serviceWorker.controller?.postMessage({ type: "invalidate" }, [
+        channel.port2,
+      ]);
+    });
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const state = await (
+          await navigator.serviceWorker.ready
+        ).navigationPreload.getState();
+        return state.headerValue;
+      })
+    )
+    .toMatch(/^h3\|fb-[^|]+\|[^|]+\|/);
+
+  await page.evaluate(async () => {
+    for (const name of await caches.keys()) {
+      const cache = await caches.open(name);
+      for (const request of await cache.keys()) {
+        const pathname = new URL(request.url).pathname;
+        if (
+          pathname.startsWith("/bangs-") &&
+          !pathname.startsWith("/bangs-meta-")
+        ) {
+          await cache.delete(request);
+        }
+      }
+    }
+  });
+  const cdp = await browser.newBrowserCDPSession();
+  const { targetInfos } = await cdp.send("Target.getTargets");
+  const workerTarget = targetInfos.find(
+    (target) =>
+      target.type === "service_worker" && target.url.endsWith("/sw.js")
+  );
+  expect(workerTarget).toBeDefined();
+  await cdp.send("Target.closeTarget", { targetId: workerTarget!.targetId });
+  await cdp.detach();
+
+  const origin = new URL(page.url()).origin;
+  await context.route(`${origin}/**`, (route) => route.abort());
+  await navigateAndWaitForRedirect(
+    page,
+    "/?q=%21mine%20hello",
+    /example\.com\/search\?q=hello/
+  );
+  const defaultPage = await context.newPage();
+  await navigateAndWaitForRedirect(
+    defaultPage,
+    `${origin}/?q=plain%20query`,
+    /startpage\.com\/do\/metasearch\.pl/
+  );
+  expect(new URL(defaultPage.url()).searchParams.get("query")).toBe(
+    "plain query"
+  );
+});
+
 test("controlled redirect works while offline", async ({
   browserName,
   context,

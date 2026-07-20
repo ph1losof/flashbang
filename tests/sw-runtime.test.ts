@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { REDIRECT_SETTINGS_SNAPSHOT_KEY } from "../src/shared/constants";
 import {
-  getHotBootSettings,
+  decodeHotBootRecord,
   HOT_BOOT_SENTINEL,
   parseHotBootRecord,
   resolveHotRedirect,
@@ -595,9 +595,9 @@ describe("sw runtime with real modules", () => {
     await handlers.message?.(end.event);
     await Promise.all(end.waits);
     expect(endReplies).toEqual([true]);
-    const updated = parseHotBootRecord(state.headerValue, "fb-test-cache");
-    expect(resolveHotRedirect(";gh+test", updated)).toBeNull();
-    expect(redirectRawUrl(";gh+test", getHotBootSettings()!)).toBe(
+    const updated = decodeHotBootRecord(state.headerValue, "fb-test-cache")!;
+    expect(resolveHotRedirect(";gh+test", updated.state)).toBeNull();
+    expect(redirectRawUrl(";gh+test", updated.settings!)).toBe(
       "https://custom.example/?q=test"
     );
     expect(navigationPreloadWrites).toContain(HOT_BOOT_SENTINEL);
