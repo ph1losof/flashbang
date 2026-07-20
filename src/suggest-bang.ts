@@ -105,6 +105,22 @@ function effectiveScore(
   );
 }
 
+function includesTrigger(
+  triggers: readonly string[] | null,
+  trigger: string
+): boolean {
+  if (!triggers) {
+    return false;
+  }
+  let i = 0;
+  while (i < triggers.length) {
+    if (triggers[i++] === trigger) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function walkPrefix(partial: string): [number, string] | null {
   let node = ROOT;
   let pos = 0;
@@ -172,7 +188,7 @@ function topK(
   frecent: Record<string, number>,
   customMatches: Candidate[],
   hasFrecent: boolean,
-  excluded: ReadonlySet<string> | null
+  excluded: readonly string[] | null
 ): number {
   let minIdx = -1;
   let threshold = -1;
@@ -218,7 +234,7 @@ function topK(
 
     if (terminalIndex >= 0) {
       const trigger = readTerminalTrigger(terminalIndex);
-      if (!excluded?.has(trigger)) {
+      if (!includesTrigger(excluded, trigger)) {
         const score = hasFrecent
           ? effectiveScore(TERM_R[terminalIndex], frecent, trigger)
           : TERM_R[terminalIndex];
@@ -393,8 +409,14 @@ export function bangSuggestions(
   selectedTriggers: readonly string[] = []
 ): Response {
   const result = walkPrefix(partial);
-  const excluded =
-    selectedTriggers.length > 0 ? new Set(selectedTriggers) : null;
+  let excluded: readonly string[] | null = null;
+  let selectedIndex = 0;
+  while (selectedIndex < selectedTriggers.length) {
+    if (selectedTriggers[selectedIndex++].startsWith(partial)) {
+      excluded = selectedTriggers;
+      break;
+    }
+  }
   let hasFrecent = false;
   for (const _ in frecent) {
     hasFrecent = true;
@@ -406,7 +428,7 @@ export function bangSuggestions(
   if (custom.length > 0) {
     const upperBound = `${partial}\uFFFF`;
     for (const trigger of custom) {
-      if (excluded?.has(trigger)) {
+      if (includesTrigger(excluded, trigger)) {
         continue;
       }
       if (!trigger.startsWith(partial)) {

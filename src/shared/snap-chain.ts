@@ -13,14 +13,26 @@ export function parsePartialSnapChain(value: string): PartialSnapChain | null {
     return null;
   }
 
-  const selectedTriggers = value
-    .substring(0, lastComma)
-    .split(",")
-    .map((trigger) => trigger.toLowerCase());
-  if (
-    selectedTriggers.length >= MAX_SNAP_CHAIN_TARGETS ||
-    selectedTriggers.some((trigger) => !trigger)
-  ) {
+  const selectedTriggers: string[] = [];
+  let segmentStart = 0;
+  while (segmentStart <= lastComma) {
+    const comma = value.indexOf(",", segmentStart);
+    const segmentEnd = comma === -1 || comma > lastComma ? lastComma : comma;
+    if (
+      segmentEnd === segmentStart ||
+      selectedTriggers.length >= MAX_SNAP_CHAIN_TARGETS
+    ) {
+      return null;
+    }
+    selectedTriggers.push(
+      value.substring(segmentStart, segmentEnd).toLowerCase()
+    );
+    if (segmentEnd === lastComma) {
+      break;
+    }
+    segmentStart = segmentEnd + 1;
+  }
+  if (selectedTriggers.length >= MAX_SNAP_CHAIN_TARGETS) {
     return null;
   }
 

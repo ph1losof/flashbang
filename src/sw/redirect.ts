@@ -17,10 +17,7 @@ import {
   CH_PERCENT,
   CH_PLUS,
 } from "../shared/chars";
-import {
-  MAX_SNAP_CHAIN_TARGETS,
-  MIN_SNAP_CHAIN_TARGETS,
-} from "../shared/snap-chain";
+import { MAX_SNAP_CHAIN_TARGETS } from "../shared/snap-chain";
 import type { SnapTargetParts } from "../shared/snap-target";
 import {
   DEFAULT_BANG_PREFIX,
@@ -535,7 +532,7 @@ function domainOfPrefix(prefix: string): string | null {
   const hostStart = protoEnd + 3;
   const tailStart = findUrlTail(prefix, hostStart);
   const host = prefix.substring(hostStart, tailStart);
-  return host.startsWith("www.") ? host.substring(4) : host;
+  return (host.startsWith("www.") ? host.substring(4) : host).toLowerCase();
 }
 
 const builtInSnapSiteFilterCache: Record<string, string> = Object.create(null);
@@ -603,12 +600,6 @@ function resolveSnapSiteFilter(
   return sf;
 }
 
-interface ResolvedSnapTargets {
-  count: number;
-  siteFilter: string;
-  trigger: string;
-}
-
 function snapSeparatorWidthAt(s: string, i: number, end: number): number {
   const c = s.charCodeAt(i);
   if (c === 44) {
@@ -622,81 +613,96 @@ function snapSeparatorWidthAt(s: string, i: number, end: number): number {
     : 0;
 }
 
-function snapSiteFilterKey(siteFilter: string): string {
-  const pathStart = siteFilter.indexOf("/", 6);
-  return pathStart === -1
-    ? siteFilter.toLowerCase()
-    : siteFilter.substring(0, pathStart).toLowerCase() +
-        siteFilter.substring(pathStart);
-}
+const snapSiteFilters = new Array<string>(MAX_SNAP_CHAIN_TARGETS);
+let _snapSeparator = -1;
+let _snapSeparatorWidth = 0;
 
-function resolveSnapTargets(
-  rawQuery: string,
-  triggerStart: number,
-  triggerEnd: number,
-  custom: Record<string, CustomUrlParts>
-): ResolvedSnapTargets | null {
-  let firstSeparator = -1;
-  for (let i = triggerStart; i < triggerEnd; i++) {
-    if (snapSeparatorWidthAt(rawQuery, i, triggerEnd)) {
-      firstSeparator = i;
+function extractSnapTrigger(s: string, from: number, to: number): string {
+  let h = 2166136261 >>> 0;
+  let hasUpper = false;
+  let end = to;
+  _snapSeparator = -1;
+  _snapSeparatorWidth = 0;
+  for (let i = from; i < to; i++) {
+    const separatorWidth = snapSeparatorWidthAt(s, i, to);
+    if (separatorWidth) {
+      end = i;
+      _snapSeparator = i;
+      _snapSeparatorWidth = separatorWidth;
       break;
     }
+    const c = s.charCodeAt(i);
+    if (c >= 65 && c <= 90) {
+      hasUpper = true;
+      h ^= c | 32;
+    } else {
+      h ^= c;
+    }
+    h = Math.imul(h, 16777619);
   }
-  if (firstSeparator === -1) {
-    const trigger = extractTrigger(rawQuery, triggerStart, triggerEnd);
-    const siteFilter = resolveSnapSiteFilter(trigger, custom, _lastHash);
-    return siteFilter ? { count: 1, siteFilter, trigger } : null;
+  _lastHash = h >>> 0;
+  if (hasUpper) {
+    return s.slice(from, end).toLowerCase();
   }
+  return from === 0 && end === s.length ? s : s.substring(from, end);
+}
 
-  const siteFilters: string[] = [];
-  const seenSiteFilters = new Set<string>();
-  let firstTrigger = "";
-  let segmentStart = triggerStart;
-  let count = 0;
+function resolveSnapChain(
+  rawQuery: string,
+  firstTrigger: string,
+  firstHash: number,
+  triggerEnd: number,
+  custom: Record<string, CustomUrlParts>
+): string | null {
+  const firstSiteFilter = resolveSnapSiteFilter(
+    firstTrigger,
+    custom,
+    firstHash
+  );
+  if (!firstSiteFilter) {
+    return null;
+  }
+  snapSiteFilters[0] = firstSiteFilter;
+  let siteFilterCount = 1;
+  let count = 1;
+  let segmentStart = _snapSeparator + _snapSeparatorWidth;
 
   while (segmentStart <= triggerEnd) {
-    let segmentEnd = triggerEnd;
-    let separatorWidth = 0;
-    for (let i = segmentStart; i < triggerEnd; i++) {
-      const width = snapSeparatorWidthAt(rawQuery, i, triggerEnd);
-      if (width) {
-        segmentEnd = i;
-        separatorWidth = width;
-        break;
-      }
-    }
-    if (segmentEnd === segmentStart || count >= MAX_SNAP_CHAIN_TARGETS) {
+    if (segmentStart === triggerEnd || count >= MAX_SNAP_CHAIN_TARGETS) {
       return null;
     }
 
-    const trigger = extractTrigger(rawQuery, segmentStart, segmentEnd);
+    const trigger = extractSnapTrigger(rawQuery, segmentStart, triggerEnd);
     const siteFilter = resolveSnapSiteFilter(trigger, custom, _lastHash);
     if (!siteFilter) {
       return null;
     }
-    if (count === 0) {
-      firstTrigger = trigger;
-    }
     count++;
 
-    const key = snapSiteFilterKey(siteFilter);
-    if (!seenSiteFilters.has(key)) {
-      seenSiteFilters.add(key);
-      siteFilters.push(siteFilter);
+    let duplicate = false;
+    for (let i = 0; i < siteFilterCount; i++) {
+      if (snapSiteFilters[i] === siteFilter) {
+        duplicate = true;
+        break;
+      }
     }
-
-    if (!separatorWidth) {
+    if (!duplicate) {
+      snapSiteFilters[siteFilterCount++] = siteFilter;
+    }
+    if (_snapSeparator === -1) {
       break;
     }
-    segmentStart = segmentEnd + separatorWidth;
+    segmentStart = _snapSeparator + _snapSeparatorWidth;
   }
 
-  const siteFilter =
-    count >= MIN_SNAP_CHAIN_TARGETS && siteFilters.length > 1
-      ? `+(${siteFilters.map((filter) => filter.substring(1)).join("+OR+")})`
-      : siteFilters[0];
-  return { count, siteFilter, trigger: firstTrigger };
+  if (siteFilterCount === 1) {
+    return firstSiteFilter;
+  }
+  let expression = `+(${firstSiteFilter.substring(1)}`;
+  for (let i = 1; i < siteFilterCount; i++) {
+    expression += `+OR+${snapSiteFilters[i].substring(1)}`;
+  }
+  return `${expression})`;
 }
 
 function buildSnapUrl(
@@ -822,28 +828,46 @@ function resolvePrefixSnap(
   const sp = spPacked === -1 ? -1 : spPacked >> 2;
   const spLen = spPacked === -1 ? 0 : spPacked & 0b11;
   const triggerEnd = sp === -1 ? end : sp;
-  const snap = resolveSnapTargets(rawQuery, afterAt, triggerEnd, custom);
-  if (!snap) {
-    return buildUrl(defaultUrl, rawQuery, start, end);
-  }
+  const trigger = extractSnapTrigger(rawQuery, afterAt, triggerEnd);
 
-  if (sp === -1 || sp + spLen >= end) {
-    if (snap.count === 1) {
-      const origin = resolveSnapOrigin(snap.trigger, custom, _lastHash);
+  if (_snapSeparator === -1) {
+    if (sp === -1 || sp + spLen >= end) {
+      const origin = resolveSnapOrigin(trigger, custom, _lastHash);
       if (!origin) {
         return buildUrl(defaultUrl, rawQuery, start, end);
       }
-      return resolveWithTrigger(origin, snap.trigger);
+      return resolveWithTrigger(origin, trigger);
+    }
+    const siteFilter = resolveSnapSiteFilter(trigger, custom, _lastHash);
+    if (!siteFilter) {
+      return buildUrl(defaultUrl, rawQuery, start, end);
     }
     return resolveWithTrigger(
-      buildSnapUrl(defaultUrl, snap.siteFilter, rawQuery, end, end),
-      snap.trigger
+      buildSnapUrl(defaultUrl, siteFilter, rawQuery, sp + spLen, end),
+      trigger
     );
   }
 
+  const siteFilter = resolveSnapChain(
+    rawQuery,
+    trigger,
+    _lastHash,
+    triggerEnd,
+    custom
+  );
+  if (!siteFilter) {
+    return buildUrl(defaultUrl, rawQuery, start, end);
+  }
+
   return resolveWithTrigger(
-    buildSnapUrl(defaultUrl, snap.siteFilter, rawQuery, sp + spLen, end),
-    snap.trigger
+    buildSnapUrl(
+      defaultUrl,
+      siteFilter,
+      rawQuery,
+      sp === -1 ? end : sp + spLen,
+      end
+    ),
+    trigger
   );
 }
 
@@ -1039,17 +1063,21 @@ function resolveRaw(rawQuery: string, settings: RedirectSettings): string {
           triggerStart < end &&
           findSpace(rawQuery, triggerStart, end) === -1
         ) {
-          const snap = resolveSnapTargets(rawQuery, triggerStart, end, custom);
-          if (snap) {
+          const trigger = extractSnapTrigger(rawQuery, triggerStart, end);
+          const siteFilter =
+            _snapSeparator === -1
+              ? resolveSnapSiteFilter(trigger, custom, _lastHash)
+              : resolveSnapChain(rawQuery, trigger, _lastHash, end, custom);
+          if (siteFilter) {
             return resolveWithTrigger(
               buildSnapUrl(
                 defaultUrl,
-                snap.siteFilter,
+                siteFilter,
                 rawQuery,
                 start,
                 spaceBeforeAtPos
               ),
-              snap.trigger
+              trigger
             );
           }
         }
