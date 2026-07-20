@@ -4,7 +4,11 @@ import {
   validateCaptureBang,
   validateSimpleBangUrl,
 } from "../shared/capture-template";
-import { LUCKY_URLS, SUGGEST_URLS } from "../shared/constants";
+import {
+  LUCKY_URLS,
+  REDIRECT_SETTINGS_SNAPSHOT_KEY,
+  SUGGEST_URLS,
+} from "../shared/constants";
 import { validateCustomTrigger } from "../shared/custom-trigger";
 import { idbWrap, openDB } from "../shared/idb";
 import { validateSnapTarget } from "../shared/snap-target";
@@ -72,6 +76,14 @@ function transactionDone(tx: IDBTransaction): Promise<void> {
     tx.onerror = () => reject(tx.error ?? new Error("IndexedDB write failed"));
     tx.onabort = () => reject(tx.error ?? new Error("IndexedDB write aborted"));
   });
+}
+
+function invalidateRedirectSettingsSnapshot(
+  tx: IDBTransaction
+): Promise<undefined> {
+  return idbWrap(
+    tx.objectStore("settings").delete(REDIRECT_SETTINGS_SNAPSHOT_KEY)
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -295,6 +307,7 @@ export class DB {
     const done = transactionDone(tx);
     await Promise.all([
       idbWrap(tx.objectStore("settings").put({ key, value })),
+      invalidateRedirectSettingsSnapshot(tx),
       done,
     ]);
   }
@@ -310,10 +323,11 @@ export class DB {
       throw new Error(triggerError);
     }
     const db = await this.dbp;
-    const tx = db.transaction("custom-bangs", "readwrite");
+    const tx = db.transaction(["settings", "custom-bangs"], "readwrite");
     const done = transactionDone(tx);
     await Promise.all([
       idbWrap(tx.objectStore("custom-bangs").put(bang)),
+      invalidateRedirectSettingsSnapshot(tx),
       done,
     ]);
   }
@@ -324,7 +338,7 @@ export class DB {
       throw new Error(triggerError);
     }
     const db = await this.dbp;
-    const tx = db.transaction("custom-bangs", "readwrite");
+    const tx = db.transaction(["settings", "custom-bangs"], "readwrite");
     const done = transactionDone(tx);
     const s = tx.objectStore("custom-bangs");
     const ops: Promise<unknown>[] = [];
@@ -332,15 +346,16 @@ export class DB {
       ops.push(idbWrap(s.delete(previousTrigger)));
     }
     ops.push(idbWrap(s.put(bang)));
-    await Promise.all([...ops, done]);
+    await Promise.all([...ops, invalidateRedirectSettingsSnapshot(tx), done]);
   }
 
   async removeCustomBang(trigger: string) {
     const db = await this.dbp;
-    const tx = db.transaction("custom-bangs", "readwrite");
+    const tx = db.transaction(["settings", "custom-bangs"], "readwrite");
     const done = transactionDone(tx);
     await Promise.all([
       idbWrap(tx.objectStore("custom-bangs").delete(trigger)),
+      invalidateRedirectSettingsSnapshot(tx),
       done,
     ]);
   }
@@ -426,6 +441,7 @@ export class DB {
     const customStore = tx.objectStore("custom-bangs");
     const ops: Promise<unknown>[] = [];
     try {
+      ops.push(invalidateRedirectSettingsSnapshot(tx));
       for (const key of CONFIGURABLE_SETTING_KEYS) {
         ops.push(idbWrap(settingsStore.delete(key)));
       }

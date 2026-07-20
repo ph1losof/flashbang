@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { REDIRECT_SETTINGS_SNAPSHOT_KEY } from "../src/shared/constants";
 import { redirectUrl } from "../src/sw/redirect";
 import { loadTestBangData } from "./helpers/bang-data";
 import { installFakeIndexedDb, reqToPromise } from "./helpers/fake-indexeddb";
@@ -32,6 +33,7 @@ async function seedDb(data: {
   const tx = db.transaction(["settings", "custom-bangs"], "readwrite");
   const settingsStore = tx.objectStore("settings");
   const customStore = tx.objectStore("custom-bangs");
+  await reqToPromise(settingsStore.delete(REDIRECT_SETTINGS_SNAPSHOT_KEY));
 
   if (data.settings) {
     for (const row of data.settings) {
@@ -231,6 +233,64 @@ describe("sw/idb redirect settings", () => {
     ]);
   });
 
+  test("reuses the compiled snapshot without the source records", async () => {
+    await seedDb({
+      settings: [{ key: "default-bang", value: "translate" }],
+      customBangs: [
+        {
+          trigger: "translate",
+          url: "https://translate.example/$1/$2",
+          regex: "(\\w+)\\s+(.*)",
+          encoding: "percent",
+        },
+      ],
+    });
+    const mod = await loadSwIdb();
+    const first = await mod.readRedirectSettings();
+    expect(first.custom.translate?.[3]).toBeInstanceOf(RegExp);
+
+    const shared = await loadSharedIdb();
+    const db = await shared.openDB();
+    const tx = db.transaction(["settings", "custom-bangs"], "readwrite");
+    await Promise.all([
+      reqToPromise(tx.objectStore("settings").delete("default-bang")),
+      reqToPromise(tx.objectStore("custom-bangs").clear()),
+    ]);
+    const restarted = await import(
+      `../src/sw/idb.ts?restart=${Date.now()}-${Math.random()}`
+    );
+    const cached = await restarted.readRedirectSettings();
+    expect(cached.custom.translate?.[3]).toBeInstanceOf(RegExp);
+    expect(redirectUrl("!translate french bonjour monde", cached)).toBe(
+      "https://translate.example/french/bonjour%20monde"
+    );
+  });
+
+  test("rebuilds an obsolete snapshot from existing user settings", async () => {
+    await seedDb({
+      settings: [{ key: "default-bang", value: "ddg" }],
+    });
+    const shared = await loadSharedIdb();
+    const db = await shared.openDB();
+    await reqToPromise(
+      db.transaction("settings", "readwrite").objectStore("settings").put({
+        key: REDIRECT_SETTINGS_SNAPSHOT_KEY,
+        snapshot: {},
+        version: 0,
+      })
+    );
+
+    const settings = await (await loadSwIdb()).readRedirectSettings();
+    expect(settings.defaultUrl[0]).toContain("duckduckgo.com");
+    const rebuilt = await reqToPromise<{ version: number } | undefined>(
+      db
+        .transaction("settings", "readonly")
+        .objectStore("settings")
+        .get(REDIRECT_SETTINGS_SNAPSHOT_KEY)
+    );
+    expect(rebuilt?.version).toBe(1);
+  });
+
   test("ignores invalid persisted capture patterns", async () => {
     await seedDb({
       customBangs: [
@@ -297,7 +357,7 @@ describe("sw/idb redirect settings", () => {
 });
 
 describe("sw/idb frecency", () => {
-  test("hydrates frecency while reading the shared settings snapshot", async () => {
+  test("hydrates frecency alongside the redirect settings snapshot", async () => {
     await seedDb({
       settings: [{ key: "frecency", value: `${Date.now()}|g:5,ddg:2` }],
     });

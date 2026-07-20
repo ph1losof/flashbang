@@ -180,9 +180,19 @@ async function seedCustomBangs(
         });
       }, bangs);
 
-      await page.evaluate(() => {
-        navigator.serviceWorker.controller?.postMessage({ type: "invalidate" });
-      });
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) => {
+            const controller = navigator.serviceWorker.controller;
+            if (!controller) {
+              resolve();
+              return;
+            }
+            const channel = new MessageChannel();
+            channel.port1.onmessage = () => resolve();
+            controller.postMessage({ type: "invalidate" }, [channel.port2]);
+          })
+      );
       return;
     } catch (error) {
       const message =

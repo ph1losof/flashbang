@@ -8,6 +8,7 @@ import {
   DEFAULT_URL,
   LUCKY_TRIGGER_PROVIDERS,
   LUCKY_URLS,
+  REDIRECT_SETTINGS_SNAPSHOT_KEY,
 } from "../shared/constants";
 import { hashFNV1a } from "../shared/hash";
 import { idbWrap, openDB } from "../shared/idb";
@@ -18,8 +19,30 @@ import {
   type CustomUrlParts,
   compileTriggerSyntax,
   type RedirectSettings,
+  type TriggerSyntax,
   type UrlParts,
 } from "./redirect";
+
+const SNAPSHOT_VERSION = 1;
+
+interface SettingRecord {
+  key: string;
+  value?: string;
+}
+
+export interface RedirectSettingsSnapshot {
+  custom: Record<string, CustomUrlParts>;
+  defaultBang: string;
+  luckyProvider: string;
+  luckyUrl: UrlParts | null;
+  syntax?: TriggerSyntax;
+}
+
+interface StoredRedirectSettingsSnapshot {
+  key: string;
+  snapshot: RedirectSettingsSnapshot;
+  version: number;
+}
 
 function splitUrl(url: string): UrlParts {
   const idx = url.indexOf("{}");
@@ -43,21 +66,48 @@ export function defaultRedirectSettings(): RedirectSettings {
   };
 }
 
-export async function loadRedirectSettings(): Promise<{
-  frecency: string | undefined;
-  settings: RedirectSettings;
-}> {
-  const db = await openDB();
-  const tx = db.transaction(["settings", "custom-bangs"], "readonly");
-  const [settings, all] = await Promise.all([
-    idbWrap<Array<{ key: string; value?: string }>>(
-      tx.objectStore("settings").getAll()
-    ),
-    idbWrap<CustomBangRecord[]>(tx.objectStore("custom-bangs").getAll()),
-  ]);
-  const settingsMap = Object.fromEntries(
-    settings.map((setting) => [setting.key, setting.value])
+function isSnapshotRecord(
+  value: unknown
+): value is StoredRedirectSettingsSnapshot {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Partial<StoredRedirectSettingsSnapshot>;
+  const snapshot = record.snapshot as
+    | Partial<RedirectSettingsSnapshot>
+    | undefined;
+  if (!snapshot) {
+    return false;
+  }
+  return (
+    record.key === REDIRECT_SETTINGS_SNAPSHOT_KEY &&
+    record.version === SNAPSHOT_VERSION &&
+    typeof snapshot.defaultBang === "string" &&
+    typeof snapshot.luckyProvider === "string" &&
+    Boolean(snapshot.custom) &&
+    typeof snapshot.custom === "object" &&
+    (snapshot.luckyUrl === null || Array.isArray(snapshot.luckyUrl)) &&
+    (snapshot.syntax === undefined || Array.isArray(snapshot.syntax))
   );
+}
+
+function normalizeSnapshot(
+  snapshot: RedirectSettingsSnapshot
+): RedirectSettingsSnapshot {
+  return {
+    ...snapshot,
+    custom: Object.assign(Object.create(null), snapshot.custom),
+  };
+}
+
+function compileRedirectSettingsSnapshot(
+  settings: readonly SettingRecord[],
+  all: readonly CustomBangRecord[]
+): RedirectSettingsSnapshot {
+  const settingsMap: Record<string, string | undefined> = Object.create(null);
+  for (const setting of settings) {
+    settingsMap[setting.key] = setting.value;
+  }
   const defaultBang = settingsMap["default-bang"] || "g";
   const custom: Record<string, CustomUrlParts> = Object.create(null);
   for (const entry of all) {
@@ -75,25 +125,42 @@ export async function loadRedirectSettings(): Promise<{
       custom[entry.trigger] = attachSnapTarget(splitUrl(entry.url), snap);
     }
   }
+  const [bangPrefix, snapPrefix] = resolveTriggerPrefixes(
+    settingsMap["bang-prefix"],
+    settingsMap["snap-prefix"]
+  );
+  const luckyProvider = settingsMap["lucky-provider"] ?? "default";
+  const syntax = compileTriggerSyntax(bangPrefix, snapPrefix);
+  return {
+    custom,
+    defaultBang,
+    luckyProvider,
+    luckyUrl:
+      luckyProvider === "custom" && settingsMap["lucky-url"]
+        ? splitUrl(settingsMap["lucky-url"])
+        : null,
+    ...(syntax ? { syntax } : {}),
+  };
+}
 
-  const customDefault = custom[defaultBang];
+export function materializeRedirectSettings(
+  snapshot: RedirectSettingsSnapshot
+): RedirectSettings {
+  const customDefault = snapshot.custom[snapshot.defaultBang];
   let defaultEntry: UrlParts | null;
   if (customDefault) {
     defaultEntry =
       customDefault.length < 5 ? (customDefault as UrlParts) : null;
   } else {
-    defaultEntry = lookupBang(defaultBang, hashFNV1a(defaultBang));
+    defaultEntry = lookupBang(
+      snapshot.defaultBang,
+      hashFNV1a(snapshot.defaultBang)
+    );
   }
   const defaultUrl = defaultEntry || splitUrl(DEFAULT_URL);
-  const effectiveDefaultBang = defaultEntry ? defaultBang : "g";
-  const [bangPrefix, snapPrefix] = resolveTriggerPrefixes(
-    settingsMap["bang-prefix"],
-    settingsMap["snap-prefix"]
-  );
-
-  const luckyProvider = settingsMap["lucky-provider"] ?? "default";
+  const effectiveDefaultBang = defaultEntry ? snapshot.defaultBang : "g";
   let luckyUrl: UrlParts | null;
-  switch (luckyProvider) {
+  switch (snapshot.luckyProvider) {
     case "none":
       luckyUrl = null;
       break;
@@ -107,9 +174,7 @@ export async function loadRedirectSettings(): Promise<{
       luckyUrl = splitUrl(LUCKY_URLS.kagi);
       break;
     case "custom":
-      luckyUrl = settingsMap["lucky-url"]
-        ? splitUrl(settingsMap["lucky-url"])
-        : null;
+      luckyUrl = snapshot.luckyUrl;
       break;
     default:
       luckyUrl = splitUrl(
@@ -118,15 +183,86 @@ export async function loadRedirectSettings(): Promise<{
       );
       break;
   }
-
-  const syntax = compileTriggerSyntax(bangPrefix, snapPrefix);
   return {
-    frecency: settingsMap.frecency,
-    settings: {
-      defaultUrl,
-      custom,
-      luckyUrl,
-      ...(syntax ? { syntax } : {}),
-    },
+    defaultUrl,
+    custom: snapshot.custom,
+    luckyUrl,
+    ...(snapshot.syntax ? { syntax: snapshot.syntax } : {}),
   };
+}
+
+function rebuildSnapshot(db: IDBDatabase): Promise<RedirectSettingsSnapshot> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(["settings", "custom-bangs"], "readwrite");
+    const settingsRequest = tx.objectStore("settings").getAll();
+    const customRequest = tx.objectStore("custom-bangs").getAll();
+    let settings: SettingRecord[] | null = null;
+    let customBangs: CustomBangRecord[] | null = null;
+    let snapshot: RedirectSettingsSnapshot | null = null;
+
+    const compileWhenReady = () => {
+      if (!(settings && customBangs) || snapshot) {
+        return;
+      }
+      snapshot = compileRedirectSettingsSnapshot(settings, customBangs);
+      tx.objectStore("settings").put({
+        key: REDIRECT_SETTINGS_SNAPSHOT_KEY,
+        snapshot,
+        version: SNAPSHOT_VERSION,
+      });
+    };
+    settingsRequest.onsuccess = () => {
+      settings = settingsRequest.result as SettingRecord[];
+      compileWhenReady();
+    };
+    customRequest.onsuccess = () => {
+      customBangs = customRequest.result as CustomBangRecord[];
+      compileWhenReady();
+    };
+    tx.oncomplete = () => {
+      if (snapshot) {
+        resolve(snapshot);
+      } else {
+        reject(new Error("IndexedDB snapshot compilation did not complete"));
+      }
+    };
+    tx.onerror = () => reject(tx.error ?? new Error("IndexedDB write failed"));
+    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB write aborted"));
+  });
+}
+
+function transactionDone(tx: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error("IndexedDB write failed"));
+    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB write aborted"));
+  });
+}
+
+export async function deleteRedirectSettingsSnapshot(): Promise<void> {
+  const db = await openDB();
+  const tx = db.transaction("settings", "readwrite");
+  const done = transactionDone(tx);
+  tx.objectStore("settings").delete(REDIRECT_SETTINGS_SNAPSHOT_KEY);
+  await done;
+}
+
+export async function prepareRedirectSettings(): Promise<RedirectSettingsSnapshot> {
+  const db = await openDB();
+  const stored = await idbWrap<StoredRedirectSettingsSnapshot | undefined>(
+    db
+      .transaction("settings", "readonly")
+      .objectStore("settings")
+      .get(REDIRECT_SETTINGS_SNAPSHOT_KEY)
+  );
+  if (isSnapshotRecord(stored)) {
+    return normalizeSnapshot(stored.snapshot);
+  }
+  return rebuildSnapshot(db);
+}
+
+export async function loadRedirectSettings(
+  prepared = prepareRedirectSettings()
+): Promise<RedirectSettings> {
+  return materializeRedirectSettings(await prepared);
 }

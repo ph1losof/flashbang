@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { REDIRECT_SETTINGS_SNAPSHOT_KEY } from "../src/shared/constants";
 import { loadTestBangData } from "./helpers/bang-data";
 import { installFakeIndexedDb, reqToPromise } from "./helpers/fake-indexeddb";
 
@@ -34,6 +35,7 @@ async function seedDb(data: {
   const tx = db.transaction(["settings", "custom-bangs"], "readwrite");
   const settingsStore = tx.objectStore("settings");
   const customStore = tx.objectStore("custom-bangs");
+  await reqToPromise(settingsStore.delete(REDIRECT_SETTINGS_SNAPSHOT_KEY));
 
   if (data.settings) {
     for (const row of data.settings) {

@@ -7,6 +7,14 @@ const NETWORK_DELAY_MS = Math.max(
   0,
   Number(process.env.PROFILE_NETWORK_DELAY_MS) || 0
 );
+const BANG_DATA_DELAY_MS = Math.max(
+  0,
+  Number(process.env.PROFILE_BANG_DATA_DELAY_MS) || 0
+);
+const IDB_OPEN_DELAY_MS = Math.max(
+  0,
+  Number(process.env.PROFILE_IDB_OPEN_DELAY_MS) || 0
+);
 
 interface Timing {
   bangDataRequests: number;
@@ -45,14 +53,58 @@ async function conditionColdNetwork(
   page: Page,
   baseURL: string
 ): Promise<void> {
-  if (NETWORK_DELAY_MS === 0) {
+  if (NETWORK_DELAY_MS === 0 && BANG_DATA_DELAY_MS === 0) {
     return;
   }
   const origin = new URL(baseURL).origin;
   await page.context().route(`${origin}/**`, async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, NETWORK_DELAY_MS));
+    const pathname = new URL(route.request().url()).pathname;
+    const bangDataDelay =
+      pathname === "/bangs.bin" ||
+      (pathname.startsWith("/bangs-") && !pathname.startsWith("/bangs-meta-"))
+        ? BANG_DATA_DELAY_MS
+        : 0;
+    await new Promise((resolve) =>
+      setTimeout(resolve, NETWORK_DELAY_MS + bangDataDelay)
+    );
     await route.continue();
   });
+}
+
+async function conditionIdbOpen(page: Page): Promise<void> {
+  if (IDB_OPEN_DELAY_MS === 0) {
+    return;
+  }
+  await page.addInitScript((delay) => {
+    const originalOpen = IDBFactory.prototype.open;
+    IDBFactory.prototype.open = function delayedOpen(
+      name: string,
+      version?: number
+    ): IDBOpenDBRequest {
+      const request =
+        version === undefined
+          ? originalOpen.call(this, name)
+          : originalOpen.call(this, name, version);
+      return new Proxy(request, {
+        get(target, property) {
+          return Reflect.get(target, property, target);
+        },
+        set(target, property, value) {
+          if (property === "onsuccess" && typeof value === "function") {
+            return Reflect.set(
+              target,
+              property,
+              (event: Event) => {
+                setTimeout(() => value.call(target, event), delay);
+              },
+              target
+            );
+          }
+          return Reflect.set(target, property, value, target);
+        },
+      });
+    };
+  }, IDB_OPEN_DELAY_MS);
 }
 
 async function waitForSeededRuntime(page: Page): Promise<void> {
@@ -155,6 +207,7 @@ test("private hash redirect and public path performance profile", async ({
   for (let i = 0; i < COLD_RUNS; i++) {
     const context = await browser.newContext();
     const page = await context.newPage();
+    await conditionIdbOpen(page);
     await page.addInitScript(() => {
       Reflect.deleteProperty(Navigator.prototype, "serviceWorker");
     });
@@ -164,11 +217,26 @@ test("private hash redirect and public path performance profile", async ({
     await context.close();
   }
 
+  const fallbackWarmContext = await browser.newContext();
+  const fallbackWarmPage = await fallbackWarmContext.newPage();
+  await conditionIdbOpen(fallbackWarmPage);
+  await fallbackWarmPage.addInitScript(() => {
+    Reflect.deleteProperty(Navigator.prototype, "serviceWorker");
+  });
+  await mockGoogle(fallbackWarmPage);
+  await measure(fallbackWarmPage);
+  const fallbackWarm: Timing[] = [];
+  for (let i = 0; i < WARM_RUNS; i++) {
+    fallbackWarm.push(await measure(fallbackWarmPage));
+  }
+  await fallbackWarmContext.close();
+
   const firstInstall: Timing[] = [];
   const postInstall: Timing[] = [];
   for (let i = 0; i < COLD_RUNS; i++) {
     const context = await browser.newContext();
     const page = await context.newPage();
+    await conditionIdbOpen(page);
     await conditionColdNetwork(page, baseURL);
     await mockGoogle(page);
     firstInstall.push(await measure(page));
@@ -202,6 +270,32 @@ test("private hash redirect and public path performance profile", async ({
   }
   await context.close();
 
+  const workerRestart: Timing[] = [];
+  if (browserName === "chromium") {
+    const restartContext = await browser.newContext();
+    const restartPage = await restartContext.newPage();
+    await mockGoogle(restartPage);
+    await restartPage.goto("/");
+    await restartPage.waitForFunction(
+      () => navigator.serviceWorker.controller !== null
+    );
+    const cdp = await browser.newBrowserCDPSession();
+    const workerUrl = new URL("/sw.js", baseURL).href;
+    for (let i = 0; i < COLD_RUNS; i++) {
+      const { targetInfos } = await cdp.send("Target.getTargets");
+      const worker = targetInfos.find(
+        (target) => target.type === "service_worker" && target.url === workerUrl
+      );
+      if (!worker) {
+        throw new Error("Service Worker target missing from restart profile");
+      }
+      await cdp.send("Target.closeTarget", { targetId: worker.targetId });
+      workerRestart.push(await measure(restartPage, "/?q=%21g%20profile"));
+    }
+    await cdp.detach();
+    await restartContext.close();
+  }
+
   const floorContext = await browser.newContext();
   const floorPage = await floorContext.newPage();
   await floorPage.addInitScript(() => {
@@ -226,13 +320,19 @@ test("private hash redirect and public path performance profile", async ({
   console.log(
     JSON.stringify({
       browserName,
+      bangDataDelayMs: BANG_DATA_DELAY_MS,
       cold: summarize(cold),
       controlledWarm: summarize(warm),
       documentFloor: summarize(documentFloor),
+      fallbackWarm: summarize(fallbackWarm),
       firstInstall: summarize(firstInstall),
+      idbOpenDelayMs: IDB_OPEN_DELAY_MS,
       networkDelayMs: NETWORK_DELAY_MS,
       postInstall: summarize(postInstall),
       publicWarm: summarize(publicWarm),
+      ...(workerRestart.length > 0
+        ? { workerRestart: summarize(workerRestart) }
+        : {}),
     })
   );
 });

@@ -69,3 +69,4 @@ export const JSON_HEADERS = {
 } as const;
 
 export const DB_VERSION = 1;
+export const REDIRECT_SETTINGS_SNAPSHOT_KEY = "redirect-settings-snapshot";

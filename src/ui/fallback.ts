@@ -8,7 +8,13 @@ import {
 import {
   defaultRedirectSettings,
   loadRedirectSettings,
+  prepareRedirectSettings,
 } from "../sw/redirect-settings";
+
+const preparedSettings = prepareRedirectSettings();
+void preparedSettings.catch(() => {
+  // resolveFallback applies safe defaults when the early read fails.
+});
 
 export async function resolveFallback(
   query: string,
@@ -18,7 +24,7 @@ export async function resolveFallback(
   initializeBangData(bangData);
   let settings: RedirectSettings;
   try {
-    settings = (await loadRedirectSettings()).settings;
+    settings = await loadRedirectSettings(preparedSettings);
   } catch {
     resetDB();
     settings = defaultRedirectSettings();

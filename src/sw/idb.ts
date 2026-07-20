@@ -15,7 +15,10 @@ import {
 import type { RedirectSettings } from "./redirect";
 import {
   defaultRedirectSettings,
+  deleteRedirectSettingsSnapshot,
   loadRedirectSettings,
+  prepareRedirectSettings,
+  type RedirectSettingsSnapshot,
 } from "./redirect-settings";
 
 const FRECENCY_COOKIE_ENTRIES = 8;
@@ -29,6 +32,7 @@ let persistPromise: Promise<void> | null = null;
 let persistPending: FrecencySnapshot | null = null;
 let cachedRedirect: RedirectSettings | null = null;
 let redirectSettingsPromise: Promise<RedirectSettings> | null = null;
+let redirectSettingsInvalidationPromise: Promise<void> | null = null;
 let redirectSettingsRetryAt = 0;
 let frecencyCounts: Record<string, number> | null = null;
 let frecencyLoaded = false;
@@ -54,7 +58,9 @@ export function seedRedirectSettings(settings: RedirectSettings): void {
   redirectSettingsRetryAt = 0;
 }
 
-export function readRedirectSettings(): Promise<RedirectSettings> {
+export function readRedirectSettings(
+  prepared?: Promise<RedirectSettingsSnapshot>
+): Promise<RedirectSettings> {
   const cached = getCachedSettings();
   if (cached) {
     return Promise.resolve(cached);
@@ -63,9 +69,12 @@ export function readRedirectSettings(): Promise<RedirectSettings> {
   if (!redirectSettingsPromise) {
     redirectSettingsPromise = (async () => {
       try {
-        const loaded = await loadRedirectSettings();
-        hydrateFrecency(loaded.frecency);
-        cachedRedirect = loaded.settings;
+        await redirectSettingsInvalidationPromise;
+        const [settings] = await Promise.all([
+          loadRedirectSettings(prepared ?? prepareRedirectSettings()),
+          loadFrecency(),
+        ]);
+        cachedRedirect = settings;
         redirectSettingsRetryAt = 0;
       } catch {
         cachedRedirect = defaultRedirectSettings();
@@ -130,10 +139,21 @@ function persistFrecencySnapshot(
   return persistPromise;
 }
 
-export function invalidateCache() {
+export function invalidateCache(): Promise<void> {
   cachedRedirect = null;
   redirectSettingsPromise = null;
   resetDB();
+  const invalidating = deleteRedirectSettingsSnapshot().catch(() => {
+    resetDB();
+  });
+  let current: Promise<void>;
+  current = invalidating.finally(() => {
+    if (redirectSettingsInvalidationPromise === current) {
+      redirectSettingsInvalidationPromise = null;
+    }
+  });
+  redirectSettingsInvalidationPromise = current;
+  return current;
 }
 
 function applyDecay(): boolean {
