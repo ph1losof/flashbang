@@ -424,9 +424,12 @@ describe("sw/idb frecency", () => {
     const mod = await loadSwIdb();
     await mod.loadFrecency();
 
-    mod.trackBangUsage("yt");
-    mod.trackBangUsage("yt");
-    mod.trackBangUsage("g");
+    const firstYt = mod.trackBangUsage("yt");
+    const secondYt = mod.trackBangUsage("yt");
+    const firstG = mod.trackBangUsage("g");
+    expect(firstYt.topMembershipChanged).toBe(true);
+    expect(secondYt.topMembershipChanged).toBe(false);
+    expect(firstG.topMembershipChanged).toBe(true);
     expect(mod.getTopFrecencyRecord()).toEqual({ yt: 2, g: 1 });
 
     mod.invalidateCache();

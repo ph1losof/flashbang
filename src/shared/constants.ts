@@ -1,4 +1,5 @@
 export const TOP_K = 8;
+export const TOP_FRECENCY_ENTRIES = 8;
 export const MAX_FRECENCY_ENTRIES = 64;
 export const FRECENCY_BOOST_MULTIPLIER = 10;
 export const FRECENCY_BOOST_CAP = 2000;

@@ -1,6 +1,7 @@
 import {
   FRECENCY_HALF_LIFE_MS,
   MAX_FRECENCY_ENTRIES,
+  TOP_FRECENCY_ENTRIES,
 } from "../shared/constants";
 import {
   parseFrecencyCompact,
@@ -20,8 +21,6 @@ import {
   prepareRedirectSettings,
   type RedirectSettingsSnapshot,
 } from "./redirect-settings";
-
-const FRECENCY_COOKIE_ENTRIES = 8;
 
 interface FrecencySnapshot {
   counts: Record<string, number> | null;
@@ -244,7 +243,7 @@ function hydrateFrecency(stored: string | undefined): void {
   const decayed = applyDecay();
   const pruned = pruneFrecency();
   shouldPersist = decayed || pruned || shouldPersist;
-  topFrecency = buildTopFrecency(frecencyCounts, FRECENCY_COOKIE_ENTRIES);
+  topFrecency = buildTopFrecency(frecencyCounts, TOP_FRECENCY_ENTRIES);
   if (shouldPersist) {
     void persistFrecencySnapshot(frecencyCounts, lastDecayTs);
   }
@@ -290,6 +289,7 @@ export function loadFrecency(): Promise<void> {
 
 export function trackBangUsage(trigger: string): {
   persistence: Promise<void>;
+  topMembershipChanged: boolean;
   topChanged: boolean;
 } {
   if (!frecencyCounts) {
@@ -299,17 +299,20 @@ export function trackBangUsage(trigger: string): {
   if (!lastDecayTs) {
     lastDecayTs = Date.now();
   }
+  const wasTop = topFrecency.some((entry) => entry.trigger === trigger);
   const nextCount = (frecencyCounts[trigger] || 0) + 1;
   frecencyCounts[trigger] = nextCount;
   updateTopFrecencyOnIncrement(
     topFrecency,
     trigger,
     nextCount,
-    FRECENCY_COOKIE_ENTRIES
+    TOP_FRECENCY_ENTRIES
   );
   pruneFrecency();
+  const topChanged = topFrecency.some((entry) => entry.trigger === trigger);
   return {
     persistence: persistFrecencySnapshot(frecencyCounts, lastDecayTs),
-    topChanged: topFrecency.some((entry) => entry.trigger === trigger),
+    topMembershipChanged: !wasTop && topChanged,
+    topChanged,
   };
 }
