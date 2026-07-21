@@ -1,12 +1,19 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { REDIRECT_SETTINGS_SNAPSHOT_KEY } from "../src/shared/constants";
 import {
+  createHotBootState,
   decodeHotBootRecord,
+  encodeHotBootRecord,
   HOT_BOOT_SENTINEL,
   parseHotBootRecord,
   resolveHotRedirect,
 } from "../src/sw/hot-redirect";
-import { redirectRawUrl } from "../src/sw/redirect";
+import {
+  compileTriggerSyntax,
+  type RedirectSettings,
+  redirectRawUrl,
+} from "../src/sw/redirect";
+import type { RedirectSettingsSnapshot } from "../src/sw/redirect-settings";
 import { loadTestBangData } from "./helpers/bang-data";
 import { installFakeIndexedDb, reqToPromise } from "./helpers/fake-indexeddb";
 
@@ -601,6 +608,65 @@ describe("sw runtime with real modules", () => {
       "https://custom.example/?q=test"
     );
     expect(navigationPreloadWrites).toContain(HOT_BOOT_SENTINEL);
+  });
+
+  test("retains hot-boot settings when a cold IndexedDB read fails", async () => {
+    const syntax = compileTriggerSyntax("$", "~")!;
+    const snapshot: RedirectSettingsSnapshot = {
+      custom: Object.create(null),
+      defaultBang: "ddg",
+      luckyProvider: "default",
+      luckyUrl: null,
+      syntax,
+    };
+    const settings: RedirectSettings = {
+      custom: Object.create(null),
+      defaultUrl: ["https://duckduckgo.com/?q=", ""],
+      luckyUrl: null,
+      syntax,
+    };
+    const state: NavigationPreloadState = {
+      enabled: false,
+      headerValue: encodeHotBootRecord(
+        "fb-test-cache",
+        createHotBootState(snapshot),
+        snapshot,
+        settings
+      ),
+    };
+    const swIdb = await import("../src/sw/idb");
+    await swIdb.invalidateCache();
+    const shared = await loadSharedIdb();
+    shared.resetDB();
+    (globalThis as { indexedDB?: unknown }).indexedDB = {
+      open() {
+        throw new Error("temporarily unavailable");
+      },
+    };
+    await loadSwRuntime([], false, state);
+
+    const defaultFetch = createFetchEvent(
+      "https://flashbang.local/?q=plain%20query",
+      "",
+      "navigate"
+    );
+    await handlers.fetch?.(defaultFetch.event);
+    const defaultLocation = new URL(
+      (await defaultFetch.response()).headers.get("Location")!
+    );
+    expect(defaultLocation.hostname).toBe("duckduckgo.com");
+
+    const syntaxFetch = createFetchEvent(
+      "https://flashbang.local/?q=%24g%20hello",
+      "",
+      "navigate"
+    );
+    await handlers.fetch?.(syntaxFetch.event);
+    const syntaxLocation = new URL(
+      (await syntaxFetch.response()).headers.get("Location")!
+    );
+    expect(syntaxLocation.hostname).toBe("www.google.com");
+    expect(syntaxLocation.searchParams.get("q")).toBe("hello");
   });
 
   test("publishes a personalized hot entry when top-eight membership changes", async () => {

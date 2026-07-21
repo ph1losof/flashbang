@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { REDIRECT_SETTINGS_SNAPSHOT_KEY } from "../src/shared/constants";
-import { redirectUrl } from "../src/sw/redirect";
+import {
+  compileTriggerSyntax,
+  type RedirectSettings,
+  redirectUrl,
+} from "../src/sw/redirect";
 import type { RedirectSettingsSnapshot } from "../src/sw/redirect-settings";
 import { loadTestBangData } from "./helpers/bang-data";
 import { installFakeIndexedDb, reqToPromise } from "./helpers/fake-indexeddb";
@@ -209,6 +213,36 @@ describe("sw/idb redirect settings", () => {
     expect(settings.luckyUrl?.[0]).toContain("duckduckgo.com/?q=");
     expect(settings.custom).toEqual(Object.create(null));
     expect(attempts).toBe(1);
+  });
+
+  test("uses startup settings when IndexedDB is temporarily unavailable", async () => {
+    (globalThis as { indexedDB?: unknown }).indexedDB = {
+      open() {
+        throw new Error("boom");
+      },
+    };
+    const shared = await loadSharedIdb();
+    shared.resetDB();
+    const startupSettings: RedirectSettings = {
+      custom: Object.create(null),
+      defaultUrl: ["https://duckduckgo.com/?q=", ""],
+      luckyUrl: null,
+      syntax: compileTriggerSyntax("$", "~"),
+    };
+
+    const settings = await (await loadSwIdb()).readRedirectSettings(
+      undefined,
+      () => Promise.resolve(startupSettings)
+    );
+
+    expect(settings).toBe(startupSettings);
+    expect(redirectUrl("plain query", settings)).toContain(
+      "duckduckgo.com/?q=plain+query"
+    );
+    expect(redirectUrl("$g cats", settings)).toContain(
+      "google.com/search?q=cats"
+    );
+    expect(redirectUrl("!g cats", settings)).toContain("q=!g+cats");
   });
 
   test("compiles custom capture bangs once while loading settings", async () => {
