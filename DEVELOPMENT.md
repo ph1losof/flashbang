@@ -42,6 +42,7 @@ flashbang/
 │   └── workflows/
 │       ├── ci.yaml            # Typecheck, checks, tests, build, and E2E matrix
 │       ├── codeql.yaml         # CodeQL analysis for application and workflow code
+│       ├── prepare-release.yaml # Version-bump pull request automation
 │       ├── release.yaml       # GitHub Release and multi-architecture image publishing
 │       └── update-bangs.yaml  # Daily bang-source refresh
 ├── functions/
@@ -330,24 +331,17 @@ A daily cron workflow (`.github/workflows/update-bangs.yaml`) fetches fresh bang
 
 ## Releasing
 
-1. Update `version` in `package.json`
-2. Run `bun run typecheck`, `bun run check`, `bun audit`, `bun test`, and `bun run build`
-3. Commit and push the version bump so the commit is on `origin/master`:
+1. Run the **Prepare Release** workflow with the stable SemVer version without a `v` prefix. It updates `package.json` and the README release marker together, pushes an `automation/release-vX.Y.Z` branch, opens a pull request, dispatches CI, and enables auto-merge.
+2. Review the generated pull request. It merges automatically after protected-branch checks, including Playwright E2E, pass.
+3. Create and push an annotated tag from the merged `origin/master` commit:
 
 ```sh
-git add package.json
-git commit -m "chore: bump version to X.Y.Z"
-git push origin master
-```
-
-4. Wait for the protected-branch CI checks, including Playwright E2E, to pass for that commit
-5. Create and push an annotated tag from that commit:
-
-```sh
+git switch master
+git pull --ff-only origin master
 git tag -a vX.Y.Z -m "vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-Do not create the GitHub Release manually. The tag-triggered release workflow (`.github/workflows/release.yaml`) accepts only strict stable `vX.Y.Z` tags, requires the tag version to match `package.json`, and verifies that the tagged commit is contained in `origin/master`. It then runs codegen (`--from-merged`), typecheck, lint/format checks, `bun audit`, the test suite, and the build. It does not rerun Playwright because protected-branch CI already covers E2E.
+Do not create the GitHub Release manually. The tag-triggered release workflow (`.github/workflows/release.yaml`) accepts only strict stable `vX.Y.Z` tags, requires the tag version to match `package.json` and the README release marker, and verifies that the tagged commit is contained in `origin/master`. It then runs codegen (`--from-merged`), typecheck, lint/format checks, `bun audit`, the test suite, and the build. It does not rerun Playwright because protected-branch CI already covers E2E.
 
 After validation succeeds, the workflow creates the GitHub Release with generated notes. It then builds and health-checks a local image before publishing `linux/amd64` and `linux/arm64` images to `ghcr.io/<owner>/flashbang` with both the release version and `latest` tags.

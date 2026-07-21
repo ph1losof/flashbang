@@ -2,6 +2,10 @@
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://dash.cloudflare.com/?to=/:account/workers-and-pages) [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/flashbang?referralCode=cxTxcH&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
+<!-- release-version -->
+<p align="center"><strong>Current release: <a href="https://github.com/ph1losof/flashbang/releases/tag/v1.6.1">v1.6.1</a></strong></p>
+<!-- /release-version -->
+
 ![Flashbang](.github/images/landing.png)
 
 <p align="center"><a href="#features">Features</a> &nbsp;|&nbsp; <a href="#bang-syntax">Bang syntax</a> &nbsp;|&nbsp; <a href="#snap-syntax">Snap syntax</a> &nbsp;|&nbsp; <a href="#setup-as-search-engine">Setup</a> &nbsp;|&nbsp; <a href="#deploy-your-own">Self-host</a> &nbsp;|&nbsp; <a href="#how-it-works">How it works</a> &nbsp;|&nbsp; <a href="#contributing">Contributing</a></p>
