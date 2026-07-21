@@ -55,7 +55,7 @@ jobs:
             exit 1
           fi
 
-      - name: Update repository versions
+      - name: Update package version
         env:
           RELEASE_VERSION: ${{ inputs.version }}
         run: |
@@ -64,14 +64,6 @@ jobs:
             const packageJson = await Bun.file("package.json").json();
             packageJson.version = version;
             await Bun.write("package.json", `${JSON.stringify(packageJson, null, 2)}\n`);
-
-            const readme = await Bun.file("README.md").text();
-            const marker = /<!-- release-version -->[\s\S]*?<!-- \/release-version -->/;
-            if (!marker.test(readme)) {
-              throw new Error("README.md release version marker is missing");
-            }
-            const block = `<!-- release-version -->\n<p align="center"><strong>Current release: <a href="https://github.com/${process.env.GITHUB_REPOSITORY}/releases/tag/v${version}">v${version}</a></strong></p>\n<!-- /release-version -->`;
-            await Bun.write("README.md", readme.replace(marker, block));
           '
 
       - name: Commit and open pull request
@@ -89,7 +81,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git switch -c "$branch"
-          git add package.json README.md
+          git add package.json
           git commit -m "chore(release): prepare v$RELEASE_VERSION"
 
           gh auth setup-git
@@ -98,7 +90,7 @@ jobs:
             --base master \
             --head "$branch" \
             --title "chore(release): prepare v$RELEASE_VERSION" \
-            --body "Automated package and README version bump for v$RELEASE_VERSION.")"
+            --body "Automated package version bump for v$RELEASE_VERSION.")"
           gh workflow run ci.yaml --repo "$GITHUB_REPOSITORY" --ref "$branch"
           gh pr merge "$pr_url" --repo "$GITHUB_REPOSITORY" \
             --auto \

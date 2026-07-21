@@ -1,10 +1,16 @@
 # flashbang
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://dash.cloudflare.com/?to=/:account/workers-and-pages) [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/flashbang?referralCode=cxTxcH&utm_medium=integration&utm_source=template&utm_campaign=generic)
+<p>
+  <a href="https://dash.cloudflare.com/?to=/:account/workers-and-pages"><img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare" height="32"></a>
+  <a href="https://railway.com/deploy/flashbang?referralCode=cxTxcH&amp;utm_medium=integration&amp;utm_source=template&amp;utm_campaign=generic"><img src="https://railway.com/button.svg" alt="Deploy on Railway" height="32"></a>
+</p>
 
-<!-- release-version -->
-<p align="center"><strong>Current release: <a href="https://github.com/ph1losof/flashbang/releases/tag/v1.6.1">v1.6.1</a></strong></p>
-<!-- /release-version -->
+<p>
+  <a href="https://github.com/ph1losof/flashbang/releases/latest"><img src="https://img.shields.io/github/v/release/ph1losof/flashbang?style=flat-square&amp;label=release&amp;labelColor=14141e&amp;color=6e6e8a" alt="Latest release"></a>
+  <a href="https://github.com/ph1losof/flashbang/actions/workflows/ci.yaml"><img src="https://img.shields.io/github/actions/workflow/status/ph1losof/flashbang/ci.yaml?branch=master&amp;style=flat-square&amp;label=build&amp;labelColor=14141e&amp;color=238636" alt="Build status"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/ph1losof/flashbang?style=flat-square&amp;label=license&amp;labelColor=14141e&amp;color=6e6e8a" alt="AGPL-3.0 license"></a>
+  <a href="package.json"><img src="https://img.shields.io/badge/runtime%20deps-0-238636?style=flat-square&amp;labelColor=14141e" alt="Zero runtime dependencies"></a>
+</p>
 
 ![Flashbang](.github/images/landing.png)
 
