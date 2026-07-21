@@ -8,7 +8,6 @@ import {
   encodeHotBootRecord,
   getResolvedHotTrigger,
   hotBootSettingsNeedPublish,
-  MAX_HOT_BOOT_RECORD_LENGTH,
   materializeHotFrecency,
   NO_HOT_BOOT,
   parseHotBootRecord,
@@ -90,6 +89,7 @@ describe("service worker hot redirects", () => {
       NO_HOT_BOOT
     );
     expect(decodeHotBootRecord(`${record}|not-base64!`, "fb-test")).toBeNull();
+    expect(decodeHotBootRecord(`${record}|-`, "fb-test")).toBeNull();
   });
 
   test("round-trips materialized settings and every custom entry", () => {
@@ -128,7 +128,6 @@ describe("service worker hot redirects", () => {
       sourceSettings
     );
 
-    expect(record.length).toBeLessThan(MAX_HOT_BOOT_RECORD_LENGTH);
     const decoded = decodeHotBootRecord(record, "fb-test")!;
     expect(decoded.state).toBe(state);
     expect(decoded.defaultBang).toBe("sp");
@@ -245,7 +244,7 @@ describe("service worker hot redirects", () => {
     expect(Object.keys(decoded.frecency!)).toHaveLength(8);
   });
 
-  test("drops the complete rich payload rather than truncating oversized settings", () => {
+  test("round-trips settings larger than the previous metadata limit", () => {
     const custom = Object.create(null) as Record<string, CustomUrlParts>;
     for (let i = 0; i < 30; i++) {
       custom[`custom${i}`] = [
@@ -261,17 +260,15 @@ describe("service worker hot redirects", () => {
       sourceSnapshot,
       settings(custom)
     );
-    expect(record.endsWith("|-")).toBe(true);
+    expect(record.length).toBeGreaterThan(96 * 1024);
+    expect(record.endsWith("|-")).toBe(false);
     const decoded = decodeHotBootRecord(record, "fb-test")!;
     expect(decoded.state).toBe(state);
-    expect(decoded.settings).toBeNull();
+    expect(Object.keys(decoded.settings!.custom)).toHaveLength(30);
     expect(hotBootSettingsNeedPublish(decoded)).toBe(false);
-    expect(
-      decodeHotBootRecord(
-        `${record}${"a".repeat(MAX_HOT_BOOT_RECORD_LENGTH)}`,
-        "fb-test"
-      )
-    ).toBeNull();
+    expect(redirectRawUrl(";custom29+query", decoded.settings!)).toContain(
+      "q=query"
+    );
   });
 
   test("normalizes a snapped custom default and rejects unsafe URLs", () => {

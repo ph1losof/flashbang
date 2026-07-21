@@ -89,6 +89,7 @@ const RESOLVED_PROMISE: Promise<void> = Promise.resolve();
 const NO_HOT_BOOT_PROMISE: Promise<HotBootRecord | null> =
   Promise.resolve(null);
 const navigationPreload = self.registration?.navigationPreload;
+let hotBootAvailable = navigationPreload !== undefined;
 let hotBootGeneration = 0;
 let currentHotBoot: HotBootRecord | null = null;
 const initialHotBootGeneration = hotBootGeneration;
@@ -104,9 +105,17 @@ let hotBootPromise: Promise<HotBootRecord | null> = navigationPreload
           return currentHotBoot;
         }
         currentHotBoot = record;
+        if (record?.settings) {
+          seedRedirectSettings(record.settings);
+        }
         return record;
       })
-      .catch(() => currentHotBoot)
+      .catch(() => {
+        if (hotBootGeneration === initialHotBootGeneration) {
+          hotBootAvailable = false;
+        }
+        return currentHotBoot;
+      })
   : NO_HOT_BOOT_PROMISE;
 let hotBootMutation: Promise<void> = RESOLVED_PROMISE;
 const hotBootUpdateTokens = new Set<string>();
@@ -117,9 +126,21 @@ const swallowError = () => {
 function readCurrentRedirectSettings(
   prepared?: Promise<RedirectSettingsSnapshot>
 ): Promise<RedirectSettings> {
-  return readRedirectSettings(prepared, () =>
-    hotBootPromise.then((record) => record?.settings ?? null)
-  );
+  const cached = getCachedSettings();
+  if (cached) {
+    return Promise.resolve(cached);
+  }
+  return hotBootPromise.then((record) => {
+    const current = getCachedSettings();
+    if (current) {
+      return current;
+    }
+    if (record === currentHotBoot && record?.settings) {
+      seedRedirectSettings(record.settings);
+      return record.settings;
+    }
+    return readRedirectSettings(prepared);
+  });
 }
 
 function queueHotBootMutation(operation: () => Promise<void>): Promise<void> {
@@ -132,15 +153,26 @@ async function disableHotBoot(): Promise<void> {
   hotBootGeneration++;
   currentHotBoot = null;
   hotBootPromise = NO_HOT_BOOT_PROMISE;
-  if (!navigationPreload) {
+  if (!(navigationPreload && hotBootAvailable)) {
     return;
   }
-  await navigationPreload.setHeaderValue(HOT_BOOT_SENTINEL);
-  await navigationPreload.disable();
+  try {
+    await navigationPreload.setHeaderValue(HOT_BOOT_SENTINEL);
+    await navigationPreload.disable();
+  } catch {
+    hotBootAvailable = false;
+    await navigationPreload.disable().catch(swallowError);
+  }
 }
 
 async function publishHotBoot(includeSettings = false): Promise<void> {
-  if (!navigationPreload || hotBootUpdateTokens.size > 0) {
+  if (hotBootUpdateTokens.size > 0) {
+    return;
+  }
+  if (!(navigationPreload && hotBootAvailable)) {
+    if (includeSettings && isBangDataInitialized() && !getCachedSettings()) {
+      await readCurrentRedirectSettings();
+    }
     return;
   }
   const snapshot = await prepareRedirectSettings();
@@ -162,12 +194,23 @@ async function publishHotBoot(includeSettings = false): Promise<void> {
     settings,
     frecency
   );
-  await navigationPreload.disable();
-  await navigationPreload.setHeaderValue(record);
+  try {
+    await navigationPreload.disable();
+    await navigationPreload.setHeaderValue(record);
+  } catch {
+    hotBootAvailable = false;
+    hotBootGeneration++;
+    currentHotBoot = null;
+    hotBootPromise = NO_HOT_BOOT_PROMISE;
+    return;
+  }
   const decoded = decodeHotBootRecord(record, CACHE_NAME);
   hotBootGeneration++;
   currentHotBoot = decoded;
   hotBootPromise = Promise.resolve(decoded);
+  if (decoded?.settings) {
+    seedRedirectSettings(decoded.settings);
+  }
 }
 
 const BENCHMARK_TARGET_PATH = "/__flashbang-bench-target";

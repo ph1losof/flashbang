@@ -34,6 +34,7 @@ let cachePutCalls: string[] = [];
 let cacheEntries = new Map<string, Map<string, Response>>();
 let fetchCalls: string[] = [];
 let navigationPreloadWrites: string[] = [];
+let rejectNavigationPreloadWrites = false;
 let fetchImpl: (input: RequestInfo | URL) => Promise<Response> = () =>
   Promise.resolve(new Response("ok"));
 
@@ -87,6 +88,7 @@ function setupSwGlobals(
   cachePutCalls = [];
   fetchCalls = [];
   navigationPreloadWrites = [];
+  rejectNavigationPreloadWrites = false;
   fetchImpl = () => Promise.resolve(new Response("ok"));
   if (!preserveCaches) {
     cacheEntries = new Map([
@@ -140,6 +142,9 @@ function setupSwGlobals(
                 return Promise.resolve({ ...navigationPreloadState });
               },
               setHeaderValue(value: string) {
+                if (rejectNavigationPreloadWrites) {
+                  return Promise.reject(new Error("metadata unavailable"));
+                }
                 navigationPreloadState.headerValue = value;
                 navigationPreloadWrites.push(value);
                 return Promise.resolve();
@@ -646,8 +651,10 @@ describe("sw runtime with real modules", () => {
     await swIdb.invalidateCache();
     const shared = await loadSharedIdb();
     shared.resetDB();
+    let idbAttempts = 0;
     (globalThis as { indexedDB?: unknown }).indexedDB = {
       open() {
+        idbAttempts++;
         throw new Error("temporarily unavailable");
       },
     };
@@ -663,6 +670,7 @@ describe("sw runtime with real modules", () => {
       (await defaultFetch.response()).headers.get("Location")!
     );
     expect(defaultLocation.hostname).toBe("duckduckgo.com");
+    expect(idbAttempts).toBe(0);
 
     const syntaxFetch = createFetchEvent(
       "https://flashbang.local/?q=%24g%20hello",
@@ -684,6 +692,68 @@ describe("sw runtime with real modules", () => {
     await handlers.fetch?.(advancedFetch.event);
     expect((await advancedFetch.response()).headers.get("Location")).toBe(
       "https://translate.example/french/bonjour+monde"
+    );
+  });
+
+  test("falls back to IndexedDB when hot-boot metadata is invalid", async () => {
+    await seedDb({ settings: [{ key: "default-bang", value: "ddg" }] });
+    const swIdb = await import("../src/sw/idb");
+    await swIdb.invalidateCache();
+    const state: NavigationPreloadState = {
+      enabled: false,
+      headerValue: "invalid-hot-boot-record",
+    };
+    await loadSwRuntime([], false, state);
+
+    const fetchEvent = createFetchEvent(
+      "https://flashbang.local/?q=plain%20query",
+      "",
+      "navigate"
+    );
+    await handlers.fetch?.(fetchEvent.event);
+    const location = new URL(
+      (await fetchEvent.response()).headers.get("Location")!
+    );
+    expect(location.hostname).toBe("duckduckgo.com");
+  });
+
+  test("keeps IndexedDB settings when publishing hot metadata fails", async () => {
+    const state: NavigationPreloadState = {
+      enabled: false,
+      headerValue: "true",
+    };
+    await loadSwRuntime([], false, state);
+    const token = "metadata-failure";
+    const begin = createMessageEvent(
+      { type: "hot-boot-begin", token },
+      undefined,
+      () => undefined
+    );
+    await handlers.message?.(begin.event);
+    await Promise.all(begin.waits);
+    expect(state.headerValue).toBe(HOT_BOOT_SENTINEL);
+
+    await seedDb({ settings: [{ key: "default-bang", value: "ddg" }] });
+    rejectNavigationPreloadWrites = true;
+    const replies: unknown[] = [];
+    const end = createMessageEvent(
+      { type: "hot-boot-end", token },
+      undefined,
+      (message) => replies.push(message)
+    );
+    await handlers.message?.(end.event);
+    await Promise.all(end.waits);
+    expect(replies).toEqual([true]);
+    expect(state.headerValue).toBe(HOT_BOOT_SENTINEL);
+
+    const redirectReplies: unknown[] = [];
+    const redirect = createMessageEvent(
+      { type: "redirect", query: "plain query" },
+      { postMessage: (message) => redirectReplies.push(message) }
+    );
+    await handlers.message?.(redirect.event);
+    expect((redirectReplies[0] as { url: string }).url).toContain(
+      "duckduckgo.com"
     );
   });
 

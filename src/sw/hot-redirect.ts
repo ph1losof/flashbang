@@ -24,7 +24,6 @@ import type { RedirectSettingsSnapshot } from "./redirect-settings";
 
 const MASK_BASE = 2 ** HOT_BANG_COUNT;
 const MAX_PACKED_STATE = 256 * MASK_BASE - 1;
-export const MAX_HOT_BOOT_RECORD_LENGTH = 96 * 1024;
 
 export { HOT_BOOT_SENTINEL };
 export const NO_HOT_BOOT = -1;
@@ -377,8 +376,7 @@ export function encodeHotBootRecord(
   if (!(snapshot && settings)) {
     return compact;
   }
-  const record = `${compact}|${encodeBootSettings(snapshot, settings, frecency)}`;
-  return record.length <= MAX_HOT_BOOT_RECORD_LENGTH ? record : `${compact}|-`;
+  return `${compact}|${encodeBootSettings(snapshot, settings, frecency)}`;
 }
 
 export function parseHotBootRecord(raw: string, cacheName: string): number {
@@ -389,9 +387,6 @@ export function decodeHotBootRecord(
   raw: string,
   cacheName: string
 ): HotBootRecord | null {
-  if (raw.length > MAX_HOT_BOOT_RECORD_LENGTH) {
-    return null;
-  }
   const prefix = `${HOT_BOOT_VERSION}|${cacheName}|`;
   if (!raw.startsWith(prefix)) {
     return null;
@@ -405,24 +400,26 @@ export function decodeHotBootRecord(
   if (packed < 0 || !isBangMarker(Math.floor(packed / MASK_BASE))) {
     return null;
   }
-  let defaultBang = "";
-  let frecency: Readonly<Record<string, UrlParts>> | null = null;
-  let settings: RedirectSettings | null = null;
-  let payloadComplete = false;
-  if (payloadStart !== -1) {
-    payloadComplete = true;
-    const encoded = raw.substring(payloadStart + 1);
-    if (encoded !== "-") {
-      const decoded = decodeBootSettings(encoded);
-      if (!decoded) {
-        return null;
-      }
-      defaultBang = decoded.defaultBang;
-      frecency = decoded.frecency;
-      settings = decoded.settings;
-    }
+  if (payloadStart === -1) {
+    return {
+      defaultBang: "",
+      frecency: null,
+      payloadComplete: false,
+      settings: null,
+      state: packed,
+    };
   }
-  return { defaultBang, frecency, payloadComplete, settings, state: packed };
+  const decoded = decodeBootSettings(raw.substring(payloadStart + 1));
+  if (!decoded) {
+    return null;
+  }
+  return {
+    defaultBang: decoded.defaultBang,
+    frecency: decoded.frecency,
+    payloadComplete: true,
+    settings: decoded.settings,
+    state: packed,
+  };
 }
 
 export function hotBootSettingsNeedPublish(

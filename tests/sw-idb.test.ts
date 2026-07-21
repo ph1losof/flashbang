@@ -194,7 +194,7 @@ describe("sw/idb redirect settings", () => {
     expect(settings.custom.g?.[3]).toBeInstanceOf(RegExp);
   });
 
-  test("returns safe defaults when IndexedDB is unavailable", async () => {
+  test("keeps safe defaults for the worker lifetime when IndexedDB fails", async () => {
     let attempts = 0;
     (globalThis as { indexedDB?: unknown }).indexedDB = {
       open() {
@@ -207,7 +207,17 @@ describe("sw/idb redirect settings", () => {
     shared.resetDB();
 
     const mod = await loadSwIdb();
-    const settings = await mod.readRedirectSettings();
+    const realNow = Date.now;
+    let now = realNow();
+    let settings: RedirectSettings;
+    try {
+      Date.now = () => now;
+      settings = await mod.readRedirectSettings();
+      now += 6_000;
+      expect(await mod.readRedirectSettings()).toBe(settings);
+    } finally {
+      Date.now = realNow;
+    }
 
     expect(settings.defaultUrl[0]).toContain("google.com/search?q=");
     expect(settings.luckyUrl?.[0]).toContain("duckduckgo.com/?q=");
@@ -215,9 +225,11 @@ describe("sw/idb redirect settings", () => {
     expect(attempts).toBe(1);
   });
 
-  test("uses startup settings when IndexedDB is temporarily unavailable", async () => {
+  test("uses explicitly seeded startup settings without opening IndexedDB", async () => {
+    let attempts = 0;
     (globalThis as { indexedDB?: unknown }).indexedDB = {
       open() {
+        attempts++;
         throw new Error("boom");
       },
     };
@@ -230,12 +242,12 @@ describe("sw/idb redirect settings", () => {
       syntax: compileTriggerSyntax("$", "~"),
     };
 
-    const settings = await (await loadSwIdb()).readRedirectSettings(
-      undefined,
-      () => Promise.resolve(startupSettings)
-    );
+    const mod = await loadSwIdb();
+    mod.seedRedirectSettings(startupSettings);
+    const settings = await mod.readRedirectSettings();
 
     expect(settings).toBe(startupSettings);
+    expect(attempts).toBe(0);
     expect(redirectUrl("plain query", settings)).toContain(
       "duckduckgo.com/?q=plain+query"
     );

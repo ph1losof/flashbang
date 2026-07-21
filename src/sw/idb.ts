@@ -32,7 +32,6 @@ let persistPending: FrecencySnapshot | null = null;
 let cachedRedirect: RedirectSettings | null = null;
 let redirectSettingsPromise: Promise<RedirectSettings> | null = null;
 let redirectSettingsInvalidationPromise: Promise<void> | null = null;
-let redirectSettingsRetryAt = 0;
 let frecencyCounts: Record<string, number> | null = null;
 let frecencyLoaded = false;
 let loadFrecencyPromise: Promise<void> | null = null;
@@ -44,22 +43,15 @@ function emptyFrecencyCounts(): Record<string, number> {
 }
 
 export function getCachedSettings(): RedirectSettings | null {
-  if (redirectSettingsRetryAt !== 0 && Date.now() >= redirectSettingsRetryAt) {
-    cachedRedirect = null;
-    redirectSettingsRetryAt = 0;
-    resetDB();
-  }
   return cachedRedirect;
 }
 
 export function seedRedirectSettings(settings: RedirectSettings): void {
   cachedRedirect = settings;
-  redirectSettingsRetryAt = 0;
 }
 
 export function readRedirectSettings(
-  prepared?: Promise<RedirectSettingsSnapshot>,
-  fallback?: () => Promise<RedirectSettings | null>
+  prepared?: Promise<RedirectSettingsSnapshot>
 ): Promise<RedirectSettings> {
   const cached = getCachedSettings();
   if (cached) {
@@ -76,16 +68,8 @@ export function readRedirectSettings(
           loadFrecency(),
         ]);
         cachedRedirect = settings;
-        redirectSettingsRetryAt = 0;
       } catch {
-        let fallbackSettings: RedirectSettings | null = null;
-        try {
-          fallbackSettings = (await fallback?.()) ?? null;
-        } catch {
-          // A recovery source must not replace the existing safe defaults.
-        }
-        cachedRedirect = fallbackSettings ?? defaultRedirectSettings();
-        redirectSettingsRetryAt = Date.now() + 5_000;
+        cachedRedirect = defaultRedirectSettings();
         resetDB();
       }
 
@@ -159,7 +143,6 @@ export function invalidateCache(): Promise<void> {
   );
   cachedRedirect = null;
   redirectSettingsPromise = null;
-  redirectSettingsRetryAt = 0;
   resetDB();
   const invalidating = Promise.allSettled(pending).then(async () => {
     cachedRedirect = null;
