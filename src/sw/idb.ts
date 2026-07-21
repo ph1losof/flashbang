@@ -58,7 +58,8 @@ export function seedRedirectSettings(settings: RedirectSettings): void {
 }
 
 export function readRedirectSettings(
-  prepared?: Promise<RedirectSettingsSnapshot>
+  prepared?: Promise<RedirectSettingsSnapshot>,
+  fallback?: () => Promise<RedirectSettings | null>
 ): Promise<RedirectSettings> {
   const cached = getCachedSettings();
   if (cached) {
@@ -77,7 +78,13 @@ export function readRedirectSettings(
         cachedRedirect = settings;
         redirectSettingsRetryAt = 0;
       } catch {
-        cachedRedirect = defaultRedirectSettings();
+        let fallbackSettings: RedirectSettings | null = null;
+        try {
+          fallbackSettings = (await fallback?.()) ?? null;
+        } catch {
+          // A recovery source must not replace the existing safe defaults.
+        }
+        cachedRedirect = fallbackSettings ?? defaultRedirectSettings();
         redirectSettingsRetryAt = Date.now() + 5_000;
         resetDB();
       }

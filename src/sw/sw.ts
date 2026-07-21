@@ -38,7 +38,10 @@ import {
   redirectRawUrl,
   redirectUrl,
 } from "./redirect";
-import { prepareRedirectSettings } from "./redirect-settings";
+import {
+  prepareRedirectSettings,
+  type RedirectSettingsSnapshot,
+} from "./redirect-settings";
 
 declare const __CACHE_VERSION__: string;
 declare const __BANG_DATA_ASSET__: string;
@@ -111,6 +114,14 @@ const swallowError = () => {
   /* best-effort */
 };
 
+function readCurrentRedirectSettings(
+  prepared?: Promise<RedirectSettingsSnapshot>
+): Promise<RedirectSettings> {
+  return readRedirectSettings(prepared, () =>
+    hotBootPromise.then((record) => record?.settings ?? null)
+  );
+}
+
 function queueHotBootMutation(operation: () => Promise<void>): Promise<void> {
   const next = hotBootMutation.then(operation, operation);
   hotBootMutation = next.catch(swallowError);
@@ -139,7 +150,7 @@ async function publishHotBoot(includeSettings = false): Promise<void> {
     await loadFrecency();
     settings =
       getCachedSettings() ??
-      (await readRedirectSettings(Promise.resolve(snapshot)));
+      (await readCurrentRedirectSettings(Promise.resolve(snapshot)));
   }
   const frecency = settings
     ? materializeHotFrecency(getTopFrecencyRecord(), snapshot)
@@ -255,7 +266,7 @@ function warmRuntime(): Promise<void> {
   if (!runtimeWarmPromise) {
     const warming = Promise.all([
       ensureBangData(),
-      readRedirectSettings(),
+      readCurrentRedirectSettings(),
     ]).then(async () => {
       if (hotBootSettingsNeedPublish(currentHotBoot)) {
         await queueHotBootMutation(() => publishHotBoot(true));
@@ -606,7 +617,7 @@ self.addEventListener("message", (e: ExtendableMessageEvent) => {
       if (cached) {
         resolve(cached);
       } else {
-        e.waitUntil(readRedirectSettings().then(resolve));
+        e.waitUntil(readCurrentRedirectSettings().then(resolve));
       }
     } else {
       e.waitUntil(
@@ -616,7 +627,7 @@ self.addEventListener("message", (e: ExtendableMessageEvent) => {
             resolve(readySettings);
             return;
           }
-          return readRedirectSettings().then(resolve);
+          return readCurrentRedirectSettings().then(resolve);
         })
       );
     }
@@ -712,7 +723,7 @@ self.addEventListener("fetch", (e: FetchEvent) => {
           e.respondWith(respondToRedirect(e, rawQ, cached));
         } else {
           e.respondWith(
-            readRedirectSettings().then((settings) =>
+            readCurrentRedirectSettings().then((settings) =>
               respondToRedirect(e, rawQ, settings)
             )
           );
@@ -757,7 +768,7 @@ self.addEventListener("fetch", (e: FetchEvent) => {
                 }
                 return respondToRedirect(e, rawQ, cached);
               }
-              return readRedirectSettings().then((settings) => {
+              return readCurrentRedirectSettings().then((settings) => {
                 if (hotBootSettingsNeedPublish(currentHotBoot)) {
                   e.waitUntil(
                     queueHotBootMutation(() => publishHotBoot(true)).catch(
