@@ -20,7 +20,7 @@ jobs:
         with:
           bun-version: 1.3.14
 
-      - name: Validate release tag and package version
+      - name: Validate release tag and repository versions
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
@@ -34,6 +34,12 @@ jobs:
           package_version="$(bun -e 'const p = await Bun.file("package.json").json(); if (typeof p.version !== "string") { console.error("package.json version must be a string"); process.exit(1); } process.stdout.write(p.version);')"
           if [ "$tag_version" != "$package_version" ]; then
             echo "::error::Release tag version '$tag_version' does not match package.json version '$package_version'." >&2
+            exit 1
+          fi
+
+          readme_version="$(bun -e 'const text = await Bun.file("README.md").text(); const match = text.match(/Current release:.*?>v([0-9]+\.[0-9]+\.[0-9]+)<\/a>/); if (!match) { console.error("README.md current release marker is missing"); process.exit(1); } process.stdout.write(match[1]);')"
+          if [ "$tag_version" != "$readme_version" ]; then
+            echo "::error::Release tag version '$tag_version' does not match README.md version '$readme_version'." >&2
             exit 1
           fi
 

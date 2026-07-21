@@ -54,7 +54,7 @@ The repository custom-bang file supports simple `{}` templates plus the special 
 We use **GitHub Releases** as the canonical place for release notes and version history.
 
 - Version tags must use strict stable SemVer `vX.Y.Z` (for example `v1.5.0`) and match the version in `package.json`
-- Maintainers push the version commit to `master`, wait for protected-branch CI, then create and push an annotated tag; they do not create the GitHub Release manually
+- Maintainers run the **Prepare Release** workflow to open an automated package/README version-bump pull request, which auto-merges after protected-branch CI; they then create and push an annotated tag and do not create the GitHub Release manually
 - The tag-triggered workflow verifies that the tagged commit is contained in `origin/master`, runs its validation gates without repeating Playwright E2E, and creates the GitHub Release with generated notes
 - After release creation, the workflow health-checks a container and publishes `linux/amd64` and `linux/arm64` images to GHCR with the version and `latest` tags
 
