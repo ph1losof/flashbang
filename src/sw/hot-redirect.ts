@@ -9,15 +9,24 @@ import {
   type CaptureUrlParts,
   compileCaptureUrl,
 } from "../shared/capture-template";
-import { TOP_FRECENCY_ENTRIES } from "../shared/constants";
+import {
+  DEFAULT_LUCKY_URL,
+  DEFAULT_URL,
+  LUCKY_TRIGGER_PROVIDERS,
+  LUCKY_URLS,
+  TOP_FRECENCY_ENTRIES,
+} from "../shared/constants";
 import { validateCustomTrigger } from "../shared/custom-trigger";
 import { hashFNV1a } from "../shared/hash";
 import { HOT_BOOT_SENTINEL, HOT_BOOT_VERSION } from "../shared/hot-boot";
 import { lookupBang } from "./bang-data";
 import {
   type CustomUrlParts,
+  compileTriggerMarker,
   compileTriggerSyntax,
+  type HotBangLookup,
   type RedirectSettings,
+  type TriggerSyntax,
   type UrlParts,
 } from "./redirect";
 import type { RedirectSettingsSnapshot } from "./redirect-settings";
@@ -28,17 +37,140 @@ const MAX_PACKED_STATE = 256 * MASK_BASE - 1;
 export { HOT_BOOT_SENTINEL };
 export const NO_HOT_BOOT = -1;
 
-let resolvedHotId = -1;
-let resolvedFrecencyTrigger = "";
-
 export type HotFrecencyEntry = readonly [string, UrlParts];
 
 export interface HotBootRecord {
+  baseComplete: boolean;
+  compactSettings: RedirectSettings | null;
   defaultBang: string;
   frecency: Readonly<Record<string, UrlParts>> | null;
+  hotBangLookup: HotBangLookup;
   payloadComplete: boolean;
   settings: RedirectSettings | null;
   state: number;
+}
+
+const hotBangUrlCache: Array<UrlParts | undefined> = [];
+
+function hotBangParts(id: number): UrlParts {
+  let parts = hotBangUrlCache[id];
+  if (!parts) {
+    parts = [HOT_PREFIXES[id], HOT_SUFFIXES[id]];
+    hotBangUrlCache[id] = parts;
+  }
+  return parts;
+}
+
+export function lookupGeneratedHotBang(trigger: string): UrlParts | null {
+  const id = lookupHotBang(trigger, 0, trigger.length);
+  return id === -1 ? null : hotBangParts(id);
+}
+
+function createHotBangLookup(
+  frecency: Readonly<Record<string, UrlParts>>
+): HotBangLookup {
+  if (Object.keys(frecency).length === 0) {
+    return lookupGeneratedHotBang;
+  }
+  return (trigger) => frecency[trigger] ?? lookupGeneratedHotBang(trigger);
+}
+
+function createCompactHotBangLookup(state: number): HotBangLookup {
+  const overrides = state & (MASK_BASE - 1);
+  if (overrides === 0) {
+    return lookupGeneratedHotBang;
+  }
+  return (trigger) => {
+    const id = lookupHotBang(trigger, 0, trigger.length);
+    if (id === -1) {
+      return null;
+    }
+    return (overrides & (1 << id)) === 0 ? hotBangParts(id) : false;
+  };
+}
+
+function createCompactSettings(state: number): RedirectSettings {
+  const marker = Math.floor(state / MASK_BASE);
+  return {
+    custom: Object.create(null),
+    defaultUrl: ["https://flashbang.invalid/", null],
+    luckyUrl: null,
+    syntax: [compileTriggerMarker(marker), 0] as TriggerSyntax,
+  };
+}
+
+function splitUrl(value: string): UrlParts {
+  const placeholder = value.indexOf("{}");
+  return placeholder === -1
+    ? [value, null]
+    : [value.substring(0, placeholder), value.substring(placeholder + 2)];
+}
+
+function baseSettings(
+  defaultUrl: UrlParts,
+  luckyUrl: UrlParts | null,
+  syntax?: TriggerSyntax
+): RedirectSettings {
+  return {
+    custom: Object.create(null),
+    defaultUrl: [defaultUrl[0], defaultUrl[1]],
+    luckyUrl: luckyUrl ? [luckyUrl[0], luckyUrl[1]] : null,
+    ...(syntax ? { syntax } : {}),
+  };
+}
+
+export function materializeCompactBaseSettings(
+  snapshot: RedirectSettingsSnapshot,
+  prepared?: RedirectSettings | null
+): RedirectSettings | null {
+  if (prepared) {
+    return baseSettings(
+      prepared.defaultUrl,
+      prepared.luckyUrl,
+      prepared.syntax
+    );
+  }
+
+  const customDefault = snapshot.custom[snapshot.defaultBang];
+  let defaultUrl: UrlParts;
+  let effectiveDefaultBang = snapshot.defaultBang;
+  if (customDefault) {
+    if (customDefault.length < 5) {
+      const defaultEntry = customDefault as UrlParts;
+      defaultUrl = [defaultEntry[0], defaultEntry[1]];
+    } else {
+      defaultUrl = splitUrl(DEFAULT_URL);
+      effectiveDefaultBang = "g";
+    }
+  } else {
+    const generatedDefault = lookupGeneratedHotBang(snapshot.defaultBang);
+    if (!generatedDefault) {
+      return null;
+    }
+    defaultUrl = generatedDefault;
+  }
+
+  let luckyUrl: UrlParts | null;
+  switch (snapshot.luckyProvider) {
+    case "none":
+      luckyUrl = null;
+      break;
+    case "google":
+    case "ddg":
+    case "kagi":
+      luckyUrl = splitUrl(LUCKY_URLS[snapshot.luckyProvider]);
+      break;
+    case "custom":
+      luckyUrl = snapshot.luckyUrl;
+      break;
+    default:
+      luckyUrl = splitUrl(
+        LUCKY_URLS[LUCKY_TRIGGER_PROVIDERS[effectiveDefaultBang]] ||
+          DEFAULT_LUCKY_URL
+      );
+      break;
+  }
+  return baseSettings(defaultUrl, luckyUrl, snapshot.syntax);
 }
 
 function isBangMarker(code: number): boolean {
@@ -333,6 +465,57 @@ function encodeBootSettings(
   );
 }
 
+function encodeCompactBaseSettings(settings: RedirectSettings): string {
+  const markers = settings.syntax
+    ? [settings.syntax[0] & 0xff, settings.syntax[1] & 0xff]
+    : [33, 64];
+  return encodeBase64Url(
+    JSON.stringify([settings.defaultUrl, settings.luckyUrl, markers])
+  );
+}
+
+function decodeCompactBaseSettings(encoded: string): RedirectSettings | null {
+  const decoded = decodeBase64Url(encoded);
+  if (decoded === null) {
+    return null;
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(value) || value.length !== 3) {
+    return null;
+  }
+  const [defaultUrl, luckyUrl, markers] = value;
+  if (!isUrlParts(defaultUrl)) {
+    return null;
+  }
+  if (!(luckyUrl === null || isUrlParts(luckyUrl))) {
+    return null;
+  }
+  if (
+    !Array.isArray(markers) ||
+    markers.length !== 2 ||
+    !markers.every(
+      (marker) => Number.isInteger(marker) && isBangMarker(marker)
+    ) ||
+    markers[0] === markers[1]
+  ) {
+    return null;
+  }
+  const syntax = compileTriggerSyntax(
+    String.fromCharCode(markers[0]) as Parameters<
+      typeof compileTriggerSyntax
+    >[0],
+    String.fromCharCode(markers[1]) as Parameters<
+      typeof compileTriggerSyntax
+    >[1]
+  );
+  return baseSettings(defaultUrl, luckyUrl, syntax);
+}
+
 export function materializeHotFrecency(
   counts: Readonly<Record<string, number>>,
   snapshot: RedirectSettingsSnapshot
@@ -373,8 +556,11 @@ export function encodeHotBootRecord(
   frecency: readonly HotFrecencyEntry[] = []
 ): string {
   const compact = `${HOT_BOOT_VERSION}|${cacheName}|${state.toString(36)}`;
-  if (!(snapshot && settings)) {
+  if (!settings) {
     return compact;
+  }
+  if (!snapshot) {
+    return `${compact}|c${encodeCompactBaseSettings(settings)}`;
   }
   return `${compact}|${encodeBootSettings(snapshot, settings, frecency)}`;
 }
@@ -402,20 +588,43 @@ export function decodeHotBootRecord(
   }
   if (payloadStart === -1) {
     return {
+      baseComplete: false,
+      compactSettings: createCompactSettings(packed),
       defaultBang: "",
       frecency: null,
+      hotBangLookup: createCompactHotBangLookup(packed),
       payloadComplete: false,
       settings: null,
       state: packed,
     };
   }
-  const decoded = decodeBootSettings(raw.substring(payloadStart + 1));
+  const payload = raw.substring(payloadStart + 1);
+  if (payload.charCodeAt(0) === 99) {
+    const compactSettings = decodeCompactBaseSettings(payload.substring(1));
+    if (!compactSettings) {
+      return null;
+    }
+    return {
+      baseComplete: true,
+      compactSettings,
+      defaultBang: "",
+      frecency: null,
+      hotBangLookup: createCompactHotBangLookup(packed),
+      payloadComplete: false,
+      settings: null,
+      state: packed,
+    };
+  }
+  const decoded = decodeBootSettings(payload);
   if (!decoded) {
     return null;
   }
   return {
+    baseComplete: true,
+    compactSettings: null,
     defaultBang: decoded.defaultBang,
     frecency: decoded.frecency,
+    hotBangLookup: createHotBangLookup(decoded.frecency),
     payloadComplete: true,
     settings: decoded.settings,
     state: packed,
@@ -426,106 +635,4 @@ export function hotBootSettingsNeedPublish(
   record: HotBootRecord | null
 ): boolean {
   return !record?.payloadComplete;
-}
-
-export function getResolvedHotTrigger(): string {
-  return resolvedHotId === -1
-    ? resolvedFrecencyTrigger
-    : HOT_TRIGGERS[resolvedHotId];
-}
-
-export function resolveHotRedirect(
-  rawQuery: string,
-  state: number,
-  frecency?: Readonly<Record<string, UrlParts>> | null
-): string | null {
-  resolvedHotId = -1;
-  if (state < 0) {
-    return null;
-  }
-
-  const marker = Math.floor(state / MASK_BASE);
-  const length = rawQuery.length;
-  let triggerStart = 0;
-  if (rawQuery.charCodeAt(0) === marker) {
-    triggerStart = 1;
-  } else if (
-    length >= 3 &&
-    rawQuery.charCodeAt(0) === 37 &&
-    rawQuery.charCodeAt(1) === (marker >> 4) + 48 &&
-    (rawQuery.charCodeAt(2) | 32) ===
-      ((marker & 15) < 10 ? (marker & 15) + 48 : (marker & 15) + 87)
-  ) {
-    triggerStart = 3;
-  } else {
-    return null;
-  }
-
-  let separator = triggerStart;
-  let separatorWidth = 0;
-  for (; separator < length; separator++) {
-    const code = rawQuery.charCodeAt(separator);
-    if (code === 43) {
-      separatorWidth = 1;
-      break;
-    }
-    if (
-      code === 37 &&
-      rawQuery.charCodeAt(separator + 1) === 50 &&
-      rawQuery.charCodeAt(separator + 2) === 48
-    ) {
-      separatorWidth = 3;
-      break;
-    }
-  }
-  if (separatorWidth === 0) {
-    return null;
-  }
-
-  const id = lookupHotBang(rawQuery, triggerStart, separator);
-  let prefix: string;
-  let suffix: string | null;
-  if (id >= 0) {
-    if ((state & (1 << id)) !== 0) {
-      return null;
-    }
-    resolvedHotId = id;
-    prefix = HOT_PREFIXES[id];
-    suffix = HOT_SUFFIXES[id];
-  } else {
-    const trigger = rawQuery.substring(triggerStart, separator);
-    const parts = frecency?.[trigger];
-    if (!parts) {
-      return null;
-    }
-    resolvedFrecencyTrigger = trigger;
-    prefix = parts[0];
-    suffix = parts[1];
-  }
-
-  const termStart = separator + separatorWidth;
-  let termEnd = length;
-  while (termEnd > termStart) {
-    if (rawQuery.charCodeAt(termEnd - 1) === 43) {
-      termEnd--;
-      continue;
-    }
-    if (
-      termEnd >= termStart + 3 &&
-      rawQuery.charCodeAt(termEnd - 3) === 37 &&
-      rawQuery.charCodeAt(termEnd - 2) === 50 &&
-      rawQuery.charCodeAt(termEnd - 1) === 48
-    ) {
-      termEnd -= 3;
-      continue;
-    }
-    break;
-  }
-  if (termStart >= termEnd) {
-    return null;
-  }
-
-  return suffix === null
-    ? prefix
-    : prefix + rawQuery.substring(termStart, termEnd) + suffix;
 }

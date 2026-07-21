@@ -6,11 +6,12 @@ import {
   createHotBootState,
   decodeHotBootRecord,
   encodeHotBootRecord,
-  resolveHotRedirect,
+  materializeCompactBaseSettings,
 } from "../src/sw/hot-redirect";
 import type { UrlParts } from "../src/sw/redirect";
 import {
   compileTriggerSyntax,
+  type HotBangLookup,
   type RedirectSettings,
   redirectRaw,
 } from "../src/sw/redirect";
@@ -47,31 +48,17 @@ function settings(): RedirectSettings {
 const WARMUP = 10_000;
 const ITERS = 100_000;
 
-function benchRedirectRaw(raw: string, s = settings()): number {
+function benchRedirectRaw(
+  raw: string,
+  s = settings(),
+  hotBangLookup?: HotBangLookup
+): number {
   for (let i = 0; i < WARMUP; i++) {
-    redirectRaw(raw, s);
+    redirectRaw(raw, s, hotBangLookup);
   }
   const t0 = performance.now();
   for (let i = 0; i < ITERS; i++) {
-    redirectRaw(raw, s);
-  }
-  return (performance.now() - t0) / ITERS;
-}
-
-function benchHotRedirect(raw: string): number {
-  const state = createHotBootState({
-    custom: Object.create(null),
-    defaultBang: "g",
-    luckyProvider: "default",
-    luckyUrl: null,
-    syntax: compileTriggerSyntax(";", "@"),
-  });
-  for (let i = 0; i < WARMUP; i++) {
-    resolveHotRedirect(raw, state);
-  }
-  const t0 = performance.now();
-  for (let i = 0; i < ITERS; i++) {
-    resolveHotRedirect(raw, state);
+    redirectRaw(raw, s, hotBangLookup);
   }
   return (performance.now() - t0) / ITERS;
 }
@@ -106,8 +93,38 @@ function benchHotBootDecode(record: string): number {
 }
 
 describe("redirect performance regression", () => {
-  test("cold-start hot bang resolution stays under 0.001ms", () => {
-    expect(benchHotRedirect("%3Bgh+service+workers")).toBeLessThan(0.001);
+  test("canonical hot bang resolution stays under 0.005ms", () => {
+    const snapshot = {
+      custom: Object.create(null),
+      defaultBang: "g",
+      luckyProvider: "default",
+      luckyUrl: null,
+      syntax: compileTriggerSyntax(";", "@"),
+    };
+    const compactSettings = materializeCompactBaseSettings(snapshot)!;
+    const compact = decodeHotBootRecord(
+      encodeHotBootRecord(
+        "fb-perf",
+        createHotBootState(snapshot),
+        undefined,
+        compactSettings
+      ),
+      "fb-perf"
+    )!;
+    expect(
+      benchRedirectRaw(
+        "%3Bgh+service+workers",
+        compact.compactSettings!,
+        compact.hotBangLookup
+      )
+    ).toBeLessThan(0.005);
+    expect(
+      benchRedirectRaw(
+        "service+workers",
+        compact.compactSettings!,
+        compact.hotBangLookup
+      )
+    ).toBeLessThan(0.005);
   });
 
   test("prefix bang redirect stays under 0.005ms", () => {

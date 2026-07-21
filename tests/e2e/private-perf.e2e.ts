@@ -22,6 +22,11 @@ interface Timing {
   fallbackRequested: boolean;
 }
 
+interface BrowserPrimitiveProfile {
+  bundleRead: { median: string; p95: string };
+  metadataRead: { median: string; p95: string };
+}
+
 function percentile(values: readonly number[], fraction: number): number {
   return values[
     Math.min(values.length - 1, Math.floor(values.length * fraction))
@@ -271,7 +276,9 @@ test("private hash redirect and public path performance profile", async ({
   await context.close();
 
   const workerRestart: Timing[] = [];
+  const workerRedirectFloor: Timing[] = [];
   const bundleFallback: Timing[] = [];
+  let browserPrimitives: BrowserPrimitiveProfile | null = null;
   if (browserName === "chromium") {
     const restartContext = await browser.newContext();
     const restartPage = await restartContext.newPage();
@@ -311,6 +318,50 @@ test("private hash redirect and public path performance profile", async ({
           };
         })
     );
+    browserPrimitives = await restartPage.evaluate(async () => {
+      const summarizePrimitive = (values: number[]) => {
+        values.sort((a, b) => a - b);
+        return {
+          median: values[Math.floor(values.length * 0.5)].toFixed(3),
+          p95: values[Math.floor(values.length * 0.95)].toFixed(3),
+        };
+      };
+      const metadata: number[] = [];
+      const registration = await navigator.serviceWorker.ready;
+      for (let i = 0; i < 50; i++) {
+        const started = performance.now();
+        await registration.navigationPreload.getState();
+        metadata.push(performance.now() - started);
+      }
+      const bundle: number[] = [];
+      for (let i = 0; i < 50; i++) {
+        const started = performance.now();
+        await new Promise<void>((resolve, reject) => {
+          const open = indexedDB.open("flashbang", 1);
+          open.onerror = () => reject(open.error);
+          open.onsuccess = () => {
+            const db = open.result;
+            const request = db
+              .transaction("settings", "readonly")
+              .objectStore("settings")
+              .get("redirect-settings-snapshot");
+            request.onerror = () => {
+              db.close();
+              reject(request.error);
+            };
+            request.onsuccess = () => {
+              db.close();
+              resolve();
+            };
+          };
+        });
+        bundle.push(performance.now() - started);
+      }
+      return {
+        bundleRead: summarizePrimitive(bundle),
+        metadataRead: summarizePrimitive(metadata),
+      };
+    });
     const cdp = await browser.newBrowserCDPSession();
     const workerUrl = new URL("/sw.js", baseURL).href;
 
@@ -356,6 +407,60 @@ test("private hash redirect and public path performance profile", async ({
     }
     await cdp.detach();
     await restartContext.close();
+
+    const floorWorkerContext = await browser.newContext();
+    const floorWorkerPage = await floorWorkerContext.newPage();
+    await mockGoogle(floorWorkerPage);
+    const profileWorkerUrl = new URL("/__profile/sw.js", baseURL).href;
+    await floorWorkerContext.route(profileWorkerUrl, (route) =>
+      route.fulfill({
+        body: `self.addEventListener("install",()=>self.skipWaiting());self.addEventListener("activate",e=>e.waitUntil(self.clients.claim()));self.addEventListener("fetch",e=>{const p=new URL(e.request.url).pathname;if(p==="/__profile/start")e.respondWith(Response.redirect("${GOOGLE}/search?q=profile",302));else if(p==="/__profile/warm")e.respondWith(new Response("ok",{headers:{"Content-Type":"text/html"}}))})`,
+        contentType: "application/javascript",
+        status: 200,
+      })
+    );
+    await floorWorkerPage.goto("/health");
+    await floorWorkerPage.evaluate(async () => {
+      const registration = await navigator.serviceWorker.register(
+        "/__profile/sw.js",
+        { scope: "/__profile/" }
+      );
+      const worker =
+        registration.installing ?? registration.waiting ?? registration.active;
+      if (worker?.state !== "activated") {
+        await new Promise<void>((resolve) => {
+          worker?.addEventListener("statechange", () => {
+            if (worker.state === "activated") {
+              resolve();
+            }
+          });
+        });
+      }
+    });
+    await floorWorkerPage.goto("/__profile/warm");
+    await floorWorkerPage.waitForFunction(() =>
+      navigator.serviceWorker.controller?.scriptURL.includes("/__profile/")
+    );
+    const floorWorkerCdp = await browser.newBrowserCDPSession();
+    for (let i = 0; i < COLD_RUNS; i++) {
+      await floorWorkerPage.goto("/__profile/warm");
+      const { targetInfos } = await floorWorkerCdp.send("Target.getTargets");
+      const worker = targetInfos.find(
+        (target) =>
+          target.type === "service_worker" && target.url === profileWorkerUrl
+      );
+      if (!worker) {
+        throw new Error("Minimal Service Worker target missing from profile");
+      }
+      await floorWorkerCdp.send("Target.closeTarget", {
+        targetId: worker.targetId,
+      });
+      workerRedirectFloor.push(
+        await measure(floorWorkerPage, "/__profile/start")
+      );
+    }
+    await floorWorkerCdp.detach();
+    await floorWorkerContext.close();
   }
 
   const floorContext = await browser.newContext();
@@ -383,6 +488,7 @@ test("private hash redirect and public path performance profile", async ({
     JSON.stringify({
       browserName,
       bangDataDelayMs: BANG_DATA_DELAY_MS,
+      ...(browserPrimitives ? { browserPrimitives } : {}),
       ...(bundleFallback.length > 0
         ? { bundleFallback: summarize(bundleFallback) }
         : {}),
@@ -397,6 +503,9 @@ test("private hash redirect and public path performance profile", async ({
       publicWarm: summarize(publicWarm),
       ...(workerRestart.length > 0
         ? { workerRestart: summarize(workerRestart) }
+        : {}),
+      ...(workerRedirectFloor.length > 0
+        ? { workerRedirectFloor: summarize(workerRedirectFloor) }
         : {}),
     })
   );

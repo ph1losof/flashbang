@@ -14,13 +14,12 @@ import {
   createHotBootState,
   decodeHotBootRecord,
   encodeHotBootRecord,
-  getResolvedHotTrigger,
   HOT_BOOT_SENTINEL,
   type HotBootRecord,
   hotBootSettingsNeedPublish,
+  lookupGeneratedHotBang,
+  materializeCompactBaseSettings,
   materializeHotFrecency,
-  NO_HOT_BOOT,
-  resolveHotRedirect,
 } from "./hot-redirect";
 import {
   getCachedSettings,
@@ -34,6 +33,8 @@ import {
   waitForRedirectSettingsPersistence,
 } from "./idb";
 import {
+  type HotBangLookup,
+  isHotBangLookupBlocked,
   type RedirectSettings,
   redirectRaw,
   redirectRawUrl,
@@ -197,11 +198,14 @@ async function publishHotBoot(includeSettings = false): Promise<void> {
   const frecency = settings
     ? materializeHotFrecency(getTopFrecencyRecord(), snapshot)
     : undefined;
+  const compactSettings = settings
+    ? undefined
+    : materializeCompactBaseSettings(snapshot, prepared.settings);
   const record = encodeHotBootRecord(
     CACHE_NAME,
     state,
-    snapshot,
-    settings,
+    settings ? snapshot : undefined,
+    settings ?? compactSettings ?? undefined,
     frecency
   );
   try {
@@ -699,16 +703,41 @@ self.addEventListener("message", (e: ExtendableMessageEvent) => {
 function respondToRedirect(
   e: FetchEvent,
   rawQuery: string,
-  settings: RedirectSettings
+  settings: RedirectSettings,
+  hotBangLookup?: HotBangLookup | null
 ): Response {
   const benchmark = benchmarkState?.clientId === e.clientId;
   const [response, trigger] = redirectRaw(
     rawQuery,
-    benchmark ? BENCHMARK_SETTINGS : settings
+    benchmark ? BENCHMARK_SETTINGS : settings,
+    benchmark ? null : hotBangLookup
   );
   if (benchmark && benchmarkState) {
     benchmarkState.requestCount++;
   } else if (trigger) {
+    queueBangSideEffects(e, trigger);
+  }
+  return response;
+}
+
+function respondToCompactHotBang(
+  e: FetchEvent,
+  rawQuery: string,
+  hotBoot: HotBootRecord
+): Response | null {
+  const settings = hotBoot.compactSettings;
+  if (!settings) {
+    return null;
+  }
+  const [response, trigger] = redirectRaw(
+    rawQuery,
+    settings,
+    hotBoot.hotBangLookup
+  );
+  if (!(trigger || hotBoot.baseComplete)) {
+    return null;
+  }
+  if (trigger) {
     queueBangSideEffects(e, trigger);
   }
   return response;
@@ -794,23 +823,30 @@ self.addEventListener("fetch", (e: FetchEvent) => {
         e.respondWith(
           hotBootPromise.then((hotBoot) => {
             if (e.request.mode === "navigate") {
-              const hotUrl = resolveHotRedirect(
-                rawQ,
-                hotBoot?.state ?? NO_HOT_BOOT,
-                hotBoot?.frecency
-              );
-              if (hotUrl) {
-                queueBangSideEffects(e, getResolvedHotTrigger());
-                return Response.redirect(hotUrl, 302);
-              }
               const settings = hotBoot?.settings;
-              if (settings) {
-                try {
-                  return respondToRedirect(e, rawQ, settings);
-                } catch (error) {
-                  if (!isBangDataUnavailable(error)) {
-                    throw error;
+              try {
+                if (settings) {
+                  return respondToRedirect(
+                    e,
+                    rawQ,
+                    settings,
+                    hotBoot.hotBangLookup
+                  );
+                }
+                if (hotBoot?.compactSettings) {
+                  const response = respondToCompactHotBang(e, rawQ, hotBoot);
+                  if (response) {
+                    return response;
                   }
+                }
+              } catch (error) {
+                if (
+                  !(
+                    isBangDataUnavailable(error) ||
+                    isHotBangLookupBlocked(error)
+                  )
+                ) {
+                  throw error;
                 }
               }
             }
@@ -831,13 +867,28 @@ self.addEventListener("fetch", (e: FetchEvent) => {
                   );
                 }
                 try {
-                  return respondToRedirect(e, rawQ, settings);
+                  return respondToRedirect(
+                    e,
+                    rawQ,
+                    settings,
+                    hotBoot?.hotBangLookup ?? lookupGeneratedHotBang
+                  );
                 } catch (error) {
-                  if (!isBangDataUnavailable(error)) {
+                  if (
+                    !(
+                      isBangDataUnavailable(error) ||
+                      isHotBangLookupBlocked(error)
+                    )
+                  ) {
                     throw error;
                   }
                   await bangDataReady;
-                  return respondToRedirect(e, rawQ, settings);
+                  return respondToRedirect(
+                    e,
+                    rawQ,
+                    settings,
+                    hotBoot?.hotBangLookup ?? lookupGeneratedHotBang
+                  );
                 }
               }
             );

@@ -7,7 +7,6 @@ import {
   encodeHotBootRecord,
   HOT_BOOT_SENTINEL,
   parseHotBootRecord,
-  resolveHotRedirect,
 } from "../src/sw/hot-redirect";
 import {
   compileTriggerSyntax,
@@ -580,9 +579,43 @@ describe("sw runtime with real modules", () => {
     const activate = createExtendableEvent();
     await handlers.activate?.(activate.event);
     await Promise.all(activate.waits);
-    const initial = parseHotBootRecord(state.headerValue, "fb-test-cache");
-    expect(initial).toBeGreaterThanOrEqual(0);
-    expect(resolveHotRedirect(";gh+test", initial)).toContain("github.com");
+    const initial = decodeHotBootRecord(state.headerValue, "fb-test-cache")!;
+    expect(initial.payloadComplete).toBe(false);
+    expect(initial.baseComplete).toBe(true);
+    expect(
+      redirectRawUrl(
+        ";gh+test",
+        initial.compactSettings!,
+        initial.hotBangLookup
+      )
+    ).toContain("github.com");
+    expect(redirectRawUrl("plain+query", initial.compactSettings!)).toContain(
+      "google.com/search?q=plain+query"
+    );
+    expect(
+      redirectRawUrl(
+        "@gh+test",
+        initial.compactSettings!,
+        initial.hotBangLookup
+      )
+    ).toContain("site:github.com");
+
+    const initialFetch = createFetchEvent(
+      "https://flashbang.local/?q=plain+query",
+      "",
+      "navigate"
+    );
+    await handlers.fetch?.(initialFetch.event);
+    expect((await initialFetch.response()).headers.get("Location")).toContain(
+      "google.com/search?q=plain+query"
+    );
+    expect(
+      redirectRawUrl(
+        "test+;gh",
+        initial.compactSettings!,
+        initial.hotBangLookup
+      )
+    ).toContain("github.com");
 
     const token = "settings-write-1";
     const beginReplies: unknown[] = [];
@@ -609,7 +642,6 @@ describe("sw runtime with real modules", () => {
     await Promise.all(end.waits);
     expect(endReplies).toEqual([true]);
     const updated = decodeHotBootRecord(state.headerValue, "fb-test-cache")!;
-    expect(resolveHotRedirect(";gh+test", updated.state)).toBeNull();
     expect(redirectRawUrl(";gh+test", updated.settings!)).toBe(
       "https://custom.example/?q=test"
     );
@@ -781,7 +813,7 @@ describe("sw runtime with real modules", () => {
     const record = decodeHotBootRecord(state.headerValue, "fb-test-cache")!;
     expect(Object.keys(record.frecency!)).toContain("npm");
     expect(
-      resolveHotRedirect("!npm+router", record.state, record.frecency)
+      redirectRawUrl("!npm+router", record.settings!, record.hotBangLookup)
     ).toBe(redirectRawUrl("!npm+router", record.settings!));
   });
 

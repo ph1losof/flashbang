@@ -38,6 +38,7 @@ type SimpleEntry = UrlParts | UrlPartsWithSnap;
 type CaptureEntry = CaptureUrlParts | CaptureUrlPartsWithSnap;
 export type CustomUrlParts = SimpleEntry | CaptureEntry;
 export type TriggerSyntax = readonly [bangMarker: number, snapMarker: number];
+export type HotBangLookup = (trigger: string) => UrlParts | false | null;
 
 export interface RedirectSettings {
   custom: Record<string, CustomUrlParts>;
@@ -50,12 +51,29 @@ function hexCode(nibble: number): number {
   return nibble < 10 ? 48 + nibble : 87 + nibble;
 }
 
-function compileMarker(code: number): number {
+export function compileTriggerMarker(code: number): number {
   return code | (hexCode(code >> 4) << 8) | (hexCode(code & 0xf) << 16);
 }
 
-const DEFAULT_BANG_MARKER = compileMarker(33);
-const DEFAULT_SNAP_MARKER = compileMarker(64);
+const DEFAULT_BANG_MARKER = compileTriggerMarker(33);
+const DEFAULT_SNAP_MARKER = compileTriggerMarker(64);
+let activeHotBangLookup: HotBangLookup | null = null;
+const HOT_BANG_LOOKUP_BLOCKED = new Error("Hot bang lookup is blocked");
+
+export function isHotBangLookupBlocked(error: unknown): boolean {
+  return error === HOT_BANG_LOOKUP_BLOCKED;
+}
+
+function lookupBuiltInBang(trigger: string, hash: number): UrlParts | null {
+  if (!activeHotBangLookup) {
+    return lookupBang(trigger, hash);
+  }
+  const entry = activeHotBangLookup(trigger);
+  if (entry === false) {
+    throw HOT_BANG_LOOKUP_BLOCKED;
+  }
+  return entry ?? lookupBang(trigger, hash);
+}
 
 export function compileTriggerSyntax(
   bangPrefix: TriggerPrefix,
@@ -68,8 +86,8 @@ export function compileTriggerSyntax(
     return undefined;
   }
   return [
-    compileMarker(bangPrefix.charCodeAt(0)),
-    compileMarker(snapPrefix.charCodeAt(0)),
+    compileTriggerMarker(bangPrefix.charCodeAt(0)),
+    compileTriggerMarker(snapPrefix.charCodeAt(0)),
   ];
 }
 
@@ -450,7 +468,7 @@ function resolveBangFill(
           termEnd
         );
   }
-  const entry = lookupBang(bang, hash);
+  const entry = lookupBuiltInBang(bang, hash);
   if (entry) {
     return buildUrl(entry, rawQuery, termStart, termEnd);
   }
@@ -514,7 +532,7 @@ function resolveBangOrigin(
   if (builtIn !== undefined) {
     return builtIn;
   }
-  const entry = lookupBang(bang, hash);
+  const entry = lookupBuiltInBang(bang, hash);
   const resolved = entry || lookupAdvancedBang(bang);
   if (!resolved) {
     return null;
@@ -586,7 +604,7 @@ function resolveSnapSiteFilter(
     builtInSnapSiteFilterCache[bang] = snap;
     return snap;
   }
-  const entry = lookupBang(bang, hash);
+  const entry = lookupBuiltInBang(bang, hash);
   const resolved = entry || lookupAdvancedBang(bang);
   if (!resolved) {
     return null;
@@ -930,7 +948,17 @@ function resolvePrefixSnap(
   );
 }
 
-function resolveRaw(rawQuery: string, settings: RedirectSettings): string {
+function resolveRaw(
+  rawQuery: string,
+  settings: RedirectSettings,
+  hotBangLookup?: HotBangLookup | null
+): string {
+  // Avoid a write on the dominant no-lookup path; resolution is synchronous.
+  if (hotBangLookup) {
+    activeHotBangLookup = hotBangLookup;
+  } else if (activeHotBangLookup) {
+    activeHotBangLookup = null;
+  }
   _resolvedTrigger = null;
   const { defaultUrl, custom, luckyUrl } = settings;
   const syntax = settings.syntax;
@@ -1264,17 +1292,19 @@ function resolveRaw(rawQuery: string, settings: RedirectSettings): string {
 
 export function redirectRaw(
   rawQuery: string,
-  settings: RedirectSettings
+  settings: RedirectSettings,
+  hotBangLookup?: HotBangLookup | null
 ): [Response, string | null] {
-  const url = resolveRaw(rawQuery, settings);
+  const url = resolveRaw(rawQuery, settings, hotBangLookup);
   return [redir(url), _resolvedTrigger];
 }
 
 export function redirectRawUrl(
   rawQuery: string,
-  settings: RedirectSettings
+  settings: RedirectSettings,
+  hotBangLookup?: HotBangLookup | null
 ): string {
-  return resolveRaw(rawQuery, settings);
+  return resolveRaw(rawQuery, settings, hotBangLookup);
 }
 
 function encodeForRedirect(query: string): string {
@@ -1306,10 +1336,18 @@ function encodeForRedirect(query: string): string {
   return query.replaceAll(" ", "+");
 }
 
-export function redirectUrl(query: string, settings: RedirectSettings): string {
-  return resolveRaw(encodeForRedirect(query), settings);
+export function redirectUrl(
+  query: string,
+  settings: RedirectSettings,
+  hotBangLookup?: HotBangLookup | null
+): string {
+  return resolveRaw(encodeForRedirect(query), settings, hotBangLookup);
 }
 
-export function redirect(query: string, settings: RedirectSettings): Response {
-  return redir(redirectUrl(query, settings));
+export function redirect(
+  query: string,
+  settings: RedirectSettings,
+  hotBangLookup?: HotBangLookup | null
+): Response {
+  return redir(redirectUrl(query, settings, hotBangLookup));
 }

@@ -6,16 +6,17 @@ import {
   createHotBootState,
   decodeHotBootRecord,
   encodeHotBootRecord,
-  getResolvedHotTrigger,
   hotBootSettingsNeedPublish,
+  lookupGeneratedHotBang,
+  materializeCompactBaseSettings,
   materializeHotFrecency,
   NO_HOT_BOOT,
   parseHotBootRecord,
-  resolveHotRedirect,
 } from "../src/sw/hot-redirect";
 import {
   type CustomUrlParts,
   compileTriggerSyntax,
+  isHotBangLookupBlocked,
   type RedirectSettings,
   redirectRawUrl,
 } from "../src/sw/redirect";
@@ -77,6 +78,9 @@ describe("service worker hot redirects", () => {
     expect(record.startsWith("h1|fb-test|")).toBe(true);
     expect(record.length).toBeLessThan(32);
     expect(parseHotBootRecord(record, "fb-test")).toBe(state);
+    const decoded = decodeHotBootRecord(record, "fb-test")!;
+    expect(decoded.baseComplete).toBe(false);
+    expect(decoded.hotBangLookup).toBe(lookupGeneratedHotBang);
     expect(parseHotBootRecord(record, "fb-other")).toBe(NO_HOT_BOOT);
     expect(parseHotBootRecord("true", "fb-test")).toBe(NO_HOT_BOOT);
     expect(parseHotBootRecord("h3|fb-test|not-valid!", "fb-test")).toBe(
@@ -90,6 +94,54 @@ describe("service worker hot redirects", () => {
     );
     expect(decodeHotBootRecord(`${record}|not-base64!`, "fb-test")).toBeNull();
     expect(decodeHotBootRecord(`${record}|-`, "fb-test")).toBeNull();
+  });
+
+  test("round-trips non-authoritative compact base settings", () => {
+    const sourceSnapshot = snapshot();
+    const compactSettings = materializeCompactBaseSettings(sourceSnapshot)!;
+    const record = encodeHotBootRecord(
+      "fb-test",
+      createHotBootState(sourceSnapshot),
+      undefined,
+      compactSettings
+    );
+    const decoded = decodeHotBootRecord(record, "fb-test")!;
+
+    expect(record.length).toBeLessThan(256);
+    expect(decoded.baseComplete).toBe(true);
+    expect(decoded.payloadComplete).toBe(false);
+    expect(decoded.settings).toBeNull();
+    expect(decoded.hotBangLookup).toBe(lookupGeneratedHotBang);
+    expect(redirectRawUrl("plain+query", decoded.compactSettings!)).toBe(
+      "https://www.google.com/search?q=plain+query"
+    );
+    expect(redirectRawUrl("\\lucky", decoded.compactSettings!)).toContain(
+      "btnI=1"
+    );
+    expect(
+      redirectRawUrl(
+        "@gh+service+workers",
+        decoded.compactSettings!,
+        decoded.hotBangLookup
+      )
+    ).toContain("site:github.com");
+    expect(decodeHotBootRecord(`${record}bad`, "fb-test")).toBeNull();
+  });
+
+  test("materializes compact base settings only from available data", () => {
+    const unknown = snapshot();
+    unknown.defaultBang = "not-a-generated-hot-bang";
+    expect(materializeCompactBaseSettings(unknown)).toBeNull();
+
+    const custom = Object.assign(Object.create(null), {
+      docs: ["https://docs.example/search?q=", ""],
+    }) as Record<string, CustomUrlParts>;
+    const customDefault = snapshot(custom);
+    customDefault.defaultBang = "docs";
+    expect(materializeCompactBaseSettings(customDefault)?.defaultUrl).toEqual([
+      "https://docs.example/search?q=",
+      "",
+    ]);
   });
 
   test("round-trips materialized settings and every custom entry", () => {
@@ -130,6 +182,7 @@ describe("service worker hot redirects", () => {
 
     const decoded = decodeHotBootRecord(record, "fb-test")!;
     expect(decoded.state).toBe(state);
+    expect(decoded.baseComplete).toBe(true);
     expect(decoded.defaultBang).toBe("sp");
     expect(decoded.frecency).toEqual({});
     expect(hotBootSettingsNeedPublish(decoded)).toBe(false);
@@ -213,9 +266,12 @@ describe("service worker hot redirects", () => {
     const decoded = decodeHotBootRecord(record, "fb-test")!;
     expect(Object.keys(decoded.frecency!)).toEqual(["npm"]);
     expect(
-      resolveHotRedirect(";npm+react%20router", state, decoded.frecency)
+      redirectRawUrl(
+        ";npm+react%20router",
+        sourceSettings,
+        decoded.hotBangLookup
+      )
     ).toBe(redirectRawUrl(";npm+react%20router", sourceSettings));
-    expect(getResolvedHotTrigger()).toBe("npm");
 
     const custom = Object.assign(Object.create(null), {
       npm: ["https://custom.example/?q=", ""],
@@ -305,13 +361,12 @@ describe("service worker hot redirects", () => {
     ).toBeNull();
   });
 
-  test("matches the full resolver for every generated hot bang", () => {
+  test("resolves every generated hot bang through the canonical parser", () => {
     expect(HOT_TRIGGERS).toHaveLength(24);
     expect(HOT_TRIGGERS).toContain("g");
     expect(HOT_TRIGGERS).toContain("gh");
     expect(HOT_PREFIXES.every((prefix) => prefix.includes("?"))).toBe(true);
     expect(HOT_PREFIXES.every((prefix) => !prefix.includes("#"))).toBe(true);
-    const state = createHotBootState(snapshot());
     const fullSettings = settings();
 
     for (const trigger of HOT_TRIGGERS) {
@@ -320,10 +375,10 @@ describe("service worker hot redirects", () => {
         `%3B${trigger}%20fast+query`,
         `%3b${trigger}+fast%2Fquery+`,
       ]) {
-        expect(resolveHotRedirect(raw, state), raw).toBe(
-          redirectRawUrl(raw, fullSettings)
-        );
-        expect(getResolvedHotTrigger()).toBe(trigger);
+        expect(
+          redirectRawUrl(raw, fullSettings, lookupGeneratedHotBang),
+          raw
+        ).toContain("fast");
       }
     }
   });
@@ -332,9 +387,6 @@ describe("service worker hot redirects", () => {
     for (const marker of TRIGGER_PREFIXES) {
       const snapMarker = marker === "@" ? "!" : "@";
       const markerSyntax = compileTriggerSyntax(marker, snapMarker)!;
-      const markerSnapshot = snapshot();
-      markerSnapshot.syntax = markerSyntax;
-      const state = createHotBootState(markerSnapshot);
       const fullSettings = settings();
       fullSettings.syntax = markerSyntax;
       const encoded = marker.charCodeAt(0).toString(16);
@@ -343,33 +395,59 @@ describe("service worker hot redirects", () => {
         `%${encoded.toUpperCase()}gh%20marker+test`,
         `%${encoded.toLowerCase()}gh+marker%20test`,
       ]) {
-        expect(resolveHotRedirect(raw, state), raw).toBe(
-          redirectRawUrl(raw, fullSettings)
-        );
+        expect(
+          redirectRawUrl(raw, fullSettings, lookupGeneratedHotBang),
+          raw
+        ).toContain("marker");
       }
     }
   });
 
-  test("falls back when a generated trigger has a custom override", () => {
+  test("keeps custom overrides ahead of generated hot bangs", () => {
     const custom = Object.assign(Object.create(null), {
       gh: ["https://custom.example/?q=", ""],
     }) as Record<string, CustomUrlParts>;
-    const state = createHotBootState(snapshot(custom));
-    expect(resolveHotRedirect(";gh+test", state)).toBeNull();
+    expect(
+      redirectRawUrl(";gh+test", settings(custom), lookupGeneratedHotBang)
+    ).toBe("https://custom.example/?q=test");
   });
 
-  test("rejects forms outside the allocation-free prefix fast path", () => {
-    const state = createHotBootState(snapshot());
-    for (const raw of [
-      ";gh",
-      ";gh+",
-      ";GH+test",
-      "+;gh+test",
-      "test+;gh",
-      ";unknown+test",
-      "!gh+test",
-    ]) {
-      expect(resolveHotRedirect(raw, state), raw).toBeNull();
+  test("blocks compact generated bangs with custom overrides", () => {
+    const custom = Object.assign(Object.create(null), {
+      gh: ["https://custom.example/?q=", ""],
+    }) as Record<string, CustomUrlParts>;
+    const sourceSnapshot = snapshot(custom);
+    const compact = decodeHotBootRecord(
+      encodeHotBootRecord(
+        "fb-test",
+        createHotBootState(sourceSnapshot),
+        undefined,
+        materializeCompactBaseSettings(sourceSnapshot)!
+      ),
+      "fb-test"
+    )!;
+
+    let blocked: unknown;
+    try {
+      redirectRawUrl(
+        ";gh+test",
+        compact.compactSettings!,
+        compact.hotBangLookup
+      );
+    } catch (error) {
+      blocked = error;
     }
+    expect(isHotBangLookupBlocked(blocked)).toBe(true);
+  });
+
+  test("uses hot data across canonical bare, suffix, snap, and encoded forms", () => {
+    const fullSettings = settings();
+    const resolve = (raw: string) =>
+      redirectRawUrl(raw, fullSettings, lookupGeneratedHotBang);
+    expect(resolve(";gh")).toBe("https://github.com");
+    expect(resolve(";GH+test")).toContain("q=test");
+    expect(resolve("test+;gh")).toContain("q=test");
+    expect(resolve("%3Bgh")).toBe("https://github.com");
+    expect(resolve("@gh+test")).toContain("site:github.com");
   });
 });

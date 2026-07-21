@@ -1838,6 +1838,9 @@ test("rich hot boot redirects without IndexedDB or bang data", async ({
   await context.route("https://www.npmjs.com/**", (route) =>
     route.fulfill({ body: "ok", contentType: "text/plain", status: 200 })
   );
+  await context.route("https://github.com/**", (route) =>
+    route.fulfill({ body: "ok", contentType: "text/plain", status: 200 })
+  );
   await ensureWarmController(page);
   await seedCustomBangs(page, [
     {
@@ -1937,6 +1940,33 @@ test("rich hot boot redirects without IndexedDB or bang data", async ({
     page,
     "/?q=%21npm%20router",
     /npmjs\.com\/search\?q=router/
+  );
+  const barePersonalPage = await context.newPage();
+  await navigateAndWaitForRedirect(
+    barePersonalPage,
+    `${origin}/?q=%21npm`,
+    /npmjs\.com\/?$/
+  );
+  const bareGlobalPage = await context.newPage();
+  await navigateAndWaitForRedirect(
+    bareGlobalPage,
+    `${origin}/?q=%21gh`,
+    /github\.com\/?$/
+  );
+  const suffixPage = await context.newPage();
+  await navigateAndWaitForRedirect(
+    suffixPage,
+    `${origin}/?q=service%20workers%20%21gh`,
+    /github\.com\/search\?q=service(%20|\+)workers/
+  );
+  const snapPage = await context.newPage();
+  await navigateAndWaitForRedirect(
+    snapPage,
+    `${origin}/?q=%40gh%20service%20workers`,
+    /startpage\.com\/do\/metasearch\.pl/
+  );
+  expect(new URL(snapPage.url()).searchParams.get("query")).toBe(
+    "service workers site:github.com"
   );
   const customPage = await context.newPage();
   await navigateAndWaitForRedirect(
