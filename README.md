@@ -9,6 +9,7 @@
   <a href="https://github.com/ph1losof/flashbang/releases/latest"><img src="https://img.shields.io/github/v/release/ph1losof/flashbang?style=plastic&amp;label=release&amp;labelColor=14141e&amp;color=6e6e8a" alt="Latest release"></a>
   <a href="https://github.com/ph1losof/flashbang/actions/workflows/ci.yaml"><img src="https://img.shields.io/github/actions/workflow/status/ph1losof/flashbang/ci.yaml?branch=master&amp;style=plastic&amp;label=build&amp;labelColor=14141e&amp;color=238636" alt="Build status"></a>
   <a href="https://github.com/ph1losof/flashbang/actions/workflows/codeql.yaml"><img src="https://img.shields.io/github/actions/workflow/status/ph1losof/flashbang/codeql.yaml?branch=master&amp;style=plastic&amp;label=security&amp;labelColor=14141e&amp;color=238636" alt="CodeQL security status"></a>
+  <a href="https://github.com/ph1losof/flashbang/actions/workflows/update-bangs.yaml"><img src="https://img.shields.io/github/actions/workflow/status/ph1losof/flashbang/update-bangs.yaml?branch=master&amp;event=schedule&amp;style=plastic&amp;label=daily%20bangs&amp;labelColor=14141e&amp;color=238636" alt="Daily bang data update status"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/ph1losof/flashbang?style=plastic&amp;label=license&amp;labelColor=14141e&amp;color=6e6e8a" alt="AGPL-3.0 license"></a>
   <a href="package.json"><img src="https://img.shields.io/badge/runtime%20deps-0-238636?style=plastic&amp;labelColor=14141e" alt="Zero runtime dependencies"></a>
 </p>
