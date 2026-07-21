@@ -81,7 +81,7 @@ describe("codegen round-trip", () => {
     const binary = await Bun.file("src/generated/bangs.bin").arrayBuffer();
     const header = new Uint32Array(binary, 0, 13);
     expect(header[0]).toBe(0x31424246);
-    expect(header[1]).toBe(3);
+    expect(header[1]).toBe(4);
     expect(header[2]).toBe(bangs.filter((bang) => !bang.regex).length);
     expect(header[11]).toBe(binary.byteLength);
     expect(header[3] & (header[3] - 1)).toBe(0);

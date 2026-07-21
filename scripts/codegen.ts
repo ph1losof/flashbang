@@ -508,8 +508,6 @@ interface PackedBangData {
   entryCount: number;
   prefixIds: number[];
   suffixIdsPlusOne: number[];
-  triggerBlob: ReturnType<typeof packBlob>;
-  triggerLensKind: "u8" | "u16";
   triggers: string[];
   uniquePrefixes: string[];
   uniqueSuffixes: string[];
@@ -582,15 +580,8 @@ function packBangData(bangs: Bang[]): PackedBangData {
     }
   }
 
-  const triggerBlob = packBlob(triggers);
   const prefixBlob = packBlob(uniquePrefixes);
   const suffixBlob = packBlob(uniqueSuffixes);
-
-  const triggerMaxLen = triggerBlob.lengths.reduce(
-    (max, len) => (len > max ? len : max),
-    0
-  );
-  const triggerLensKind = triggerMaxLen <= 0xff ? "u8" : "u16";
   for (const len of prefixBlob.lengths) {
     if (len > 0xffff) {
       throw new Error(
@@ -608,8 +599,6 @@ function packBangData(bangs: Bang[]): PackedBangData {
 
   return {
     entryCount,
-    triggerBlob,
-    triggerLensKind,
     prefixBlob,
     suffixBlob,
     prefixIds,
@@ -652,10 +641,25 @@ function generateBinary(bangs: readonly Bang[]): Uint8Array {
   const triggerBytes = encoder.encode(triggerBlob.blob);
   const prefixBytes = encoder.encode(packed.prefixBlob.blob);
   const suffixBytes = encoder.encode(packed.suffixBlob.blob);
+  const triggerByteLengths = triggers.map(
+    (trigger) => encoder.encode(trigger).byteLength
+  );
+  const triggerMaxLength = Math.max(...triggerByteLengths);
+  if (triggerMaxLength > 0x7fff) {
+    throw new Error(
+      `Binary bang format requires encoded trigger length <= 32767, got ${triggerMaxLength}`
+    );
+  }
+  const triggerLengthWidth = triggerMaxLength <= 0x7f ? 1 : 2;
+  const nonAsciiFlag = triggerLengthWidth === 1 ? 0x80 : 0x8000;
   const triggerLengths =
-    packed.triggerLensKind === "u8"
-      ? Uint8Array.from(triggerBlob.lengths)
-      : Uint16Array.from(triggerBlob.lengths);
+    triggerLengthWidth === 1
+      ? Uint8Array.from(triggerByteLengths, (length, index) =>
+          length === triggers[index].length ? length : length | nonAsciiFlag
+        )
+      : Uint16Array.from(triggerByteLengths, (length, index) =>
+          length === triggers[index].length ? length : length | nonAsciiFlag
+        );
   // URL blobs stay byte-backed in the worker and are decoded one entry at a time.
   const prefixLengths = Uint16Array.from(packed.uniquePrefixes, (value) => {
     const length = encoder.encode(value).byteLength;
@@ -696,10 +700,10 @@ function generateBinary(bangs: readonly Bang[]): Uint8Array {
   const output = new Uint8Array(new ArrayBuffer(totalBytes));
   new Uint32Array(output.buffer, 0, headerWords).set([
     0x31424246,
-    3,
+    4,
     packed.entryCount,
     mph.displacements.length,
-    packed.triggerLensKind === "u8" ? 1 : 2,
+    triggerLengths.BYTES_PER_ELEMENT,
     packed.uniquePrefixes.length,
     packed.uniqueSuffixes.length,
     triggerBytes.byteLength,
