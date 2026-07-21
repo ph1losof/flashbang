@@ -1,8 +1,8 @@
 export type BuiltinUrlParts = readonly [string, string | null];
 
 const MAGIC = 0x31424246;
-// Version 3 stores prefix/suffix lengths as UTF-8 bytes for lazy decoding.
-const VERSION = 3;
+// Version 4 stores blob lengths as UTF-8 bytes and flags non-ASCII triggers.
+const VERSION = 4;
 const HEADER_WORDS = 13;
 const HEADER_BYTES = HEADER_WORDS * Uint32Array.BYTES_PER_ELEMENT;
 const MPH_SLOT_MULTIPLIER = 0x85ebca6b;
@@ -11,15 +11,37 @@ let lookup: ((trigger: string, hash: number) => BuiltinUrlParts | null) | null =
   null;
 const BANG_DATA_UNAVAILABLE = new Error("Binary bang data is not initialized");
 
-function offsets(lengths: Uint8Array | Uint16Array): Uint32Array {
+function offsets(
+  lengths: Uint8Array | Uint16Array,
+  lengthMask = 0xffff
+): Uint32Array {
   const result = new Uint32Array(lengths.length + 1);
   let position = 0;
   for (let i = 0; i < lengths.length; i++) {
     result[i] = position;
-    position += lengths[i];
+    position += lengths[i] & lengthMask;
   }
   result[lengths.length] = position;
   return result;
+}
+
+function matchesTrigger(
+  raw: string,
+  rawStart: number,
+  bytes: Uint8Array,
+  byteStart: number,
+  length: number
+): boolean {
+  for (let i = 0; i < length; i++) {
+    let code = raw.charCodeAt(rawStart + i);
+    if (code >= 65 && code <= 90) {
+      code |= 32;
+    }
+    if (code !== bytes[byteStart + i]) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export function initializeBangData(buffer: ArrayBuffer): void {
@@ -34,6 +56,7 @@ export function initializeBangData(buffer: ArrayBuffer): void {
   const entryCount = header[2];
   const bucketCount = header[3];
   const triggerLengthWidth = header[4];
+  const triggerLengthMask = triggerLengthWidth === 1 ? 0x7f : 0x7fff;
   const prefixCount = header[5];
   const suffixCount = header[6];
   const displacementWidth = header[12];
@@ -80,13 +103,16 @@ export function initializeBangData(buffer: ArrayBuffer): void {
   }
 
   const decoder = new TextDecoder();
-  const triggerBlob = decoder.decode(new Uint8Array(buffer, offset, header[7]));
+  const triggerBlob = new Uint8Array(buffer, offset, header[7]);
   offset += header[7];
   const prefixBlob = new Uint8Array(buffer, offset, header[8]);
   offset += header[8];
   const suffixBlob = new Uint8Array(buffer, offset, header[9]);
 
-  const triggerOffsets = offsets(triggerLengths);
+  const triggerOffsets = offsets(triggerLengths, triggerLengthMask);
+  if (triggerOffsets[entryCount] !== triggerBlob.length) {
+    throw new Error("Invalid binary bang trigger lengths");
+  }
   const prefixOffsets = offsets(prefixLengths);
   const suffixOffsets = offsets(suffixLengths);
   const prefixCache: string[] = [];
@@ -140,8 +166,17 @@ export function initializeBangData(buffer: ArrayBuffer): void {
         : (Math.imul(unsignedHash ^ (displacement + 1), MPH_SLOT_MULTIPLIER) >>>
             0) %
           entryCount;
-    return triggerLengths[index] === trigger.length &&
-      triggerBlob.startsWith(trigger, triggerOffsets[index])
+    const triggerInfo = triggerLengths[index];
+    const triggerLength = triggerInfo & triggerLengthMask;
+    const triggerStart = triggerOffsets[index];
+    const triggerEnd = triggerOffsets[index + 1];
+    return (
+      triggerInfo === triggerLength
+        ? triggerLength === trigger.length &&
+          matchesTrigger(trigger, 0, triggerBlob, triggerStart, triggerLength)
+        : decoder.decode(triggerBlob.subarray(triggerStart, triggerEnd)) ===
+          trigger
+    )
       ? tuple(index)
       : null;
   };
