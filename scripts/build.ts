@@ -138,7 +138,9 @@ async function main(): Promise<void> {
   console.log("=== Bundle app + bench (to discover chunks) ===");
   const { appOutputs, fallbackAsset } = await bundleUI(
     allowUnsafeCustomSuggestUrls,
-    bangMetaAsset
+    bangMetaAsset,
+    "fallback-[hash].[ext]",
+    bangDataAsset
   );
   const requiredAppAssets = [
     ...requiredAppAssetPaths(appOutputs),

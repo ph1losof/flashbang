@@ -15,11 +15,12 @@ import {
 } from "./frecency";
 import type { RedirectSettings } from "./redirect";
 import {
+  createRedirectSettingsBundle,
   defaultRedirectSettings,
   deleteRedirectSettingsSnapshot,
-  loadRedirectSettings,
+  type PreparedRedirectSettings,
+  persistRedirectSettingsBundle,
   prepareRedirectSettings,
-  type RedirectSettingsSnapshot,
 } from "./redirect-settings";
 
 interface FrecencySnapshot {
@@ -30,8 +31,10 @@ interface FrecencySnapshot {
 let persistPromise: Promise<void> | null = null;
 let persistPending: FrecencySnapshot | null = null;
 let cachedRedirect: RedirectSettings | null = null;
+let redirectSettingsGeneration = 0;
 let redirectSettingsPromise: Promise<RedirectSettings> | null = null;
 let redirectSettingsInvalidationPromise: Promise<void> | null = null;
+let redirectSettingsPersistencePromise: Promise<void> | null = null;
 let frecencyCounts: Record<string, number> | null = null;
 let frecencyLoaded = false;
 let loadFrecencyPromise: Promise<void> | null = null;
@@ -50,8 +53,39 @@ export function seedRedirectSettings(settings: RedirectSettings): void {
   cachedRedirect = settings;
 }
 
+function persistRedirectSettings(
+  prepared: PreparedRedirectSettings,
+  catalogVersion: string,
+  generation: number
+): RedirectSettings {
+  const bundle = createRedirectSettingsBundle(prepared.snapshot);
+  if (generation !== redirectSettingsGeneration) {
+    return bundle.settings;
+  }
+  cachedRedirect = bundle.settings;
+  const persistence = persistRedirectSettingsBundle(bundle, catalogVersion);
+  let current: Promise<void>;
+  current = persistence
+    .catch(() => {
+      resetDB();
+    })
+    .finally(() => {
+      if (redirectSettingsPersistencePromise === current) {
+        redirectSettingsPersistencePromise = null;
+      }
+    });
+  redirectSettingsPersistencePromise = current;
+  return bundle.settings;
+}
+
+export function waitForRedirectSettingsPersistence(): Promise<void> {
+  return redirectSettingsPersistencePromise ?? Promise.resolve();
+}
+
 export function readRedirectSettings(
-  prepared?: Promise<RedirectSettingsSnapshot>
+  prepared?: Promise<PreparedRedirectSettings>,
+  catalogVersion = "",
+  bangDataReady: Promise<void> = Promise.resolve()
 ): Promise<RedirectSettings> {
   const cached = getCachedSettings();
   if (cached) {
@@ -59,21 +93,41 @@ export function readRedirectSettings(
   }
 
   if (!redirectSettingsPromise) {
+    const generation = redirectSettingsGeneration;
+    const ready = bangDataReady.then(
+      () => true,
+      () => false
+    );
     let current: Promise<RedirectSettings>;
     current = (async () => {
+      await redirectSettingsInvalidationPromise;
+      let value: PreparedRedirectSettings;
       try {
-        await redirectSettingsInvalidationPromise;
-        const [settings] = await Promise.all([
-          loadRedirectSettings(prepared ?? prepareRedirectSettings()),
-          loadFrecency(),
-        ]);
-        cachedRedirect = settings;
+        value = await (prepared ?? prepareRedirectSettings(catalogVersion));
       } catch {
-        cachedRedirect = defaultRedirectSettings();
+        const settings = defaultRedirectSettings();
+        if (generation === redirectSettingsGeneration) {
+          cachedRedirect = settings;
+        }
         resetDB();
+        return settings;
       }
-
-      return cachedRedirect as RedirectSettings;
+      let settings: RedirectSettings;
+      if (value.settings) {
+        settings = value.settings;
+      } else if (await ready) {
+        try {
+          settings = persistRedirectSettings(value, catalogVersion, generation);
+        } catch {
+          settings = defaultRedirectSettings();
+        }
+      } else {
+        settings = defaultRedirectSettings();
+      }
+      if (generation === redirectSettingsGeneration) {
+        cachedRedirect = settings;
+      }
+      return settings;
     })().finally(() => {
       if (redirectSettingsPromise === current) {
         redirectSettingsPromise = null;
@@ -134,8 +188,10 @@ function persistFrecencySnapshot(
 }
 
 export function invalidateCache(): Promise<void> {
+  redirectSettingsGeneration++;
   const pending = [
     redirectSettingsInvalidationPromise,
+    redirectSettingsPersistencePromise,
     redirectSettingsPromise,
   ].filter(
     (promise): promise is Promise<void> | Promise<RedirectSettings> =>

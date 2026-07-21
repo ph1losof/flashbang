@@ -31,6 +31,7 @@ import {
   readRedirectSettings,
   seedRedirectSettings,
   trackBangUsage,
+  waitForRedirectSettingsPersistence,
 } from "./idb";
 import {
   type RedirectSettings,
@@ -39,8 +40,8 @@ import {
   redirectUrl,
 } from "./redirect";
 import {
+  type PreparedRedirectSettings,
   prepareRedirectSettings,
-  type RedirectSettingsSnapshot,
 } from "./redirect-settings";
 
 declare const __CACHE_VERSION__: string;
@@ -124,7 +125,8 @@ const swallowError = () => {
 };
 
 function readCurrentRedirectSettings(
-  prepared?: Promise<RedirectSettingsSnapshot>
+  prepared?: Promise<PreparedRedirectSettings>,
+  bangDataReady?: Promise<void>
 ): Promise<RedirectSettings> {
   const cached = getCachedSettings();
   if (cached) {
@@ -139,7 +141,11 @@ function readCurrentRedirectSettings(
       seedRedirectSettings(record.settings);
       return record.settings;
     }
-    return readRedirectSettings(prepared);
+    return readRedirectSettings(
+      prepared,
+      BANG_DATA_ASSET,
+      bangDataReady ?? ensureBangData()
+    );
   });
 }
 
@@ -175,14 +181,18 @@ async function publishHotBoot(includeSettings = false): Promise<void> {
     }
     return;
   }
-  const snapshot = await prepareRedirectSettings();
+  const prepared = await prepareRedirectSettings(BANG_DATA_ASSET);
+  const snapshot = prepared.snapshot;
   const state = createHotBootState(snapshot);
   let settings: RedirectSettings | undefined;
   if (includeSettings && isBangDataInitialized()) {
     await loadFrecency();
     settings =
       getCachedSettings() ??
-      (await readCurrentRedirectSettings(Promise.resolve(snapshot)));
+      (await readCurrentRedirectSettings(
+        Promise.resolve(prepared),
+        RESOLVED_PROMISE
+      ));
   }
   const frecency = settings
     ? materializeHotFrecency(getTopFrecencyRecord(), snapshot)
@@ -307,10 +317,13 @@ function warmRuntime(): Promise<void> {
     return RESOLVED_PROMISE;
   }
   if (!runtimeWarmPromise) {
+    const bangDataReady = ensureBangData();
     const warming = Promise.all([
-      ensureBangData(),
-      readCurrentRedirectSettings(),
+      bangDataReady,
+      readCurrentRedirectSettings(undefined, bangDataReady),
+      loadFrecency(),
     ]).then(async () => {
+      await waitForRedirectSettingsPersistence();
       if (hotBootSettingsNeedPublish(currentHotBoot)) {
         await queueHotBootMutation(() => publishHotBoot(true));
       }
@@ -663,15 +676,21 @@ self.addEventListener("message", (e: ExtendableMessageEvent) => {
         e.waitUntil(readCurrentRedirectSettings().then(resolve));
       }
     } else {
+      const bangDataReady = ensureBangData();
       e.waitUntil(
-        ensureBangData().then(() => {
-          const readySettings = getCachedSettings();
-          if (readySettings) {
-            resolve(readySettings);
-            return;
+        readCurrentRedirectSettings(undefined, bangDataReady).then(
+          async (settings) => {
+            try {
+              resolve(settings);
+            } catch (error) {
+              if (!isBangDataUnavailable(error)) {
+                throw error;
+              }
+              await bangDataReady;
+              resolve(settings);
+            }
           }
-          return readCurrentRedirectSettings().then(resolve);
-        })
+        )
       );
     }
   }
@@ -795,33 +814,33 @@ self.addEventListener("fetch", (e: FetchEvent) => {
                 }
               }
             }
-            const loading =
+            const bangDataReady =
               hotBootUpdateTokens.size > 0
                 ? invalidateCache().then(ensureBangData)
                 : ensureBangData();
-            return loading.then(() => {
-              const cached = getCachedSettings();
-              if (cached) {
+            e.waitUntil(bangDataReady.catch(swallowError));
+            return readCurrentRedirectSettings(undefined, bangDataReady).then(
+              async (settings) => {
                 if (hotBootSettingsNeedPublish(currentHotBoot)) {
                   e.waitUntil(
-                    queueHotBootMutation(() => publishHotBoot(true)).catch(
-                      swallowError
-                    )
+                    bangDataReady
+                      .then(() =>
+                        queueHotBootMutation(() => publishHotBoot(true))
+                      )
+                      .catch(swallowError)
                   );
                 }
-                return respondToRedirect(e, rawQ, cached);
+                try {
+                  return respondToRedirect(e, rawQ, settings);
+                } catch (error) {
+                  if (!isBangDataUnavailable(error)) {
+                    throw error;
+                  }
+                  await bangDataReady;
+                  return respondToRedirect(e, rawQ, settings);
+                }
               }
-              return readCurrentRedirectSettings().then((settings) => {
-                if (hotBootSettingsNeedPublish(currentHotBoot)) {
-                  e.waitUntil(
-                    queueHotBootMutation(() => publishHotBoot(true)).catch(
-                      swallowError
-                    )
-                  );
-                }
-                return respondToRedirect(e, rawQ, settings);
-              });
-            });
+            );
           })
         );
       }

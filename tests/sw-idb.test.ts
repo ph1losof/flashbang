@@ -5,7 +5,7 @@ import {
   type RedirectSettings,
   redirectUrl,
 } from "../src/sw/redirect";
-import type { RedirectSettingsSnapshot } from "../src/sw/redirect-settings";
+import type { PreparedRedirectSettings } from "../src/sw/redirect-settings";
 import { loadTestBangData } from "./helpers/bang-data";
 import { installFakeIndexedDb, reqToPromise } from "./helpers/fake-indexeddb";
 
@@ -293,7 +293,12 @@ describe("sw/idb redirect settings", () => {
       ],
     });
     const mod = await loadSwIdb();
-    const first = await mod.readRedirectSettings();
+    const first = await mod.readRedirectSettings(
+      undefined,
+      "catalog-a",
+      Promise.resolve()
+    );
+    await mod.waitForRedirectSettingsPersistence();
     expect(first.custom.translate?.[3]).toBeInstanceOf(RegExp);
 
     const shared = await loadSharedIdb();
@@ -306,7 +311,11 @@ describe("sw/idb redirect settings", () => {
     const restarted = await import(
       `../src/sw/idb.ts?restart=${Date.now()}-${Math.random()}`
     );
-    const cached = await restarted.readRedirectSettings();
+    const cached = await restarted.readRedirectSettings(
+      undefined,
+      "catalog-a",
+      new Promise(() => undefined)
+    );
     expect(cached.custom.translate?.[3]).toBeInstanceOf(RegExp);
     expect(redirectUrl("!translate french bonjour monde", cached)).toBe(
       "https://translate.example/french/bonjour%20monde"
@@ -335,7 +344,66 @@ describe("sw/idb redirect settings", () => {
         .objectStore("settings")
         .get(REDIRECT_SETTINGS_SNAPSHOT_KEY)
     );
-    expect(rebuilt?.version).toBe(1);
+    expect(rebuilt?.version).toBe(2);
+  });
+
+  test("rebuilds a bundle when the bang catalog changes", async () => {
+    await seedDb({ settings: [{ key: "default-bang", value: "g" }] });
+    const mod = await loadSwIdb();
+    await mod.readRedirectSettings(undefined, "catalog-a", Promise.resolve());
+    await mod.waitForRedirectSettingsPersistence();
+
+    const shared = await loadSharedIdb();
+    const db = await shared.openDB();
+    await reqToPromise(
+      db
+        .transaction("settings", "readwrite")
+        .objectStore("settings")
+        .put({ key: "default-bang", value: "ddg" })
+    );
+    const restarted = await import(
+      `../src/sw/idb.ts?catalog=${Date.now()}-${Math.random()}`
+    );
+    const rebuilt = await restarted.readRedirectSettings(
+      undefined,
+      "catalog-b",
+      Promise.resolve()
+    );
+    expect(rebuilt.defaultUrl[0]).toContain("duckduckgo.com");
+  });
+
+  test("waits for bang data only when rebuilding a bundle", async () => {
+    let releaseBangData!: () => void;
+    const bangDataReady = new Promise<void>((resolve) => {
+      releaseBangData = resolve;
+    });
+    const prepared: PreparedRedirectSettings = {
+      settings: null,
+      snapshot: {
+        custom: Object.create(null),
+        defaultBang: "ddg",
+        luckyProvider: "default",
+        luckyUrl: null,
+      },
+    };
+    const mod = await loadSwIdb();
+    let settled = false;
+    const loading = mod
+      .readRedirectSettings(
+        Promise.resolve(prepared),
+        "catalog-a",
+        bangDataReady
+      )
+      .then((settings) => {
+        settled = true;
+        return settings;
+      });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    releaseBangData();
+    expect((await loading).defaultUrl[0]).toContain("duckduckgo.com");
   });
 
   test("ignores invalid persisted capture patterns", async () => {
@@ -403,8 +471,8 @@ describe("sw/idb redirect settings", () => {
   });
 
   test("waits for an in-flight settings load before invalidating", async () => {
-    let resolvePrepared!: (snapshot: RedirectSettingsSnapshot) => void;
-    const prepared = new Promise<RedirectSettingsSnapshot>((resolve) => {
+    let resolvePrepared!: (snapshot: PreparedRedirectSettings) => void;
+    const prepared = new Promise<PreparedRedirectSettings>((resolve) => {
       resolvePrepared = resolve;
     });
     const mod = await loadSwIdb();
@@ -424,10 +492,13 @@ describe("sw/idb redirect settings", () => {
     expect(invalidated).toBe(false);
 
     resolvePrepared({
-      custom: Object.create(null),
-      defaultBang: "g",
-      luckyProvider: "default",
-      luckyUrl: null,
+      settings: null,
+      snapshot: {
+        custom: Object.create(null),
+        defaultBang: "g",
+        luckyProvider: "default",
+        luckyUrl: null,
+      },
     });
     await Promise.all([staleLoad, invalidation]);
 
@@ -436,17 +507,31 @@ describe("sw/idb redirect settings", () => {
       "https://docs.example/search?q=",
       "",
     ]);
+    await mod.waitForRedirectSettingsPersistence();
+    const shared = await loadSharedIdb();
+    const db = await shared.openDB();
+    const stored = await reqToPromise<
+      { snapshot?: { custom?: Record<string, unknown> } } | undefined
+    >(
+      db
+        .transaction("settings", "readonly")
+        .objectStore("settings")
+        .get(REDIRECT_SETTINGS_SNAPSHOT_KEY)
+    );
+    expect(stored?.snapshot?.custom?.mydocs).toBeDefined();
   });
 });
 
 describe("sw/idb frecency", () => {
-  test("hydrates frecency alongside the redirect settings snapshot", async () => {
+  test("keeps frecency outside the redirect settings critical path", async () => {
     await seedDb({
       settings: [{ key: "frecency", value: `${Date.now()}|g:5,ddg:2` }],
     });
 
     const mod = await loadSwIdb();
     await mod.readRedirectSettings();
+    expect(mod.getTopFrecencyRecord()).toEqual({});
+    await mod.loadFrecency();
 
     expect(mod.getTopFrecencyRecord()).toEqual({ g: 5, ddg: 2 });
   });
@@ -490,7 +575,7 @@ describe("sw/idb frecency", () => {
       settings: [{ key: "frecency", value: `${Date.now()}|g:1` }],
     });
     const mod = await loadSwIdb();
-    await mod.readRedirectSettings();
+    await mod.loadFrecency();
 
     const first = mod.trackBangUsage("yt");
     const second = mod.trackBangUsage("yt");

@@ -1961,6 +1961,102 @@ test("rich hot boot redirects without IndexedDB or bang data", async ({
   );
 });
 
+test("executable settings bundle redirects before bang data is available", async ({
+  browser,
+  browserName,
+  context,
+  page,
+}) => {
+  test.skip(
+    browserName !== "chromium",
+    "Playwright only exposes service worker handles in Chromium"
+  );
+  await mockGoogleSearchRoute(page);
+  await ensureWarmController(page);
+  await page.waitForFunction(
+    () =>
+      new Promise<boolean>((resolve) => {
+        const open = indexedDB.open("flashbang", 1);
+        open.onerror = () => resolve(false);
+        open.onsuccess = () => {
+          const db = open.result;
+          const request = db
+            .transaction("settings", "readonly")
+            .objectStore("settings")
+            .get("redirect-settings-snapshot");
+          request.onerror = () => {
+            db.close();
+            resolve(false);
+          };
+          request.onsuccess = () => {
+            const value = request.result as
+              | { catalogVersion?: unknown; version?: unknown }
+              | undefined;
+            db.close();
+            resolve(
+              value?.version === 2 &&
+                typeof value.catalogVersion === "string" &&
+                value.catalogVersion.length > 0
+            );
+          };
+        };
+      })
+  );
+
+  const origin = new URL(page.url()).origin;
+  await page.evaluate(async () => {
+    const registration = await navigator.serviceWorker.ready;
+    await registration.navigationPreload.setHeaderValue("invalid");
+    await registration.navigationPreload.disable();
+    for (const cacheName of await caches.keys()) {
+      const cache = await caches.open(cacheName);
+      for (const request of await cache.keys()) {
+        const pathname = new URL(request.url).pathname;
+        if (
+          pathname === "/bangs.bin" ||
+          (pathname.startsWith("/bangs-") &&
+            !pathname.startsWith("/bangs-meta-"))
+        ) {
+          await cache.delete(request);
+        }
+      }
+    }
+  });
+
+  let releaseBangData!: () => void;
+  const bangDataGate = new Promise<void>((resolve) => {
+    releaseBangData = resolve;
+  });
+  let bangDataBlocked = false;
+  await context.route(`${origin}/bangs-*.bin`, async (route) => {
+    if (new URL(route.request().url()).pathname.startsWith("/bangs-meta-")) {
+      await route.continue();
+      return;
+    }
+    bangDataBlocked = true;
+    await bangDataGate;
+    await route.continue();
+  });
+
+  const cdp = await browser.newBrowserCDPSession();
+  const { targetInfos } = await cdp.send("Target.getTargets");
+  const workerTarget = targetInfos.find(
+    (target) =>
+      target.type === "service_worker" && target.url.endsWith("/sw.js")
+  );
+  expect(workerTarget).toBeDefined();
+  await cdp.send("Target.closeTarget", { targetId: workerTarget!.targetId });
+  await cdp.detach();
+
+  try {
+    await navigateAndWaitForRedirect(page, "/?q=hello", GOOGLE_REDIRECT);
+    expect(bangDataBlocked).toBe(true);
+  } finally {
+    releaseBangData();
+    await context.unroute(`${origin}/bangs-*.bin`);
+  }
+});
+
 test("controlled redirect works while offline", async ({
   browserName,
   context,

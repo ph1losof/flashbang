@@ -70,7 +70,8 @@ export async function buildControlledBootstrap(
 export async function bundleUI(
   allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled(),
   bangMetaAsset = "/bangs-meta.bin",
-  fallbackNaming = "fallback-[hash].[ext]"
+  fallbackNaming = "fallback-[hash].[ext]",
+  bangDataAsset = "/bangs.bin"
 ) {
   const [appBuild, benchBuild, fallbackBuild] = await Promise.all([
     Bun.build({
@@ -103,6 +104,9 @@ export async function bundleUI(
       minify: true,
       target: "browser",
       format: "esm",
+      define: {
+        __BANG_DATA_ASSET__: JSON.stringify(bangDataAsset),
+      },
     }),
   ]);
   const builds = [appBuild, benchBuild, fallbackBuild];

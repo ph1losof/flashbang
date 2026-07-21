@@ -23,7 +23,7 @@ import {
   type UrlParts,
 } from "./redirect";
 
-const SNAPSHOT_VERSION = 1;
+const SNAPSHOT_VERSION = 2;
 
 interface SettingRecord {
   key: string;
@@ -38,8 +38,21 @@ export interface RedirectSettingsSnapshot {
   syntax?: TriggerSyntax;
 }
 
-interface StoredRedirectSettingsSnapshot {
+export interface RedirectSettingsBundle {
+  settings: RedirectSettings;
+  snapshot: RedirectSettingsSnapshot;
+}
+
+export interface PreparedRedirectSettings {
+  settings: RedirectSettings | null;
+  snapshot: RedirectSettingsSnapshot;
+}
+
+interface StoredRedirectSettingsBundle {
+  catalogVersion: string;
+  defaultUrl: UrlParts;
   key: string;
+  luckyUrl: UrlParts | null;
   snapshot: RedirectSettingsSnapshot;
   version: number;
 }
@@ -66,13 +79,23 @@ export function defaultRedirectSettings(): RedirectSettings {
   };
 }
 
-function isSnapshotRecord(
-  value: unknown
-): value is StoredRedirectSettingsSnapshot {
+function isUrlParts(value: unknown): value is UrlParts {
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    typeof value[0] === "string" &&
+    (value[1] === null || typeof value[1] === "string")
+  );
+}
+
+function isBundleRecord(
+  value: unknown,
+  catalogVersion: string
+): value is StoredRedirectSettingsBundle {
   if (!value || typeof value !== "object") {
     return false;
   }
-  const record = value as Partial<StoredRedirectSettingsSnapshot>;
+  const record = value as Partial<StoredRedirectSettingsBundle>;
   const snapshot = record.snapshot as
     | Partial<RedirectSettingsSnapshot>
     | undefined;
@@ -82,6 +105,9 @@ function isSnapshotRecord(
   return (
     record.key === REDIRECT_SETTINGS_SNAPSHOT_KEY &&
     record.version === SNAPSHOT_VERSION &&
+    record.catalogVersion === catalogVersion &&
+    isUrlParts(record.defaultUrl) &&
+    (record.luckyUrl === null || isUrlParts(record.luckyUrl)) &&
     typeof snapshot.defaultBang === "string" &&
     typeof snapshot.luckyProvider === "string" &&
     Boolean(snapshot.custom) &&
@@ -191,44 +217,15 @@ export function materializeRedirectSettings(
   };
 }
 
-function rebuildSnapshot(db: IDBDatabase): Promise<RedirectSettingsSnapshot> {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(["settings", "custom-bangs"], "readwrite");
-    const settingsRequest = tx.objectStore("settings").getAll();
-    const customRequest = tx.objectStore("custom-bangs").getAll();
-    let settings: SettingRecord[] | null = null;
-    let customBangs: CustomBangRecord[] | null = null;
-    let snapshot: RedirectSettingsSnapshot | null = null;
-
-    const compileWhenReady = () => {
-      if (!(settings && customBangs) || snapshot) {
-        return;
-      }
-      snapshot = compileRedirectSettingsSnapshot(settings, customBangs);
-      tx.objectStore("settings").put({
-        key: REDIRECT_SETTINGS_SNAPSHOT_KEY,
-        snapshot,
-        version: SNAPSHOT_VERSION,
-      });
-    };
-    settingsRequest.onsuccess = () => {
-      settings = settingsRequest.result as SettingRecord[];
-      compileWhenReady();
-    };
-    customRequest.onsuccess = () => {
-      customBangs = customRequest.result as CustomBangRecord[];
-      compileWhenReady();
-    };
-    tx.oncomplete = () => {
-      if (snapshot) {
-        resolve(snapshot);
-      } else {
-        reject(new Error("IndexedDB snapshot compilation did not complete"));
-      }
-    };
-    tx.onerror = () => reject(tx.error ?? new Error("IndexedDB write failed"));
-    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB write aborted"));
-  });
+async function rebuildSnapshot(
+  db: IDBDatabase
+): Promise<RedirectSettingsSnapshot> {
+  const tx = db.transaction(["settings", "custom-bangs"], "readonly");
+  const [settings, customBangs] = await Promise.all([
+    idbWrap<SettingRecord[]>(tx.objectStore("settings").getAll()),
+    idbWrap<CustomBangRecord[]>(tx.objectStore("custom-bangs").getAll()),
+  ]);
+  return compileRedirectSettingsSnapshot(settings, customBangs);
 }
 
 function transactionDone(tx: IDBTransaction): Promise<void> {
@@ -247,22 +244,66 @@ export async function deleteRedirectSettingsSnapshot(): Promise<void> {
   await done;
 }
 
-export async function prepareRedirectSettings(): Promise<RedirectSettingsSnapshot> {
+export async function prepareRedirectSettings(
+  catalogVersion = ""
+): Promise<PreparedRedirectSettings> {
   const db = await openDB();
-  const stored = await idbWrap<StoredRedirectSettingsSnapshot | undefined>(
+  const stored = await idbWrap<StoredRedirectSettingsBundle | undefined>(
     db
       .transaction("settings", "readonly")
       .objectStore("settings")
       .get(REDIRECT_SETTINGS_SNAPSHOT_KEY)
   );
-  if (isSnapshotRecord(stored)) {
-    return normalizeSnapshot(stored.snapshot);
+  if (isBundleRecord(stored, catalogVersion)) {
+    const snapshot = normalizeSnapshot(stored.snapshot);
+    return {
+      settings: {
+        custom: snapshot.custom,
+        defaultUrl: stored.defaultUrl,
+        luckyUrl: stored.luckyUrl,
+        ...(snapshot.syntax ? { syntax: snapshot.syntax } : {}),
+      },
+      snapshot,
+    };
   }
-  return rebuildSnapshot(db);
+  return { settings: null, snapshot: await rebuildSnapshot(db) };
+}
+
+export function createRedirectSettingsBundle(
+  snapshot: RedirectSettingsSnapshot
+): RedirectSettingsBundle {
+  return { settings: materializeRedirectSettings(snapshot), snapshot };
+}
+
+export async function persistRedirectSettingsBundle(
+  bundle: RedirectSettingsBundle,
+  catalogVersion = ""
+): Promise<void> {
+  const db = await openDB();
+  const tx = db.transaction("settings", "readwrite");
+  const done = transactionDone(tx);
+  tx.objectStore("settings").put({
+    catalogVersion,
+    defaultUrl: bundle.settings.defaultUrl,
+    key: REDIRECT_SETTINGS_SNAPSHOT_KEY,
+    luckyUrl: bundle.settings.luckyUrl,
+    snapshot: bundle.snapshot,
+    version: SNAPSHOT_VERSION,
+  } satisfies StoredRedirectSettingsBundle);
+  await done;
 }
 
 export async function loadRedirectSettings(
-  prepared = prepareRedirectSettings()
+  prepared = prepareRedirectSettings(),
+  catalogVersion = ""
 ): Promise<RedirectSettings> {
-  return materializeRedirectSettings(await prepared);
+  const value = await prepared;
+  if (value.settings) {
+    return value.settings;
+  }
+  const bundle = createRedirectSettingsBundle(value.snapshot);
+  void persistRedirectSettingsBundle(bundle, catalogVersion).catch(() => {
+    /* The next load can rebuild a failed derived cache write. */
+  });
+  return bundle.settings;
 }
