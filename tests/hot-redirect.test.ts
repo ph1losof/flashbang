@@ -50,6 +50,25 @@ function settings(
   };
 }
 
+function recordWithCustomEntry(entry: unknown): string {
+  const sourceSnapshot = snapshot();
+  const state = createHotBootState(sourceSnapshot);
+  const payload = btoa(
+    JSON.stringify([
+      "g",
+      ["https://www.google.com/search?q=", ""],
+      null,
+      [59, 64],
+      [["advanced", entry]],
+      [],
+    ])
+  )
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
+  return `h1|fb-test|${state.toString(36)}|${payload}`;
+}
+
 beforeAll(loadTestBangData);
 
 describe("service worker hot redirects", () => {
@@ -73,7 +92,15 @@ describe("service worker hot redirects", () => {
     expect(decodeHotBootRecord(`${record}|not-base64!`, "fb-test")).toBeNull();
   });
 
-  test("round-trips materialized settings and every simple custom entry", () => {
+  test("round-trips materialized settings and every custom entry", () => {
+    const snappedCapture = [
+      ...compileCaptureUrl(
+        "https://translate.example/$1/$2",
+        "^(\\w+)\\s+(.+)$",
+        "plus"
+      )!,
+      ["+site:translate.example/docs", "https://translate.example/docs"],
+    ] as CustomUrlParts;
     const custom = Object.assign(Object.create(null), {
       docs: [
         "https://docs.example/search?q=",
@@ -82,6 +109,8 @@ describe("service worker hot redirects", () => {
       ],
       path: ["https://example.com/users/", ""],
       regex: compileCaptureUrl("https://example.com/$1", "^(.*)$", "percent")!,
+      raw: compileCaptureUrl("https://example.com/raw/$1", "^(.*)$", "raw")!,
+      snapped: snappedCapture,
     }) as Record<string, CustomUrlParts>;
     const sourceSnapshot = snapshot(custom);
     sourceSnapshot.defaultBang = "sp";
@@ -105,16 +134,64 @@ describe("service worker hot redirects", () => {
     expect(decoded.defaultBang).toBe("sp");
     expect(decoded.frecency).toEqual({});
     expect(hotBootSettingsNeedPublish(decoded)).toBe(false);
-    expect(decoded.settings!.custom.regex).toBeUndefined();
+    expect(decoded.settings!.custom.regex?.[3]).toBeInstanceOf(RegExp);
+    expect(decoded.settings!.custom.raw?.[3]).toBeInstanceOf(RegExp);
+    expect(decoded.settings!.custom.snapped?.[3]).toBeInstanceOf(RegExp);
     expect(redirectRawUrl("regular+query", decoded.settings!)).toBe(
       "https://startpage.com/do/metasearch.pl?query=regular+query"
     );
     expect(redirectRawUrl(";path+alice", decoded.settings!)).toBe(
       "https://example.com/users/alice"
     );
+    expect(redirectRawUrl(";regex+hello%20world", decoded.settings!)).toBe(
+      "https://example.com/hello%20world"
+    );
+    expect(redirectRawUrl(";raw+hello%2Fworld", decoded.settings!)).toBe(
+      "https://example.com/raw/hello/world"
+    );
+    expect(
+      redirectRawUrl(";snapped+french%20bonjour%20monde", decoded.settings!)
+    ).toBe("https://translate.example/french/bonjour+monde");
     expect(redirectRawUrl("@docs+service+workers", decoded.settings!)).toBe(
       "https://startpage.com/do/metasearch.pl?query=service+workers+site:docs.example"
     );
+    expect(redirectRawUrl("@snapped+service+workers", decoded.settings!)).toBe(
+      "https://startpage.com/do/metasearch.pl?query=service+workers+site:translate.example/docs"
+    );
+    for (const query of [
+      ";snapped+french%20bonjour%20monde",
+      "french%20bonjour%20monde+;snapped",
+      "french%20bonjour%20monde+snapped;",
+      "service+workers+@snapped",
+    ]) {
+      expect(redirectRawUrl(query, decoded.settings!), query).toBe(
+        redirectRawUrl(query, sourceSettings)
+      );
+    }
+  });
+
+  test("rejects malformed advanced entries in untrusted boot metadata", () => {
+    for (const entry of [
+      ["javascript:alert($1)", "^(.*)$", 1],
+      ["https://example.com/$1", "^(a+)+$", 1],
+      ["https://example.com/$1", "^(.*)$", 3],
+      [
+        "https://example.com/$1",
+        "^(.*)$",
+        1,
+        ["+site:example.com", "javascript:alert(1)"],
+      ],
+      [
+        "https://example.com/$1",
+        "^(.*)$",
+        1,
+        ["+site:other.example", "https://example.com"],
+      ],
+    ]) {
+      expect(
+        decodeHotBootRecord(recordWithCustomEntry(entry), "fb-test")
+      ).toBeNull();
+    }
   });
 
   test("round-trips and resolves eligible personalized frecency bangs", () => {

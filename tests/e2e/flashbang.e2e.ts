@@ -1845,6 +1845,13 @@ test("rich hot boot redirects without IndexedDB or bang data", async ({
       name: "Metadata custom",
       url: `${CUSTOM_HOST}/search?q={}`,
     },
+    {
+      trigger: "capture",
+      name: "Metadata capture",
+      url: `${CUSTOM_HOST}/$1/$2`,
+      regex: "^(\\w+)\\s+(.+)$",
+      encoding: "plus",
+    },
   ]);
   await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -1936,6 +1943,12 @@ test("rich hot boot redirects without IndexedDB or bang data", async ({
     customPage,
     `${origin}/?q=%21mine%20hello`,
     /example\.com\/search\?q=hello/
+  );
+  const capturePage = await context.newPage();
+  await navigateAndWaitForRedirect(
+    capturePage,
+    `${origin}/?q=%21capture%20french%20bonjour%20monde`,
+    /example\.com\/french\/bonjour\+monde/
   );
   const defaultPage = await context.newPage();
   await navigateAndWaitForRedirect(

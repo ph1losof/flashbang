@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { compileCaptureUrl } from "../src/shared/capture-template";
 import { REDIRECT_SETTINGS_SNAPSHOT_KEY } from "../src/shared/constants";
 import {
   createHotBootState,
@@ -612,15 +613,22 @@ describe("sw runtime with real modules", () => {
 
   test("retains hot-boot settings when a cold IndexedDB read fails", async () => {
     const syntax = compileTriggerSyntax("$", "~")!;
+    const custom = Object.assign(Object.create(null), {
+      advanced: compileCaptureUrl(
+        "https://translate.example/$1/$2",
+        "^(\\w+)\\s+(.+)$",
+        "plus"
+      )!,
+    });
     const snapshot: RedirectSettingsSnapshot = {
-      custom: Object.create(null),
+      custom,
       defaultBang: "ddg",
       luckyProvider: "default",
       luckyUrl: null,
       syntax,
     };
     const settings: RedirectSettings = {
-      custom: Object.create(null),
+      custom,
       defaultUrl: ["https://duckduckgo.com/?q=", ""],
       luckyUrl: null,
       syntax,
@@ -667,6 +675,16 @@ describe("sw runtime with real modules", () => {
     );
     expect(syntaxLocation.hostname).toBe("www.google.com");
     expect(syntaxLocation.searchParams.get("q")).toBe("hello");
+
+    const advancedFetch = createFetchEvent(
+      "https://flashbang.local/?q=%24advanced%20french%20bonjour%20monde",
+      "",
+      "navigate"
+    );
+    await handlers.fetch?.(advancedFetch.event);
+    expect((await advancedFetch.response()).headers.get("Location")).toBe(
+      "https://translate.example/french/bonjour+monde"
+    );
   });
 
   test("publishes a personalized hot entry when top-eight membership changes", async () => {

@@ -2,7 +2,12 @@ import { describe, expect, test } from "bun:test";
 
 import { compileCaptureUrl } from "../src/shared/capture-template";
 import { compileSnapTarget } from "../src/shared/snap-target";
-import { createHotBootState, resolveHotRedirect } from "../src/sw/hot-redirect";
+import {
+  createHotBootState,
+  decodeHotBootRecord,
+  encodeHotBootRecord,
+  resolveHotRedirect,
+} from "../src/sw/hot-redirect";
 import type { UrlParts } from "../src/sw/redirect";
 import {
   compileTriggerSyntax,
@@ -71,6 +76,35 @@ function benchHotRedirect(raw: string): number {
   return (performance.now() - t0) / ITERS;
 }
 
+function hotBootRecord(custom: RedirectSettings["custom"]): string {
+  const sourceSettings = { ...settings(), custom };
+  const snapshot = {
+    custom,
+    defaultBang: "g",
+    luckyProvider: "default",
+    luckyUrl: null,
+  };
+  return encodeHotBootRecord(
+    "fb-perf",
+    createHotBootState(snapshot),
+    snapshot,
+    sourceSettings
+  );
+}
+
+function benchHotBootDecode(record: string): number {
+  const warmup = 100;
+  const iterations = 1000;
+  for (let i = 0; i < warmup; i++) {
+    decodeHotBootRecord(record, "fb-perf");
+  }
+  const t0 = performance.now();
+  for (let i = 0; i < iterations; i++) {
+    decodeHotBootRecord(record, "fb-perf");
+  }
+  return (performance.now() - t0) / iterations;
+}
+
 describe("redirect performance regression", () => {
   test("cold-start hot bang resolution stays under 0.001ms", () => {
     expect(benchHotRedirect("%3Bgh+service+workers")).toBeLessThan(0.001);
@@ -121,6 +155,24 @@ describe("redirect performance regression", () => {
   test("custom capture redirect stays under 0.01ms", () => {
     const ms = benchRedirectRaw("!tr+japanese+hello+world");
     expect(ms).toBeLessThan(0.01);
+  });
+
+  test("hot-boot custom capture redirect stays under 0.01ms", () => {
+    const source = settings();
+    const restored = decodeHotBootRecord(
+      hotBootRecord(source.custom),
+      "fb-perf"
+    )!.settings!;
+    const ms = benchRedirectRaw("!tr+japanese+hello+world", restored);
+    expect(ms).toBeLessThan(0.01);
+  });
+
+  test("eight advanced bangs restore from hot boot under 1ms", () => {
+    const custom = Object.create(null) as RedirectSettings["custom"];
+    for (let i = 0; i < 8; i++) {
+      custom[`capture${i}`] = CAPTURE_URL;
+    }
+    expect(benchHotBootDecode(hotBootRecord(custom))).toBeLessThan(1);
   });
 
   test("built-in ad snap redirect stays under 0.005ms", () => {

@@ -5,6 +5,10 @@ import {
   HOT_TRIGGERS,
   lookupHotBang,
 } from "../generated/bangs-hot.js";
+import {
+  type CaptureUrlParts,
+  compileCaptureUrl,
+} from "../shared/capture-template";
 import { TOP_FRECENCY_ENTRIES } from "../shared/constants";
 import { validateCustomTrigger } from "../shared/custom-trigger";
 import { hashFNV1a } from "../shared/hash";
@@ -121,13 +125,35 @@ function isUrlParts(value: unknown): value is UrlParts {
 }
 
 function isSnapTarget(value: unknown): value is readonly [string, string] {
-  return (
-    Array.isArray(value) &&
-    value.length === 2 &&
-    typeof value[0] === "string" &&
-    typeof value[1] === "string" &&
-    isHttpUrl(value[1])
-  );
+  if (
+    !Array.isArray(value) ||
+    value.length !== 2 ||
+    typeof value[0] !== "string" ||
+    typeof value[1] !== "string"
+  ) {
+    return false;
+  }
+  try {
+    const url = new URL(value[1]);
+    if (
+      (url.protocol !== "http:" && url.protocol !== "https:") ||
+      !url.hostname ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash
+    ) {
+      return false;
+    }
+    const path = url.pathname === "/" ? "" : url.pathname.replace(/\/+$/, "");
+    const host = url.host.startsWith("www.") ? url.host.substring(4) : url.host;
+    return (
+      value[0] === `+site:${host}${path}` &&
+      value[1] === `${url.protocol}//${url.host}${path}`
+    );
+  } catch {
+    return false;
+  }
 }
 
 function isSimpleCustom(value: unknown): value is CustomUrlParts {
@@ -140,6 +166,37 @@ function isSimpleCustom(value: unknown): value is CustomUrlParts {
       (value[1] === null || typeof value[1] === "string") &&
       isSnapTarget(value[2]))
   );
+}
+
+// Compile wire-format capture sources once so redirects receive the same
+// precompiled tuple shape as IndexedDB-loaded settings.
+function decodeCustomEntry(value: unknown): CustomUrlParts | null {
+  if (isSimpleCustom(value)) {
+    return value;
+  }
+  if (
+    !Array.isArray(value) ||
+    (value.length !== 3 && value.length !== 4) ||
+    typeof value[0] !== "string" ||
+    typeof value[1] !== "string" ||
+    (value[2] !== 0 && value[2] !== 1 && value[2] !== 2) ||
+    (value.length === 4 && !isSnapTarget(value[3]))
+  ) {
+    return null;
+  }
+  let encoding: "percent" | "plus" | "raw" = "percent";
+  if (value[2] === 0) {
+    encoding = "raw";
+  } else if (value[2] === 2) {
+    encoding = "plus";
+  }
+  const capture = compileCaptureUrl(value[0], value[1], encoding);
+  if (!capture) {
+    return null;
+  }
+  return value.length === 4
+    ? ([...capture, value[3]] as CustomUrlParts)
+    : capture;
 }
 
 function decodeBootSettings(encoded: string): {
@@ -188,12 +245,15 @@ function decodeBootSettings(encoded: string): {
       item.length !== 2 ||
       typeof item[0] !== "string" ||
       validateCustomTrigger(item[0]) !== null ||
-      Object.hasOwn(custom, item[0]) ||
-      !isSimpleCustom(item[1])
+      Object.hasOwn(custom, item[0])
     ) {
       return null;
     }
-    custom[item[0]] = item[1];
+    const entry = decodeCustomEntry(item[1]);
+    if (!entry) {
+      return null;
+    }
+    custom[item[0]] = entry;
   }
 
   const frecency = Object.create(null) as Record<string, UrlParts>;
@@ -238,12 +298,27 @@ function encodeBootSettings(
   settings: RedirectSettings,
   frecency: readonly HotFrecencyEntry[]
 ): string {
-  const custom = Object.keys(snapshot.custom)
-    .sort()
-    .flatMap((trigger) => {
-      const entry = snapshot.custom[trigger];
-      return entry.length === 2 || entry.length === 3 ? [[trigger, entry]] : [];
-    });
+  const triggers = Object.keys(snapshot.custom).sort();
+  const custom = new Array<readonly [string, unknown]>(triggers.length);
+  for (let i = 0; i < triggers.length; i++) {
+    const trigger = triggers[i];
+    const entry = snapshot.custom[trigger];
+    if (entry.length < 5) {
+      custom[i] = [trigger, entry];
+      continue;
+    }
+    const capture = entry as CaptureUrlParts;
+    let template = capture[0];
+    for (let j = 0; j < capture[2].length; j++) {
+      template += `$${capture[2][j]}${capture[1][j]}`;
+    }
+    custom[i] = [
+      trigger,
+      entry.length === 6
+        ? [template, capture[3].source, capture[4], entry[5]]
+        : [template, capture[3].source, capture[4]],
+    ];
+  }
   const markers = settings.syntax
     ? [settings.syntax[0] & 0xff, settings.syntax[1] & 0xff]
     : [33, 64];
