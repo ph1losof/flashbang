@@ -108,6 +108,17 @@ The redirect destination depends on your lucky provider (configurable in setting
 
 ## Setup as search engine
 
+### Use the hosted version
+
+A public instance is available at **[flashbang.tech](https://flashbang.tech)**. Just visit it, then add it as a custom search engine in your browser:
+
+- **Search URL:** `https://flashbang.tech?q=%s`
+- **Suggestion URL:** `https://flashbang.tech/suggest?q=%s` (Optional)
+
+Nothing to build or deploy.
+
+For maximum query privacy, use `https://flashbang.tech/#q=%s`. Everything after `#` is a URL fragment, which browsers do not include in the HTTP request to Flashbang. Once installed, Flashbang's Service Worker reads and resolves the fragment locally, then loads a minimal synthetic page to navigate without carrying the private fragment to the destination. This extra page is slower and may briefly flash during navigation. On a first visit, the page fallback resolves the query in the browser instead. The standard `https://flashbang.tech?q=%s` URL is significantly faster and is recommended unless keeping the query out of requests to Flashbang is more important than redirect speed.
+
 > **Note:** Search suggestions and OpenSearch auto-discovery require a server endpoint since browsers don't route these requests through Service Workers — both are completely optional. Redirects always work offline once installed with no server needed. If you use the hosted version, these requests go through our Cloudflare Pages Functions. No queries are logged or stored — self-host if you'd rather keep them local too.
 
 ### Suggestion URL parameters
@@ -131,17 +142,6 @@ https://flashbang.tech/suggest?q=%s&sp=ddg&bp=%24&np=~
 ```
 
 **Why this exists:** in Chromium-based browsers, cookies are sent with suggest requests and settings configured in the UI are picked up automatically, so these overrides are rarely needed. Firefox-based browsers withhold cookies; the settings UI therefore generates a copyable URL containing `sp`, and adds `bp` plus `np` when the selected syntax differs from the default `!`/`@` pair. See [Browser quirks](#browser-quirks) for details.
-
-### Use the hosted version
-
-A public instance is available at **[flashbang.tech](https://flashbang.tech)**. Just visit it, then add it as a custom search engine in your browser:
-
-- **Search URL:** `https://flashbang.tech?q=%s`
-- **Suggestion URL:** `https://flashbang.tech/suggest?q=%s` (Optional)
-
-Nothing to build or deploy.
-
-For maximum query privacy, use `https://flashbang.tech/#q=%s`. Everything after `#` is a URL fragment, which browsers do not include in the HTTP request to Flashbang. Once installed, Flashbang's Service Worker reads and resolves the fragment locally, then loads a minimal synthetic page to navigate without carrying the private fragment to the destination. This extra page is slower and may briefly flash during navigation. On a first visit, the page fallback resolves the query in the browser instead. The standard `https://flashbang.tech?q=%s` URL is significantly faster and is recommended unless keeping the query out of requests to Flashbang is more important than redirect speed.
 
 ### Browser quirks
 
