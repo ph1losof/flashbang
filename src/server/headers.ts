@@ -6,6 +6,11 @@ const BASE_HEADERS: Record<string, string> = {
   "Referrer-Policy": "strict-origin-when-cross-origin",
 };
 
+export const FALLBACK_SHELL_HEADERS: Record<string, string> = {
+  "Cache-Control": "public, max-age=300",
+  "No-Vary-Search": 'params=("q")',
+};
+
 // SW runtime avoids eval; keep CSP strict.
 export const SW_CSP =
   "default-src 'self'; script-src 'self'; connect-src 'self'";

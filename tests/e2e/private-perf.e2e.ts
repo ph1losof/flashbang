@@ -27,6 +27,14 @@ interface BrowserPrimitiveProfile {
   metadataRead: { median: string; p95: string };
 }
 
+interface ShellCacheProfile {
+  cacheControl: string | null;
+  hits: number;
+  noVarySearch: string | null;
+  requests: number;
+  responses: number;
+}
+
 function percentile(values: readonly number[], fraction: number): number {
   return values[
     Math.min(values.length - 1, Math.floor(values.length * fraction))
@@ -150,9 +158,42 @@ async function waitForSeededRuntime(page: Page): Promise<void> {
   });
 }
 
+async function seedLocalProfileBang(page: Page): Promise<void> {
+  await page.goto("/health");
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        const open = indexedDB.open("flashbang", 1);
+        open.onupgradeneeded = () => {
+          open.result.createObjectStore("settings", { keyPath: "key" });
+          open.result.createObjectStore("custom-bangs", {
+            keyPath: "trigger",
+          });
+        };
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const db = open.result;
+          const tx = db.transaction("custom-bangs", "readwrite");
+          tx.onabort = () => reject(tx.error);
+          tx.onerror = () => reject(tx.error);
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          tx.objectStore("custom-bangs").put({
+            name: "Profile",
+            trigger: "profile",
+            url: "/health?q={}",
+          });
+        };
+      })
+  );
+}
+
 async function measure(
   page: Page,
-  path = "/#q=%21g%20profile"
+  path = "/#q=%21g%20profile",
+  targetUrl = `${GOOGLE}/search?`
 ): Promise<Timing> {
   let bangDataRequests = 0;
   let fallbackRequested = false;
@@ -172,7 +213,7 @@ async function measure(
     if (pathname === "/fallback.js" || pathname.startsWith("/fallback-")) {
       fallbackRequested = true;
     }
-    if (request.url().startsWith(`${GOOGLE}/search?`)) {
+    if (request.url().startsWith(targetUrl)) {
       resolveTarget({
         bangDataRequests,
         elapsed: performance.now() - started,
@@ -235,6 +276,82 @@ test("private hash redirect and public path performance profile", async ({
     fallbackWarm.push(await measure(fallbackWarmPage));
   }
   await fallbackWarmContext.close();
+
+  const publicFallbackContext = await browser.newContext();
+  const publicFallbackPage = await publicFallbackContext.newPage();
+  let publicFallbackCache: ShellCacheProfile | null = null;
+  const publicFallbackCdp =
+    browserName === "chromium"
+      ? await publicFallbackContext.newCDPSession(publicFallbackPage)
+      : null;
+  const shellRequestIds = new Set<string>();
+  if (publicFallbackCdp) {
+    publicFallbackCache = {
+      cacheControl: null,
+      hits: 0,
+      noVarySearch: null,
+      requests: 0,
+      responses: 0,
+    };
+    await publicFallbackCdp.send("Network.enable");
+    if (NETWORK_DELAY_MS > 0) {
+      await publicFallbackCdp.send("Network.emulateNetworkConditions", {
+        downloadThroughput: -1,
+        latency: NETWORK_DELAY_MS,
+        offline: false,
+        uploadThroughput: -1,
+      });
+    }
+    publicFallbackCdp.on("Network.requestWillBeSent", (event) => {
+      const url = new URL(event.request.url);
+      if (url.origin === new URL(baseURL).origin && url.pathname === "/") {
+        publicFallbackCache!.requests++;
+        shellRequestIds.add(event.requestId);
+      }
+    });
+    publicFallbackCdp.on("Network.responseReceived", (event) => {
+      if (shellRequestIds.has(event.requestId)) {
+        publicFallbackCache!.responses++;
+        if (event.response.fromDiskCache || event.response.fromPrefetchCache) {
+          publicFallbackCache!.hits++;
+        }
+        const headers = event.response.headers;
+        publicFallbackCache!.cacheControl =
+          String(headers["Cache-Control"] ?? headers["cache-control"] ?? "") ||
+          null;
+        publicFallbackCache!.noVarySearch =
+          String(
+            headers["No-Vary-Search"] ?? headers["no-vary-search"] ?? ""
+          ) || null;
+      }
+    });
+  }
+  await publicFallbackPage.addInitScript(() => {
+    Reflect.deleteProperty(Navigator.prototype, "serviceWorker");
+  });
+  await seedLocalProfileBang(publicFallbackPage);
+  const localTarget = new URL("/health?q=", baseURL).href;
+  await measure(publicFallbackPage, "/?q=%21profile%20warm", localTarget);
+  const publicFallbackWarm: Timing[] = [];
+  for (let i = 0; i < WARM_RUNS; i++) {
+    publicFallbackWarm.push(
+      await measure(publicFallbackPage, `/?q=%21profile%20${i}`, localTarget)
+    );
+  }
+  const publicFallbackMiss: Timing[] = [];
+  if (browserName === "chromium") {
+    for (let i = 0; i < WARM_RUNS; i++) {
+      publicFallbackMiss.push(
+        await measure(
+          publicFallbackPage,
+          `/?q=%21profile%20${i}&profile-miss=${i}`,
+          localTarget
+        )
+      );
+    }
+  }
+  await publicFallbackCdp?.detach();
+  await publicFallbackContext.close();
 
   const firstInstall: Timing[] = [];
   const postInstall: Timing[] = [];
@@ -500,6 +617,11 @@ test("private hash redirect and public path performance profile", async ({
       idbOpenDelayMs: IDB_OPEN_DELAY_MS,
       networkDelayMs: NETWORK_DELAY_MS,
       postInstall: summarize(postInstall),
+      ...(publicFallbackCache ? { publicFallbackCache } : {}),
+      ...(publicFallbackMiss.length > 0
+        ? { publicFallbackMiss: summarize(publicFallbackMiss) }
+        : {}),
+      publicFallbackWarm: summarize(publicFallbackWarm),
       publicWarm: summarize(publicWarm),
       ...(workerRestart.length > 0
         ? { workerRestart: summarize(workerRestart) }

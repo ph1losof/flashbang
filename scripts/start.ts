@@ -3,7 +3,11 @@ import {
   handleOpenSearchRequest,
   handleSuggestRequest,
 } from "../src/server/handlers";
-import { pageHeaders, SW_HEADERS } from "../src/server/headers";
+import {
+  FALLBACK_SHELL_HEADERS,
+  pageHeaders,
+  SW_HEADERS,
+} from "../src/server/headers";
 import { readPathname } from "../src/shared/raw-url";
 import { extractInlineScriptHashes } from "./inline-script-hash";
 
@@ -52,6 +56,9 @@ export function acceptsBrotli(header: string | null): boolean {
 }
 
 export function cacheControlForAsset(assetPath: string): string {
+  if (assetPath === "/index.html") {
+    return FALLBACK_SHELL_HEADERS["Cache-Control"];
+  }
   if (assetPath === "/sw.js" || assetPath.endsWith(".html")) {
     return "no-cache";
   }
@@ -71,6 +78,7 @@ export function staticAssetHeaders(
     "Cache-Control": cacheControlForAsset(assetPath),
     Vary: "Accept-Encoding",
     ...(compressed ? { "Content-Encoding": "br" } : {}),
+    ...(assetPath === "/index.html" ? FALLBACK_SHELL_HEADERS : {}),
     ...securityHeaders,
     ...extraHeaders,
   };

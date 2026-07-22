@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 import { mkdir, rm } from "node:fs/promises";
 import { basename } from "node:path";
 import { brotliCompressSync, constants } from "node:zlib";
-import { pageHeaders, SW_CSP } from "../src/server/headers";
+import {
+  FALLBACK_SHELL_HEADERS,
+  pageHeaders,
+  SW_CSP,
+} from "../src/server/headers";
 import { ensureGeneratedBangData } from "./codegen";
 import { extractInlineScriptHashes } from "./inline-script-hash";
 import {
@@ -206,6 +210,9 @@ async function main(): Promise<void> {
     .join("\n  ");
   const pageCspHeader = `Content-Security-Policy: ${pageCsp}`;
   const swCspHeader = `Content-Security-Policy: ${SW_CSP}`;
+  const fallbackShellHeaders = Object.entries(FALLBACK_SHELL_HEADERS).map(
+    ([key, value]) => `  ${key}: ${value}`
+  );
   await Bun.write(
     `${DIST_DIR}/_headers`,
     [
@@ -214,9 +221,11 @@ async function main(): Promise<void> {
       "",
       "/",
       `  ${pageCspHeader}`,
+      ...fallbackShellHeaders,
       "",
       "/index.html",
       `  ${pageCspHeader}`,
+      ...fallbackShellHeaders,
       "",
       "/home.html",
       `  ${pageCspHeader}`,

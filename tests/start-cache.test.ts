@@ -40,8 +40,20 @@ describe("production static caching", () => {
         "public, max-age=0, must-revalidate"
       );
     }
-    expect(cacheControlForAsset("/index.html")).toBe("no-cache");
+    expect(cacheControlForAsset("/index.html")).toBe("public, max-age=300");
+    expect(cacheControlForAsset("/home.html")).toBe("no-cache");
+    expect(cacheControlForAsset("/bench.html")).toBe("no-cache");
     expect(cacheControlForAsset("/sw.js")).toBe("no-cache");
+  });
+
+  test("makes only the fallback shell query-blind", () => {
+    const fallback = staticAssetHeaders("/index.html", "text/html", false);
+    const home = staticAssetHeaders("/home.html", "text/html", false);
+
+    expect(fallback["No-Vary-Search"]).toBe('params=("q")');
+    expect(fallback["Cache-Control"]).toBe("public, max-age=300");
+    expect(home["No-Vary-Search"]).toBeUndefined();
+    expect(home["Cache-Control"]).toBe("no-cache");
   });
 
   test("compressed and identity responses share representation headers", () => {
