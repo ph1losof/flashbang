@@ -267,7 +267,7 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for build pipeline and project structure de
 | **OpenSearch**              | Yes (dynamic, self-host friendly)             | No                               | Yes                              | Yes                                                    |
 | **Custom bangs**            | Yes (IndexedDB faster)                        | No                               | Yes (localStorage)               | Yes (localStorage)                                     |
 | **Build tool**              | Bun                                           | Vite                             | Vite                             | Vite                                                   |
-| **Bang data for redirects** | ~843 KB (packed trigger→URL lookup)           | 2.7 MB (full metadata)           | 1.5 MB (full metadata)           | ~200 KB inline + 1.5 MB lazy-loaded                    |
+| **Bang data for redirects** | ~708 KB (packed trigger→URL lookup)           | 2.7 MB (full metadata)           | 1.5 MB (full metadata)           | ~200 KB inline + 1.5 MB lazy-loaded                    |
 | **Parsed on**               | SW thread (once per worker lifetime)          | Main thread (every page load)    | Main thread (every page load)    | Main thread (every page load) or edge worker           |
 | **License**                 | AGPL-3.0                                      | MIT                              | MIT                              | MIT                                                    |
 
