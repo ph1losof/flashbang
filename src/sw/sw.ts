@@ -830,7 +830,7 @@ function responseForQuery(
   });
 }
 
-function clearInheritedPrivateFragment(response: Response): Response {
+function createSyntheticRedirectResponse(response: Response): Response {
   const location = response.headers.get("Location");
   if (!location) {
     return response;
@@ -908,7 +908,7 @@ self.addEventListener("fetch", (e: FetchEvent) => {
       }
       e.respondWith(
         Promise.resolve(responseForQuery(e, privateQuery)).then(
-          clearInheritedPrivateFragment
+          createSyntheticRedirectResponse
         )
       );
       return;
