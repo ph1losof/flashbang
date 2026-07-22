@@ -20,7 +20,7 @@
 
 Turn your browser's address bar into a shortcut launcher. Type `!g kittens` to search Google, `!w dogs` for Wikipedia, `!gh react` for GitHub — over 14,000 shortcuts (called "bangs") that take you straight to the right site, instantly. No extra tabs, no round-trips, no waiting for a page to load. Or use **snaps** — type `@w quantum` to search your default engine restricted to Wikipedia, `@gh api` for GitHub-only results.
 
-Every other bang tool loads a full page before redirecting — adding hundreds of milliseconds — or routes through an edge server adding network latency. Flashbang skips the page entirely — a [Service Worker](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API) handles the redirect before your browser even starts rendering.
+Other bang tools load a full page before redirecting — adding hundreds of milliseconds — or routes through an edge server adding network latency. Flashbang skips the page entirely — a [Service Worker](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API) handles the redirect before your browser even starts rendering.
 
 ### Try it now
 
@@ -248,7 +248,52 @@ An optional snap target such as `docs.example.com/api` makes `@mybang query` sea
 
 ## How it works
 
-When you type `!gh react` (or the equivalent with your selected bang prefix) in the address bar, the Service Worker intercepts the request before it reaches the network. It parses the bang trigger, looks it up in the bang map (checking custom bangs first, then built-ins), and responds with a 302 redirect. Snaps work the same way with their separately selected prefix — the Service Worker resolves the trigger's domain and redirects to your default search engine with `site:domain` appended. If no bang or snap is found, your default search engine is used.
+The redirect path is deliberately separate from the website UI and from the suggestion server:
+
+```mermaid
+flowchart LR
+    address[Address bar navigation] --> worker[Service Worker fetch handler]
+    worker --> parser[Raw query parser]
+    parser --> custom{Custom bang?}
+    custom -->|Yes| redirect[302 redirect]
+    custom -->|No| builtin[Packed built-in lookup]
+    builtin --> redirect
+    redirect -. waitUntil .-> sideEffects[Frecency and persistence]
+```
+
+### Redirect before render
+
+When you type `!gh react` (or the equivalent with your selected bang prefix), the browser navigates to Flashbang's search URL. The installed Service Worker intercepts that navigation, reads `q` directly from the raw request URL, resolves the destination, and returns `Response.redirect(..., 302)`. The browser follows that response without loading or rendering the Flashbang page.
+
+The parser works on the still-encoded query instead of first passing the whole value through `URLSearchParams`, decoding it, and encoding it again. It recognizes literal and percent-encoded markers and spaces, computes the trigger's FNV-1a hash while extracting it, and preserves the raw search term where the destination template allows it. Custom bangs are checked first; built-ins are checked only if there is no custom override. The same parser handles all prefix/suffix bang forms, lucky syntax, snaps, and snap chains. Unknown syntax safely becomes a search through the configured default engine.
+
+### A search catalog compiled like an index
+
+The 14,000+ source records are not shipped to the redirect worker as a large JSON object. `scripts/codegen.ts` merges and validates the DuckDuckGo, Kagi, and project-specific sources, then produces purpose-built artifacts for different jobs:
+
+- `bangs.bin` contains the regular trigger-to-URL redirect index
+- generated sparse data handles advanced capture/regex bangs
+- a packed radix trie powers prefix autocomplete and snap-chain completion
+- `bangs-meta.bin` contains the names and domains needed by the settings UI
+- a tiny generated hot-bang table covers common triggers during worker startup
+
+For the redirect index, codegen splits every URL template around its query placeholder, deduplicates the resulting prefixes and suffixes, and stores compact IDs plus byte lengths in typed arrays. It also deterministically builds a CHD-style minimal perfect hash from each trigger's FNV-1a hash and writes records directly in hash-slot order. A lookup therefore selects one slot with no probe loop, verifies that the stored trigger really matches, and only then decodes and caches that entry's URL pieces. Most of the catalog remains byte-backed for the worker's lifetime.
+
+### Fast restarts and offline redirects
+
+Service Workers can be stopped whenever the browser considers them idle, so in-memory state cannot be assumed to survive. The full binary index is cached in Cache Storage, while settings, custom bangs, and compact frecency snapshots live in IndexedDB.
+
+Flashbang also keeps a compact **hot-boot record** in the Service Worker's persisted navigation-preload configuration while leaving navigation preload itself disabled. That record can contain redirect settings and the user's top frecent bang URLs. Together with the generated hot-bang table, it lets a newly started worker answer common navigations before IndexedDB and the full binary catalog have finished loading. A miss falls through to the cached full index, so this optimization never changes redirect semantics. Browsers without the required API simply use the normal cache and IndexedDB path.
+
+### No storage work on the response path
+
+Destination resolution is synchronous once the required lookup state is available. After the 302 has been created, `FetchEvent.waitUntil()` schedules usage counting, coalesced IndexedDB persistence, hot-boot refreshes, and suggestion-cookie updates. Frecency can therefore personalize later autocomplete results without putting an IndexedDB write in front of the current redirect.
+
+### Suggestions use a different data structure
+
+Browsers send OpenSearch suggestion requests to `/suggest`; they do not route them through the Service Worker. Bang completion is still local to the Flashbang deployment: the endpoint walks a generated radix trie whose nodes carry the maximum relevance of their descendants, then performs a bounded top-k search that prunes branches unable to beat the current results. Global relevance, optional frecency boosts, custom triggers, and already-selected snap-chain targets are combined during that walk. Regular non-bang queries are proxied to the configured suggestion provider and are never added to the bang catalog or frecency data.
+
+The privacy-first `#q=%s` URL takes a related but intentionally slower path. The query remains in the URL fragment, which is not sent to the server. The Service Worker resolves it locally and returns a minimal synthetic page that calls `location.replace()` with a safely serialized destination; this prevents the private source fragment from being carried into the destination URL.
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for build pipeline and project structure details.
 
@@ -281,13 +326,11 @@ The author claims that Web Analytics have been disabled, but `beacon.min.js` is 
 
 ## Why is it faster?
 
-Every other bang tool (unduck, unduckified) — works the same way: your browser navigates to their page, loads HTML, parses and executes JavaScript (including a 1.5–2.7 MB bang database), and only then calls `window.location.replace()` to send you to your destination. You see it happen: there is a screen flash, their page briefly appears or flickers, and then you arrive where you wanted to go. That blank-page flash is the browser loading and executing their redirect page. It typically takes 100–500ms depending on your device, and it happens on every single redirect — even with all assets cached.
+Other bang tools (unduck, unduckified) — works the same way: your browser navigates to their page, loads HTML, parses and executes JavaScript (including a 1.5–2.7 MB bang database), and only then calls `window.location.replace()` to send you to your destination. You see it happen: there is a screen flash, their page briefly appears or flickers, and then you arrive where you wanted to go. That blank-page flash is the browser loading and executing their redirect page. It typically takes 100–500ms depending on your device, and it happens on every single redirect — even with all assets cached.
 
 Flashbang works differently. A [Service Worker](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API) intercepts your navigation **before the browser starts rendering any page**. It parses the bang from the raw URL, looks it up in an in-memory map, and responds with a `302 redirect` — all in under 1ms. No page loads. No JavaScript bundle to parse. No white flash. Your browser goes straight from the address bar to your destination nearly as if you'd typed the URL directly.
 
-The packed bang database (trigger→URL lookup, currently ~708 KiB uncompressed) is loaded into typed-array views when the Service Worker starts and stays in memory across navigations for that worker lifetime. The settings UI is a separate bundle that only loads when you visit the homepage. During a redirect, the hot path is a lightweight parser and a minimal-perfect-hash lookup; settings persistence and frecency updates are handled outside the response path.
-
-That lookup path is pre-optimized by `scripts/codegen.ts` at build time. Instead of shipping a large plain JSON/object map, codegen splits bang URLs into deduplicated prefix/suffix tables, packs trigger/prefix/suffix lengths into typed arrays, and deterministically builds a CHD-style minimal perfect hash from each trigger's FNV-1a hash. Records are emitted directly in perfect-hash slot order, so lookup needs no sparse table or probe loop. The Service Worker verifies the selected trigger and lazily materializes and caches URL parts only for matched entries.
+The packed bang database (currently ~708 KiB uncompressed), settings UI, and suggestion index are separate artifacts, so a redirect does not parse metadata it does not need. The raw parser, minimal-perfect-hash lookup, hot-boot tier, and deferred persistence behind that path are described in [How it works](#how-it-works).
 
 ### Will I actually notice the difference?
 
