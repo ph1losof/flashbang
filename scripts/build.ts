@@ -2,16 +2,11 @@ import { createHash } from "node:crypto";
 import { mkdir, rm } from "node:fs/promises";
 import { basename } from "node:path";
 import { brotliCompressSync, constants } from "node:zlib";
-import {
-  controlledPageHeaders,
-  pageHeaders,
-  SW_CSP,
-} from "../src/server/headers";
+import { pageHeaders, SW_CSP } from "../src/server/headers";
 import { ensureGeneratedBangData } from "./codegen";
 import { extractInlineScriptHashes } from "./inline-script-hash";
 import {
   assembleUIAssets,
-  buildControlledBootstrap,
   bundleUI,
   customSuggestUrlsEnabled,
   DIST_DIR,
@@ -84,9 +79,7 @@ async function bundleServiceWorker(
   cacheVersion: string,
   requiredAppAssets: readonly string[],
   bangDataAsset: string,
-  fallbackAsset: string,
-  controlledHtml: string,
-  controlledHeaders: Record<string, string>
+  fallbackAsset: string
 ): Promise<void> {
   const result = await Bun.build({
     entrypoints: ["src/sw/sw.ts"],
@@ -100,8 +93,6 @@ async function bundleServiceWorker(
       __FALLBACK_ASSET__: JSON.stringify(fallbackAsset),
       __CACHE_VERSION__: JSON.stringify(cacheVersion),
       __REQUIRED_APP_ASSETS__: JSON.stringify(requiredAppAssets),
-      __CONTROLLED_HTML__: JSON.stringify(controlledHtml),
-      __CONTROLLED_HEADERS__: JSON.stringify(controlledHeaders),
       __IS_DEV__: JSON.stringify(false),
     },
   });
@@ -170,16 +161,6 @@ async function main(): Promise<void> {
   const scriptHashes = [distIndex, distHome, distBench].flatMap(
     extractInlineScriptHashes
   );
-  const controlledHtml = await buildControlledBootstrap(
-    bangDataAsset,
-    fallbackAsset
-  );
-  const controlledScriptHashes = extractInlineScriptHashes(controlledHtml);
-  const controlledHeaders = {
-    "Content-Type": "text/html; charset=utf-8",
-    ...controlledPageHeaders(controlledScriptHashes.join(" ")),
-  };
-
   console.log("=== Compute service worker cache version ===");
   // This fixed placeholder bundle captures SW implementation and bang-data
   // changes without introducing the final cache version into its own hash.
@@ -188,9 +169,7 @@ async function main(): Promise<void> {
     "fb-cache-version-input",
     requiredAppAssets,
     bangDataAsset,
-    fallbackAsset,
-    controlledHtml,
-    controlledHeaders
+    fallbackAsset
   );
   const cacheInputs: CacheVersionInput[] = await Promise.all(
     precacheFileInputs(requiredAppAssets, bangDataAsset, fallbackAsset).map(
@@ -214,9 +193,7 @@ async function main(): Promise<void> {
     cacheVersion,
     requiredAppAssets,
     bangDataAsset,
-    fallbackAsset,
-    controlledHtml,
-    controlledHeaders
+    fallbackAsset
   );
 
   console.log("=== Generate _headers with CSP ===");

@@ -49,8 +49,6 @@ declare const __CACHE_VERSION__: string;
 declare const __BANG_DATA_ASSET__: string;
 declare const __FALLBACK_ASSET__: string;
 declare const __REQUIRED_APP_ASSETS__: string[];
-declare const __CONTROLLED_HTML__: string;
-declare const __CONTROLLED_HEADERS__: Record<string, string>;
 declare const __IS_DEV__: boolean;
 
 const CACHE_PREFIX = "fb-";
@@ -254,6 +252,18 @@ function rawQueryParameter(rawUrl: string, name: string): string | null {
   start += marker.length + 1;
   const end = rawUrl.indexOf("&", start);
   return end === -1 ? rawUrl.substring(start) : rawUrl.substring(start, end);
+}
+
+function rawPrivateQuery(rawUrl: string): string | null {
+  const start = rawUrl.indexOf("#q=");
+  if (start === -1) {
+    return null;
+  }
+  const valueStart = start + 3;
+  const end = rawUrl.indexOf("&", valueStart);
+  return end === -1
+    ? rawUrl.substring(valueStart)
+    : rawUrl.substring(valueStart, end);
 }
 
 async function loadBangData(): Promise<void> {
@@ -743,6 +753,115 @@ function respondToCompactHotBang(
   return response;
 }
 
+function responseForQuery(
+  e: FetchEvent,
+  rawQuery: string
+): Response | Promise<Response> {
+  if (isBangDataInitialized()) {
+    const cached = getCachedSettings();
+    if (cached) {
+      return respondToRedirect(e, rawQuery, cached);
+    }
+    return readCurrentRedirectSettings().then((settings) =>
+      respondToRedirect(e, rawQuery, settings)
+    );
+  }
+  return hotBootPromise.then((hotBoot) => {
+    if (e.request.mode === "navigate") {
+      const settings = hotBoot?.settings;
+      try {
+        if (settings) {
+          return respondToRedirect(
+            e,
+            rawQuery,
+            settings,
+            hotBoot.hotBangLookup
+          );
+        }
+        if (hotBoot?.compactSettings) {
+          const response = respondToCompactHotBang(e, rawQuery, hotBoot);
+          if (response) {
+            return response;
+          }
+        }
+      } catch (error) {
+        if (!(isBangDataUnavailable(error) || isHotBangLookupBlocked(error))) {
+          throw error;
+        }
+      }
+    }
+    const bangDataReady =
+      hotBootUpdateTokens.size > 0
+        ? invalidateCache().then(ensureBangData)
+        : ensureBangData();
+    e.waitUntil(bangDataReady.catch(swallowError));
+    return readCurrentRedirectSettings(undefined, bangDataReady).then(
+      async (settings) => {
+        if (hotBootSettingsNeedPublish(currentHotBoot)) {
+          e.waitUntil(
+            bangDataReady
+              .then(() => queueHotBootMutation(() => publishHotBoot(true)))
+              .catch(swallowError)
+          );
+        }
+        try {
+          return respondToRedirect(
+            e,
+            rawQuery,
+            settings,
+            hotBoot?.hotBangLookup ?? lookupGeneratedHotBang
+          );
+        } catch (error) {
+          if (
+            !(isBangDataUnavailable(error) || isHotBangLookupBlocked(error))
+          ) {
+            throw error;
+          }
+          await bangDataReady;
+          return respondToRedirect(
+            e,
+            rawQuery,
+            settings,
+            hotBoot?.hotBangLookup ?? lookupGeneratedHotBang
+          );
+        }
+      }
+    );
+  });
+}
+
+function clearInheritedPrivateFragment(response: Response): Response {
+  const location = response.headers.get("Location");
+  if (!location) {
+    return response;
+  }
+  const serializedLocation = JSON.stringify(location)
+    .replaceAll("<", "\\u003c")
+    .replaceAll("\u2028", "\\u2028")
+    .replaceAll("\u2029", "\\u2029");
+  return new Response(
+    `<!doctype html><script>location.replace(${serializedLocation})</script>`,
+    {
+      headers: {
+        "Cache-Control": "no-store",
+        "Content-Security-Policy":
+          "default-src 'none'; script-src 'unsafe-inline'; base-uri 'none'",
+        "Content-Type": "text/html; charset=utf-8",
+        "Referrer-Policy": "no-referrer",
+      },
+    }
+  );
+}
+
+function refreshHome(): Response {
+  return new Response(null, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      Refresh: `0;url=${APP_ORIGIN}/home`,
+    },
+  });
+}
+
 self.addEventListener("fetch", (e: FetchEvent) => {
   const raw = e.request.url;
 
@@ -780,6 +899,22 @@ self.addEventListener("fetch", (e: FetchEvent) => {
     }
   }
 
+  if (e.request.mode === "navigate") {
+    const privateQuery = rawPrivateQuery(raw);
+    if (privateQuery !== null) {
+      if (!privateQuery) {
+        e.respondWith(refreshHome());
+        return;
+      }
+      e.respondWith(
+        Promise.resolve(responseForQuery(e, privateQuery)).then(
+          clearInheritedPrivateFragment
+        )
+      );
+      return;
+    }
+  }
+
   const vStart = findQueryValueStart(raw);
   if (vStart !== -1) {
     const vEnd = raw.indexOf("&", vStart);
@@ -808,93 +943,7 @@ self.addEventListener("fetch", (e: FetchEvent) => {
         );
         return;
       }
-      if (isBangDataInitialized()) {
-        const cached = getCachedSettings();
-        if (cached) {
-          e.respondWith(respondToRedirect(e, rawQ, cached));
-        } else {
-          e.respondWith(
-            readCurrentRedirectSettings().then((settings) =>
-              respondToRedirect(e, rawQ, settings)
-            )
-          );
-        }
-      } else {
-        e.respondWith(
-          hotBootPromise.then((hotBoot) => {
-            if (e.request.mode === "navigate") {
-              const settings = hotBoot?.settings;
-              try {
-                if (settings) {
-                  return respondToRedirect(
-                    e,
-                    rawQ,
-                    settings,
-                    hotBoot.hotBangLookup
-                  );
-                }
-                if (hotBoot?.compactSettings) {
-                  const response = respondToCompactHotBang(e, rawQ, hotBoot);
-                  if (response) {
-                    return response;
-                  }
-                }
-              } catch (error) {
-                if (
-                  !(
-                    isBangDataUnavailable(error) ||
-                    isHotBangLookupBlocked(error)
-                  )
-                ) {
-                  throw error;
-                }
-              }
-            }
-            const bangDataReady =
-              hotBootUpdateTokens.size > 0
-                ? invalidateCache().then(ensureBangData)
-                : ensureBangData();
-            e.waitUntil(bangDataReady.catch(swallowError));
-            return readCurrentRedirectSettings(undefined, bangDataReady).then(
-              async (settings) => {
-                if (hotBootSettingsNeedPublish(currentHotBoot)) {
-                  e.waitUntil(
-                    bangDataReady
-                      .then(() =>
-                        queueHotBootMutation(() => publishHotBoot(true))
-                      )
-                      .catch(swallowError)
-                  );
-                }
-                try {
-                  return respondToRedirect(
-                    e,
-                    rawQ,
-                    settings,
-                    hotBoot?.hotBangLookup ?? lookupGeneratedHotBang
-                  );
-                } catch (error) {
-                  if (
-                    !(
-                      isBangDataUnavailable(error) ||
-                      isHotBangLookupBlocked(error)
-                    )
-                  ) {
-                    throw error;
-                  }
-                  await bangDataReady;
-                  return respondToRedirect(
-                    e,
-                    rawQ,
-                    settings,
-                    hotBoot?.hotBangLookup ?? lookupGeneratedHotBang
-                  );
-                }
-              }
-            );
-          })
-        );
-      }
+      e.respondWith(responseForQuery(e, rawQ));
       return;
     }
   }
@@ -903,11 +952,7 @@ self.addEventListener("fetch", (e: FetchEvent) => {
     e.request.mode === "navigate" &&
     (raw === ROOT_URL || raw === INDEX_URL)
   ) {
-    e.respondWith(
-      new Response(__CONTROLLED_HTML__, {
-        headers: __CONTROLLED_HEADERS__,
-      })
-    );
+    e.respondWith(Response.redirect(`${APP_ORIGIN}/home`, 302));
     return;
   }
 
@@ -915,8 +960,7 @@ self.addEventListener("fetch", (e: FetchEvent) => {
     return;
   }
 
-  // Private redirects should not install or compete with UI assets. Root is
-  // handled above because the worker cannot see its URL fragment.
+  // Private redirects should not install or compete with UI assets.
   if (!(isBangDataInitialized() && getCachedSettings())) {
     e.waitUntil(warmRuntime());
   }

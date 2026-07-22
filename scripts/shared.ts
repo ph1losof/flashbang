@@ -52,21 +52,6 @@ function configureRedirectAssets(
   );
 }
 
-export async function buildControlledBootstrap(
-  bangDataAsset = "/bangs.bin",
-  fallbackAsset = "/fallback.js"
-): Promise<string> {
-  const source = configureRedirectAssets(
-    await Bun.file("src/ui/controlled.html").text(),
-    bangDataAsset,
-    fallbackAsset
-  );
-  return minify(Buffer.from(source), {
-    minify_css: true,
-    minify_js: true,
-  }).toString();
-}
-
 export async function bundleUI(
   allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled(),
   bangMetaAsset = "/bangs-meta.bin",

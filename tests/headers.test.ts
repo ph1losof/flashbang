@@ -1,10 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  controlledPageHeaders,
-  pageHeaders,
-  SW_CSP,
-  SW_HEADERS,
-} from "../src/server/headers";
+import { pageHeaders, SW_CSP, SW_HEADERS } from "../src/server/headers";
 
 describe("server headers", () => {
   test("SW headers include strict CSP and security headers", () => {
@@ -34,15 +29,5 @@ describe("server headers", () => {
     const csp = pageHeaders("'sha256-example'")["Content-Security-Policy"];
     expect(csp).toContain("script-src 'self' 'sha256-example'");
     expect(csp).not.toContain("script-src 'self' 'unsafe-inline'");
-  });
-
-  test("controlled page headers omit unrelated CSP directives", () => {
-    const csp =
-      controlledPageHeaders("'sha256-example'")["Content-Security-Policy"];
-    expect(csp).toContain("script-src 'self' 'sha256-example'");
-    expect(csp).toContain("style-src 'unsafe-inline'");
-    expect(csp).toContain("frame-ancestors 'none'");
-    expect(csp).not.toContain("worker-src");
-    expect(csp).not.toContain("manifest-src");
   });
 });

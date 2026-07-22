@@ -6,15 +6,10 @@ import {
   handleOpenSearchRequest,
   handleSuggestRequest,
 } from "../src/server/handlers";
-import {
-  controlledPageHeaders,
-  pageHeaders,
-  SW_HEADERS,
-} from "../src/server/headers";
+import { pageHeaders, SW_HEADERS } from "../src/server/headers";
 import { readPathname } from "../src/shared/raw-url";
 import {
   assembleUIAssets,
-  buildControlledBootstrap,
   bundleUI,
   customSuggestUrlsEnabled,
   generateCSS,
@@ -75,10 +70,6 @@ async function build() {
     "/bangs.bin",
     uiBuild.fallbackAsset
   );
-  const controlledHtml = await buildControlledBootstrap(
-    "/bangs.bin",
-    uiBuild.fallbackAsset
-  );
   await Bun.build({
     entrypoints: ["src/sw/sw.ts"],
     outdir: "dist",
@@ -91,11 +82,6 @@ async function build() {
       __FALLBACK_ASSET__: JSON.stringify(uiBuild.fallbackAsset),
       __CACHE_VERSION__: '"flashbang-dev"',
       __REQUIRED_APP_ASSETS__: '["/bangs-meta.bin"]',
-      __CONTROLLED_HTML__: JSON.stringify(controlledHtml),
-      __CONTROLLED_HEADERS__: JSON.stringify({
-        "Content-Type": "text/html; charset=utf-8",
-        ...controlledPageHeaders("'unsafe-inline'"),
-      }),
       __IS_DEV__: JSON.stringify(true),
     },
   });

@@ -103,12 +103,6 @@ function setupSwGlobals(
   globals.__FALLBACK_ASSET__ = "/fallback.js";
   globals.__CACHE_VERSION__ = "test-cache";
   globals.__REQUIRED_APP_ASSETS__ = [...requiredAppAssets];
-  globals.__CONTROLLED_HTML__ =
-    "<!doctype html><title>flashbang bootstrap</title>";
-  globals.__CONTROLLED_HEADERS__ = {
-    "Content-Security-Policy": "default-src 'self'",
-    "Content-Type": "text/html; charset=utf-8",
-  };
   globals.__IS_DEV__ = false;
 
   (globalThis as unknown as { self: unknown }).self = {
@@ -415,7 +409,7 @@ describe("sw runtime with real modules", () => {
     );
   });
 
-  test("serves the root bootstrap from memory without starting precache", async () => {
+  test("redirects the root to home without starting precache", async () => {
     await loadSwRuntime(["/chunk-catalog123.js"]);
 
     const fetchEvt = createFetchEvent(
@@ -426,15 +420,15 @@ describe("sw runtime with real modules", () => {
     await handlers.fetch?.(fetchEvt.event);
     const response = await fetchEvt.response();
 
-    expect(await response.text()).toContain("flashbang bootstrap");
-    expect(response.headers.get("Content-Type")).toBe(
-      "text/html; charset=utf-8"
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe(
+      "https://flashbang.local/home"
     );
     expect(fetchEvt.waits).toHaveLength(0);
     expect(fetchCalls).toEqual([]);
   });
 
-  test("only serves the root bootstrap for same-origin navigations", async () => {
+  test("only redirects same-origin root navigations", async () => {
     await loadSwRuntime();
 
     const crossOrigin = createFetchEvent(
@@ -877,6 +871,31 @@ describe("sw runtime with real modules", () => {
       expect(fetchEvt.waits).toHaveLength(0);
       expect(fetchCalls).toEqual([]);
     }
+  });
+
+  test("private fragment path uses the fetch redirect and clears inheritance", async () => {
+    await loadSwRuntime();
+    const fetchEvt = createFetchEvent(
+      "https://flashbang.local/#q=hello",
+      "",
+      "navigate"
+    );
+
+    await handlers.fetch?.(fetchEvt.event);
+    const response = await fetchEvt.response();
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).toContain("location.replace(");
+    expect(body).toContain("google.com");
+    expect(body).toContain("q=hello");
+    expect(response.headers.get("Content-Security-Policy")).toContain(
+      "script-src 'unsafe-inline'"
+    );
+    expect(response.headers.get("Location")).toBeNull();
+    expect(response.headers.get("Refresh")).toBeNull();
+    expect(fetchEvt.waits).toHaveLength(0);
+    expect(fetchCalls).toEqual([]);
   });
 
   test("benchmark mode validates and counts client-scoped worker requests", async () => {

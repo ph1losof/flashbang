@@ -1743,7 +1743,9 @@ test("private hash redirect works from a controlled homepage", async ({
       ["/app.js", "/home"].includes(new URL(url).pathname)
     )
   ).toBe(false);
+  expect(page.url()).not.toContain("#q=");
   expect(new URL(page.url()).hash).toBe("");
+  expect(await page.evaluate(() => location.hash)).toBe("");
 });
 
 test("redirect falls back when service workers are unavailable", async ({
