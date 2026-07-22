@@ -141,7 +141,7 @@ A public instance is available at **[flashbang.tech](https://flashbang.tech)**. 
 
 Nothing to build or deploy.
 
-For maximum query privacy, use `https://flashbang.tech/#q=%s`. Everything after `#` is a URL fragment, which browsers do not include in the HTTP request to Flashbang. Once installed, Flashbang's Service Worker reads and resolves the fragment locally through the same fast path as the standard Search URL. On a first visit, the page fallback resolves it in the browser instead. The query therefore stays on your device until the final destination navigation.
+For maximum query privacy, use `https://flashbang.tech/#q=%s`. Everything after `#` is a URL fragment, which browsers do not include in the HTTP request to Flashbang. Once installed, Flashbang's Service Worker reads and resolves the fragment locally, then loads a minimal synthetic page to navigate without carrying the private fragment to the destination. This extra page is slower and may briefly flash during navigation. On a first visit, the page fallback resolves the query in the browser instead. The standard `https://flashbang.tech?q=%s` URL is significantly faster and is recommended unless keeping the query out of requests to Flashbang is more important than redirect speed.
 
 ### Browser quirks
 
