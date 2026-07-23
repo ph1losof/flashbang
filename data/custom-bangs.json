@@ -299,5 +299,685 @@
     "name": "Webtender",
     "url": "https://www.webtender.com/cgi-bin/search?verbose=on&name={}",
     "domain": "www.webtender.com"
+  },
+  "1337x": {
+    "name": "1337x",
+    "url": "https://1337x.to/search/{}/1/",
+    "domain": "1337x.to"
+  },
+  "1x": {
+    "name": "1x",
+    "url": "https://1x.com/search/{}",
+    "domain": "1x.com"
+  },
+  "360sov": {
+    "name": "360Search Videos",
+    "url": "https://tv.360kan.com/s?q={}",
+    "domain": "tv.360kan.com"
+  },
+  "acf": {
+    "name": "AcFun",
+    "url": "https://www.acfun.cn/search?keyword={}",
+    "domain": "www.acfun.cn"
+  },
+  "ans": {
+    "name": "ANSA",
+    "url": "https://www.ansa.it/ricerca/ansait/search.shtml?any={}",
+    "domain": "www.ansa.it"
+  },
+  "arc": {
+    "name": "Art Institute of Chicago",
+    "url": "https://www.artic.edu/search/artworks?q={}",
+    "domain": "www.artic.edu"
+  },
+  "asv": {
+    "name": "Adobe Stock Video",
+    "url": "https://stock.adobe.com/search/video?k={}",
+    "domain": "stock.adobe.com"
+  },
+  "ayo": {
+    "name": "Ayo",
+    "url": "https://search.ayo.de/search?q={}",
+    "domain": "search.ayo.de"
+  },
+  "bdk": {
+    "name": "Baidu Kaifa",
+    "url": "https://kaifa.baidu.com/searchPage?wd={}",
+    "domain": "kaifa.baidu.com"
+  },
+  "bii": {
+    "name": "Bing Images",
+    "url": "https://www.bing.com/images/search?q={}",
+    "domain": "www.bing.com"
+  },
+  "bit": {
+    "name": "BitChute",
+    "url": "https://www.bitchute.com/search/?query={}",
+    "domain": "www.bitchute.com"
+  },
+  "biv": {
+    "name": "Bing Videos",
+    "url": "https://www.bing.com/videos/search?q={}",
+    "domain": "www.bing.com"
+  },
+  "boa": {
+    "name": "Boardreader",
+    "url": "https://boardreader.com/s/{}.html",
+    "domain": "boardreader.com"
+  },
+  "brimg": {
+    "name": "Brave Images",
+    "url": "https://search.brave.com/images?q={}",
+    "domain": "search.brave.com"
+  },
+  "brnews": {
+    "name": "Brave News",
+    "url": "https://search.brave.com/news?q={}",
+    "domain": "search.brave.com"
+  },
+  "brvid": {
+    "name": "Brave Videos",
+    "url": "https://search.brave.com/videos?q={}",
+    "domain": "search.brave.com"
+  },
+  "bt4g": {
+    "name": "BT4G",
+    "url": "https://bt4gprx.com/search?q={}",
+    "domain": "bt4gprx.com"
+  },
+  "caddy": {
+    "name": "Caddy Community",
+    "url": "https://caddy.community/search?q={}",
+    "domain": "caddy.community"
+  },
+  "chinaso": {
+    "name": "ChinaSo News",
+    "url": "https://www.chinaso.com/newssearch/all/allResults?q={}",
+    "domain": "www.chinaso.com"
+  },
+  "ddgw": {
+    "name": "DuckDuckGo Web",
+    "url": "https://duckduckgo.com/?q={}&ia=web",
+    "domain": "duckduckgo.com"
+  },
+  "ddv": {
+    "name": "DuckDuckGo Videos",
+    "url": "https://duckduckgo.com/?q={}&ia=videos&iax=videos",
+    "domain": "duckduckgo.com"
+  },
+  "destat": {
+    "name": "Destatis",
+    "url": "https://www.destatis.de/SiteGlobals/Forms/Suche/Expertensuche_Formular.html?templateQueryString={}",
+    "domain": "www.destatis.de"
+  },
+  "dogi": {
+    "name": "Dogpile Images",
+    "url": "https://www.dogpile.com/images?q={}",
+    "domain": "www.dogpile.com"
+  },
+  "dogn": {
+    "name": "Dogpile News",
+    "url": "https://www.dogpile.com/news?q={}",
+    "domain": "www.dogpile.com"
+  },
+  "dogv": {
+    "name": "Dogpile Videos",
+    "url": "https://www.dogpile.com/videos?q={}",
+    "domain": "www.dogpile.com"
+  },
+  "dpy": {
+    "name": "Discuss Python",
+    "url": "https://discuss.python.org/search?q={}",
+    "domain": "discuss.python.org"
+  },
+  "du": {
+    "name": "Duden",
+    "url": "https://www.duden.de/suchen/dudenonline/{}",
+    "domain": "www.duden.de"
+  },
+  "fif": {
+    "name": "FindFiles",
+    "url": "https://findfiles.net/en/serp/all/?query={}",
+    "domain": "findfiles.net"
+  },
+  "fifi": {
+    "name": "FindFiles Images",
+    "url": "https://findfiles.net/en/serp/image/?query={}",
+    "domain": "findfiles.net"
+  },
+  "fifm": {
+    "name": "FindFiles Music",
+    "url": "https://findfiles.net/en/serp/audio/?query={}",
+    "domain": "findfiles.net"
+  },
+  "fifv": {
+    "name": "FindFiles Videos",
+    "url": "https://findfiles.net/en/serp/video/?query={}",
+    "domain": "findfiles.net"
+  },
+  "fire": {
+    "name": "Fireball",
+    "url": "https://fireball.com/search?f=web&q={}",
+    "domain": "fireball.com"
+  },
+  "firen": {
+    "name": "Fireball News",
+    "url": "https://fireball.com/search?f=news&q={}",
+    "domain": "fireball.com"
+  },
+  "firev": {
+    "name": "Fireball Videos",
+    "url": "https://fireball.com/?f=videos&q={}",
+    "domain": "fireball.com"
+  },
+  "fla": {
+    "name": "Flickr",
+    "url": "https://www.flickr.com/search/?text={}",
+    "domain": "www.flickr.com"
+  },
+  "fli": {
+    "name": "Flaticon",
+    "url": "https://www.flaticon.com/search?word={}",
+    "domain": "www.flaticon.com"
+  },
+  "frk": {
+    "name": "Frinkiac",
+    "url": "https://frinkiac.com/?q={}",
+    "domain": "frinkiac.com"
+  },
+  "ftm": {
+    "name": "FindThatMeme",
+    "url": "https://findthatmeme.com/?search={}",
+    "domain": "findthatmeme.com"
+  },
+  "fy": {
+    "name": "fyyd",
+    "url": "https://fyyd.de/search?search={}",
+    "domain": "fyyd.de"
+  },
+  "fynd": {
+    "name": "Fynd",
+    "url": "https://fynd.bot/?search={}",
+    "domain": "fynd.bot"
+  },
+  "gitea": {
+    "name": "Gitea.com",
+    "url": "https://gitea.com/explore/repos?q={}",
+    "domain": "gitea.com"
+  },
+  "goc": {
+    "name": "Google CSE",
+    "url": "https://cse.google.com/cse?cx=partner-pub-8993703457585266:4862972284&q={}",
+    "domain": "cse.google.com"
+  },
+  "goi": {
+    "name": "Google Images",
+    "url": "https://www.google.com/search?tbm=isch&q={}",
+    "domain": "www.google.com"
+  },
+  "gon": {
+    "name": "Google News",
+    "url": "https://news.google.com/search?q={}",
+    "domain": "news.google.com"
+  },
+  "he": {
+    "name": "Heexy",
+    "url": "https://heexy.org/search?q={}&source=opensearch",
+    "domain": "heexy.org"
+  },
+  "hf": {
+    "name": "Hugging Face Models",
+    "url": "https://huggingface.co/models?search={}",
+    "domain": "huggingface.co"
+  },
+  "ifs": {
+    "name": "InfoSpace",
+    "url": "https://search.infospace.com/serp?q={}",
+    "domain": "search.infospace.com"
+  },
+  "iq": {
+    "name": "iQIYI",
+    "url": "https://www.iqiyi.com/so/q_{}",
+    "domain": "www.iqiyi.com"
+  },
+  "koz": {
+    "name": "Kozmonavt",
+    "url": "https://kozmonavt.su/s?q={}",
+    "domain": "kozmonavt.su"
+  },
+  "kuk": {
+    "name": "Kukei",
+    "url": "https://kukei.eu/?q={}",
+    "domain": "kukei.eu"
+  },
+  "leco": {
+    "name": "Lemmy Communities",
+    "url": "https://lemmy.ml/search?q={}&type=Communities",
+    "domain": "lemmy.ml"
+  },
+  "lecom": {
+    "name": "Lemmy Comments",
+    "url": "https://lemmy.ml/search?q={}&type=Comments",
+    "domain": "lemmy.ml"
+  },
+  "lepo": {
+    "name": "Lemmy Posts",
+    "url": "https://lemmy.ml/search?q={}&type=Posts",
+    "domain": "lemmy.ml"
+  },
+  "leus": {
+    "name": "Lemmy Users",
+    "url": "https://lemmy.ml/search?q={}&type=Users",
+    "domain": "lemmy.ml"
+  },
+  "lo": {
+    "name": "Lobsters",
+    "url": "https://lobste.rs/search?q={}&what=stories&order=relevance",
+    "domain": "lobste.rs"
+  },
+  "lrs": {
+    "name": "lib.rs",
+    "url": "https://lib.rs/search?q={}",
+    "domain": "lib.rs"
+  },
+  "luc": {
+    "name": "Lucide Icons",
+    "url": "https://lucide.dev/icons/?search={}",
+    "domain": "lucide.dev"
+  },
+  "luxi": {
+    "name": "Luxxle Images",
+    "url": "https://luxxle.com/luximages?q={}",
+    "domain": "luxxle.com"
+  },
+  "luxn": {
+    "name": "Luxxle News",
+    "url": "https://luxxle.com/luxnews?q={}",
+    "domain": "luxxle.com"
+  },
+  "luxv": {
+    "name": "Luxxle Videos",
+    "url": "https://luxxle.com/luxvideos?q={}",
+    "domain": "luxxle.com"
+  },
+  "mah": {
+    "name": "Mastodon Hashtags",
+    "url": "https://mastodon.social/search?q={}&type=hashtags",
+    "domain": "mastodon.social"
+  },
+  "mau": {
+    "name": "Mastodon Users",
+    "url": "https://mastodon.social/search?q={}&type=accounts",
+    "domain": "mastodon.social"
+  },
+  "mjk": {
+    "name": "Mojeek",
+    "url": "https://www.mojeek.com/search?q={}",
+    "domain": "www.mojeek.com"
+  },
+  "mjkimg": {
+    "name": "Mojeek Images",
+    "url": "https://www.mojeek.com/search?q={}&fmt=images",
+    "domain": "www.mojeek.com"
+  },
+  "mjknews": {
+    "name": "Mojeek News",
+    "url": "https://www.mojeek.com/search?q={}&fmt=news",
+    "domain": "www.mojeek.com"
+  },
+  "msl": {
+    "name": "Microsoft Learn",
+    "url": "https://learn.microsoft.com/en-us/search/?terms={}",
+    "domain": "learn.microsoft.com"
+  },
+  "mvw": {
+    "name": "MediathekViewWeb",
+    "url": "https://mediathekviewweb.de/#query={}",
+    "domain": "mediathekviewweb.de"
+  },
+  "nixw": {
+    "name": "NixOS Wiki",
+    "url": "https://wiki.nixos.org/w/index.php?search={}",
+    "domain": "wiki.nixos.org"
+  },
+  "nvr": {
+    "name": "NAVER",
+    "url": "https://search.naver.com/search.naver?where=web&query={}",
+    "domain": "search.naver.com"
+  },
+  "nvri": {
+    "name": "NAVER Images",
+    "url": "https://search.naver.com/search.naver?where=image&query={}",
+    "domain": "search.naver.com"
+  },
+  "nvrn": {
+    "name": "NAVER News",
+    "url": "https://search.naver.com/search.naver?where=news&query={}",
+    "domain": "search.naver.com"
+  },
+  "nvrv": {
+    "name": "NAVER Videos",
+    "url": "https://search.naver.com/search.naver?where=video&query={}",
+    "domain": "search.naver.com"
+  },
+  "oa": {
+    "name": "OpenAlex",
+    "url": "https://openalex.org/works?search={}",
+    "domain": "openalex.org"
+  },
+  "oap": {
+    "name": "OpenAIRE Publications",
+    "url": "https://explore.openaire.eu/search/find/research-outcomes?type=%22publication%22&keyword={}",
+    "domain": "explore.openaire.eu"
+  },
+  "ocl": {
+    "name": "OpenClipart",
+    "url": "https://openclipart.org/search/?query={}",
+    "domain": "openclipart.org"
+  },
+  "ollama": {
+    "name": "Ollama",
+    "url": "https://ollama.com/search?q={}",
+    "domain": "ollama.com"
+  },
+  "opv": {
+    "name": "Openverse",
+    "url": "https://openverse.org/search/image?q={}",
+    "domain": "openverse.org"
+  },
+  "pdia": {
+    "name": "Public Domain Image Archive",
+    "url": "https://pdimagearchive.org/search/?q={}",
+    "domain": "pdimagearchive.org"
+  },
+  "pgo": {
+    "name": "Go Package Reference",
+    "url": "https://pkg.go.dev/search?q={}",
+    "domain": "pkg.go.dev"
+  },
+  "pixi": {
+    "name": "Pixabay Images",
+    "url": "https://pixabay.com/images/search/{}/",
+    "domain": "pixabay.com"
+  },
+  "pixv": {
+    "name": "Pixabay Videos",
+    "url": "https://pixabay.com/videos/search/{}/",
+    "domain": "pixabay.com"
+  },
+  "poc": {
+    "name": "Podchaser",
+    "url": "https://www.podchaser.com/search/podcasts/q/{}",
+    "domain": "www.podchaser.com"
+  },
+  "ppd": {
+    "name": "Piped Videos",
+    "url": "https://piped.video/results?search_query={}&filter=videos",
+    "domain": "piped.video"
+  },
+  "ppdm": {
+    "name": "Piped Music",
+    "url": "https://piped.video/results?search_query={}&filter=music_songs",
+    "domain": "piped.video"
+  },
+  "psimg": {
+    "name": "Presearch Images",
+    "url": "https://presearch.com/images?q={}",
+    "domain": "presearch.com"
+  },
+  "psnews": {
+    "name": "Presearch News",
+    "url": "https://presearch.com/news?q={}",
+    "domain": "presearch.com"
+  },
+  "pst": {
+    "name": "Il Post",
+    "url": "https://www.ilpost.it/cerca/?qs={}",
+    "domain": "www.ilpost.it"
+  },
+  "psvid": {
+    "name": "Presearch Videos",
+    "url": "https://presearch.com/videos?q={}",
+    "domain": "presearch.com"
+  },
+  "ptb": {
+    "name": "PeerTube",
+    "url": "https://peer.tube/search?search={}",
+    "domain": "peer.tube"
+  },
+  "pwi": {
+    "name": "PrivacyWall Images",
+    "url": "https://www.privacywall.org/images/?q={}",
+    "domain": "www.privacywall.org"
+  },
+  "qk": {
+    "name": "Quark",
+    "url": "https://quark.sm.cn/s?q={}",
+    "domain": "quark.sm.cn"
+  },
+  "qki": {
+    "name": "Quark Images",
+    "url": "https://m.quark.cn/vsearch/picture?q={}",
+    "domain": "m.quark.cn"
+  },
+  "rbg": {
+    "name": "RubyGems",
+    "url": "https://rubygems.org/search?query={}",
+    "domain": "rubygems.org"
+  },
+  "re": {
+    "name": "Reddit",
+    "url": "https://www.reddit.com/search/?q={}",
+    "domain": "www.reddit.com"
+  },
+  "reh": {
+    "name": "Result Hunter",
+    "url": "https://resulthunter.com/search?q={}&search_type=web",
+    "domain": "resulthunter.com"
+  },
+  "rehi": {
+    "name": "Result Hunter Images",
+    "url": "https://resulthunter.com/search?q={}&search_type=images",
+    "domain": "resulthunter.com"
+  },
+  "rel": {
+    "name": "Reloado",
+    "url": "https://reloado.com/search?q={}",
+    "domain": "reloado.com"
+  },
+  "scr": {
+    "name": "SensCritique",
+    "url": "https://www.senscritique.com/recherche?query={}",
+    "domain": "www.senscritique.com"
+  },
+  "sina": {
+    "name": "Sina Search",
+    "url": "https://search.sina.com.cn/?q={}",
+    "domain": "search.sina.com.cn"
+  },
+  "sogoui": {
+    "name": "Sogou Images",
+    "url": "https://pic.sogou.com/pics?query={}",
+    "domain": "pic.sogou.com"
+  },
+  "sogouv": {
+    "name": "Sogou Videos",
+    "url": "https://v.sogou.com/v?query={}",
+    "domain": "v.sogou.com"
+  },
+  "sogouw": {
+    "name": "Sogou WeChat",
+    "url": "https://weixin.sogou.com/weixin?type=2&query={}",
+    "domain": "weixin.sogou.com"
+  },
+  "solid": {
+    "name": "BitSearch",
+    "url": "https://bitsearch.to/search?q={}",
+    "domain": "bitsearch.to"
+  },
+  "spnli": {
+    "name": "Startpagina Images",
+    "url": "https://startgoogle.startpagina.nl/images/?query={}",
+    "domain": "startgoogle.startpagina.nl"
+  },
+  "spnln": {
+    "name": "Startpagina News",
+    "url": "https://startgoogle.startpagina.nl/news/?query={}",
+    "domain": "startgoogle.startpagina.nl"
+  },
+  "spnlv": {
+    "name": "Startpagina Videos",
+    "url": "https://startgoogle.startpagina.nl/videos/?query={}",
+    "domain": "startgoogle.startpagina.nl"
+  },
+  "srht": {
+    "name": "SourceHut",
+    "url": "https://sr.ht/projects?search={}&sort=recently-updated",
+    "domain": "sr.ht"
+  },
+  "std": {
+    "name": "SearchToday",
+    "url": "https://info.searchtoday.site/serp?q={}",
+    "domain": "info.searchtoday.site"
+  },
+  "sto": {
+    "name": "StockSnap",
+    "url": "https://stocksnap.io/search/{}",
+    "domain": "stocksnap.io"
+  },
+  "swn": {
+    "name": "Swisscows News",
+    "url": "https://swisscows.com/en/news?query={}",
+    "domain": "swisscows.com"
+  },
+  "swv": {
+    "name": "Swisscows Videos",
+    "url": "https://swisscows.com/en/video?query={}",
+    "domain": "swisscows.com"
+  },
+  "sznw": {
+    "name": "SearchZee News",
+    "url": "https://searchzee.com/?q={}&type=news",
+    "domain": "searchzee.com"
+  },
+  "tin": {
+    "name": "TinEye",
+    "url": "https://tineye.com/search?url={}",
+    "domain": "tineye.com"
+  },
+  "toli": {
+    "name": "T-Online Images",
+    "url": "https://suche.t-online.de/images?q={}",
+    "domain": "suche.t-online.de"
+  },
+  "tolv": {
+    "name": "T-Online Videos",
+    "url": "https://suche.t-online.de/videos?q={}",
+    "domain": "suche.t-online.de"
+  },
+  "toot": {
+    "name": "Tootfinder",
+    "url": "https://www.tootfinder.ch/?query={}",
+    "domain": "www.tootfinder.ch"
+  },
+  "tpb": {
+    "name": "The Pirate Bay",
+    "url": "https://thepiratebay.org/search.php?q={}",
+    "domain": "thepiratebay.org"
+  },
+  "tui": {
+    "name": "TUSK Search Images",
+    "url": "https://tusksearch.com/images?q={}",
+    "domain": "tusksearch.com"
+  },
+  "uno": {
+    "name": "Unobtanium",
+    "url": "https://unobtanium.rocks/search?search={}",
+    "domain": "unobtanium.rocks"
+  },
+  "vm": {
+    "name": "Vimeo",
+    "url": "https://vimeo.com/search?q={}",
+    "domain": "vimeo.com"
+  },
+  "vu": {
+    "name": "Vuhuv",
+    "url": "https://vuhuv.com/?q={}",
+    "domain": "vuhuv.com"
+  },
+  "vui": {
+    "name": "Vuhuv Images",
+    "url": "https://vuhuv.com/?q=.image+{}",
+    "domain": "vuhuv.com"
+  },
+  "vuv": {
+    "name": "Vuhuv Videos",
+    "url": "https://vuhuv.com/?q=.video+{}",
+    "domain": "vuhuv.com"
+  },
+  "waa": {
+    "name": "Wolfram|Alpha",
+    "url": "https://www.wolframalpha.com/input?i={}",
+    "domain": "www.wolframalpha.com"
+  },
+  "wcf": {
+    "name": "Wikimedia Commons Files",
+    "url": "https://commons.wikimedia.org/w/index.php?search=filetype%3Amultimedia%7Coffice%7Carchive%7C3d+{}",
+    "domain": "commons.wikimedia.org"
+  },
+  "wib": {
+    "name": "Wiby",
+    "url": "https://wiby.me/?q={}",
+    "domain": "wiby.me"
+  },
+  "wkmn": {
+    "name": "Wikimini",
+    "url": "https://fr.wikimini.org/w/index.php?search={}&title=Sp%C3%A9cial%3ASearch&fulltext=Search",
+    "domain": "fr.wikimini.org"
+  },
+  "wnik": {
+    "name": "Wordnik",
+    "url": "https://www.wordnik.com/words/{}",
+    "domain": "www.wordnik.com"
+  },
+  "woxi": {
+    "name": "Woxikon Synonyms",
+    "url": "https://synonyme.woxikon.de/synonyme/{}.php",
+    "domain": "synonyme.woxikon.de"
+  },
+  "wsp": {
+    "name": "Wikispecies",
+    "url": "https://species.wikimedia.org/w/index.php?search={}",
+    "domain": "species.wikimedia.org"
+  },
+  "xo": {
+    "name": "Xonaly",
+    "url": "https://xonaly.com/?query={}",
+    "domain": "xonaly.com"
+  },
+  "ydi": {
+    "name": "Yandex Images",
+    "url": "https://yandex.com/images/search?text={}",
+    "domain": "yandex.com"
+  },
+  "ydm": {
+    "name": "Yandex Music",
+    "url": "https://music.yandex.com/search?text={}",
+    "domain": "music.yandex.com"
+  },
+  "yhn": {
+    "name": "Yahoo News",
+    "url": "https://news.search.yahoo.com/search?p={}",
+    "domain": "news.search.yahoo.com"
+  },
+  "yta": {
+    "name": "YouTube",
+    "url": "https://www.youtube.com/results?search_query={}",
+    "domain": "www.youtube.com"
+  },
+  "zpm": {
+    "name": "ZapMeta",
+    "url": "https://www.zapmeta.com/search?q={}",
+    "domain": "www.zapmeta.com"
   }
 }
