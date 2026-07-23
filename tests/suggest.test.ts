@@ -295,20 +295,6 @@ describe("parseCookie", () => {
     });
   });
 
-  test("legacy unprefixed frecency section is ignored", () => {
-    const s = parseCookie(req("suggest=google,g,|gh:50.yt:30.w:12"));
-    expect(s.frecent).toEqual({});
-    expect(s.custom).toEqual([]);
-  });
-
-  test("legacy unprefixed context sections are ignored", () => {
-    const s = parseCookie(
-      req("suggest=google,g,|gh:50.yt:30|test8.mysite.proj")
-    );
-    expect(s.frecent).toEqual({});
-    expect(s.custom).toEqual([]);
-  });
-
   test("unified suggest format parses frecency and custom together", () => {
     const cookie = `suggest=custom,ddg,https%3A%2F%2Fapi.example.com%2Fsuggest%3Fq%3D%7B%7D|f:mdn:20,gh:3|c:${encodeURIComponent(JSON.stringify(["my.site", "repo"]))}`;
     const s = parseCookie(req(cookie));
@@ -333,48 +319,13 @@ describe("parseCookie", () => {
     }
   });
 
-  test("backward compat: old cookie format without | parses identically", () => {
+  test("cookie without optional context parses core settings", () => {
     const s = parseCookie(req("suggest=google,ddg,https%3A%2F%2Fexample.com"));
     expect(s.provider).toBe("google");
     expect(s.trigger).toBe("ddg");
     expect(s.customUrl).toBe("https://example.com");
     expect(s.frecent).toEqual({});
     expect(s.custom).toEqual([]);
-  });
-
-  test("empty frecency and custom sections", () => {
-    const s = parseCookie(req("suggest=google,g,||"));
-    expect(s.frecent).toEqual({});
-    expect(s.custom).toEqual([]);
-  });
-
-  test("legacy sf cookie is ignored", () => {
-    const s = parseCookie(req("suggest=google,g,|gh:10.yt:5; sf=w:50.b:30"));
-    expect(s.frecent).toEqual({});
-    expect(s.provider).toBe("google");
-    expect(s.trigger).toBe("g");
-  });
-
-  test("legacy sf and unprefixed suggest sections are ignored", () => {
-    const s = parseCookie(
-      req("sf=ddg:100.g:80; suggest=brave,b,|mdn:20|mysite")
-    );
-    expect(s.frecent).toEqual({});
-    expect(s.provider).toBe("brave");
-    expect(s.trigger).toBe("b");
-    expect(s.custom).toEqual([]);
-  });
-
-  test("unified suggest sections are used while legacy sf is ignored", () => {
-    const s = parseCookie(
-      req(
-        `sf=ddg:100.g:80; suggest=brave,b,|f:meta:9|c:${encodeURIComponent(JSON.stringify(["mysite"]))}`
-      )
-    );
-    expect(s.frecent).toEqual({ meta: 9 });
-    expect(s.custom).toEqual(["mysite"]);
-    expect(s.provider).toBe("brave");
-    expect(s.trigger).toBe("b");
   });
 
   test("suggest cookie accepts compact and padded separators", () => {
@@ -388,17 +339,6 @@ describe("parseCookie", () => {
     expect(padded.trigger).toBe("g");
     expect(leading.provider).toBe("google");
     expect(leading.trigger).toBe("g");
-  });
-
-  test("legacy suggest context is normalized on next response", () => {
-    const { settings, rewrittenSuggestCookie } =
-      parseSettingsFromRawUrlWithCleanup(
-        "http://localhost/suggest?q=cats",
-        req("suggest=google,g,|gh:10.yt:5|")
-      );
-    expect(settings.frecent).toEqual({});
-    expect(settings.custom).toEqual([]);
-    expect(rewrittenSuggestCookie).toBe("google,g,");
   });
 
   test("malformed suggest context is normalized", () => {
@@ -528,7 +468,7 @@ describe("readQueryParam", () => {
 });
 
 describe("suggest JSON serialization", () => {
-  test("matches legacy payload shape for escaped values", async () => {
+  test("preserves the OpenSearch payload shape for escaped values", async () => {
     const query = 'line1\nline2 "quoted" \\ slash';
     const prefix = 'cats "';
     const candidates = [
