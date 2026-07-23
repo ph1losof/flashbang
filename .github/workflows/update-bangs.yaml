@@ -42,6 +42,16 @@ jobs:
             echo "changed=true" >> $GITHUB_OUTPUT
           fi
 
+      - name: Summarize changes
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          PR_BODY: ${{ runner.temp }}/update-bangs-pr.md
+          PREVIOUS_BANGS: ${{ runner.temp }}/previous-bangs.json
+        run: |
+          git show HEAD:data/bangs.json > "$PREVIOUS_BANGS"
+          bun scripts/summarize-bang-update.ts \
+            "$PREVIOUS_BANGS" data/bangs.json > "$PR_BODY"
+
       - name: Install Playwright browsers
         if: steps.diff.outputs.changed == 'true'
         run: bunx playwright install --with-deps chromium firefox webkit
@@ -67,6 +77,7 @@ jobs:
         if: steps.diff.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_BODY: ${{ runner.temp }}/update-bangs-pr.md
         run: |
           set -euo pipefail
           branch="automation/update-bangs"
@@ -85,13 +96,18 @@ jobs:
             gh pr edit "$pr" --repo "$GITHUB_REPOSITORY" \
               --base master \
               --title "chore: update bangs" \
-              --body "Automated daily update of the merged DuckDuckGo and Kagi bang data."
+              --body-file "$PR_BODY"
           else
-            gh pr create --repo "$GITHUB_REPOSITORY" \
+            pr="$(gh pr create --repo "$GITHUB_REPOSITORY" \
               --base master \
               --head "$branch" \
               --title "chore: update bangs" \
-              --body "Automated daily update of the merged DuckDuckGo and Kagi bang data."
+              --body-file "$PR_BODY")"
           fi
 
           gh workflow run ci.yaml --repo "$GITHUB_REPOSITORY" --ref "$branch"
+          gh pr merge "$pr" --repo "$GITHUB_REPOSITORY" \
+            --auto \
+            --merge \
+            --delete-branch \
+            --match-head-commit "$(git rev-parse HEAD)"
