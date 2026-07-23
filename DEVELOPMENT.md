@@ -55,7 +55,8 @@ flashbang/
 │   ├── inline-script-hash.ts # Shared inline-script CSP hash extraction
 │   ├── profile.ts            # Profiling script
 │   ├── shared.ts             # Shared HTML and static-asset build helpers
-│   └── start.ts              # Production server (serves pre-built dist/)
+│   ├── start.ts              # Production server (serves pre-built dist/)
+│   └── summarize-bang-update.ts # Daily bang-update change summary generator
 ├── data/
 │   ├── bangs.json            # Merged bang data (committed, updated by daily automation)
 │   └── custom-bangs.json     # Custom bang definitions
