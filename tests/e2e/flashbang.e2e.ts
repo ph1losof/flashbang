@@ -1623,30 +1623,44 @@ test("first fallback seeds the worker for the next offline redirect", async ({
       }
     });
 
-    await page.goto("/health");
+    await page.goto("/health", { waitUntil: "domcontentloaded" });
+    const probe = await context.newPage();
+    await mockGoogleSearchRoute(probe);
+    await probe.goto("/health", { waitUntil: "domcontentloaded" });
+
     await navigateAndWaitForRedirect(
       page,
       "/?q=%21g%20first",
       /google\.com\/search\?q=first/
     );
 
-    const probe = await context.newPage();
-    await mockGoogleSearchRoute(probe);
-    await probe.goto("/health");
     await probe.evaluate(async () => {
       const registration = await navigator.serviceWorker.ready;
       if (navigator.serviceWorker.controller) {
         return;
       }
-      registration.active?.postMessage({ type: "claim" });
+      const worker = registration.active;
+      if (!worker) {
+        throw new Error("active service worker not found");
+      }
       await new Promise<void>((resolve) => {
+        const onControllerChange = () => resolve();
         navigator.serviceWorker.addEventListener(
           "controllerchange",
-          () => resolve(),
+          onControllerChange,
           {
             once: true,
           }
         );
+        if (navigator.serviceWorker.controller) {
+          navigator.serviceWorker.removeEventListener(
+            "controllerchange",
+            onControllerChange
+          );
+          resolve();
+          return;
+        }
+        worker.postMessage({ type: "claim" });
       });
     });
     await expect
