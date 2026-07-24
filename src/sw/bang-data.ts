@@ -72,11 +72,7 @@ function matchesTrigger(
   length: number
 ): boolean {
   for (let i = 0; i < length; i++) {
-    let code = raw.charCodeAt(rawStart + i);
-    if (code >= 65 && code <= 90) {
-      code |= 32;
-    }
-    if (code !== bytes[byteStart + i]) {
+    if (raw.charCodeAt(rawStart + i) !== bytes[byteStart + i]) {
       return false;
     }
   }
