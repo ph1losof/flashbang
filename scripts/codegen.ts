@@ -62,10 +62,23 @@ const CUSTOM_BANGS_PATH = `${DATA_DIR}/custom-bangs.json`;
 const MERGED_BANGS_PATH = `${DATA_DIR}/bangs.json`;
 const GENERATED_OUT_DIR = "src/generated";
 const HOT_BANG_LIMIT = 24;
+const BANG_BINARY_MAGIC = 0x31424246;
+const BANG_BINARY_VERSION = 7;
 
 const DDG_SOURCE_URL = "https://duckduckgo.com/bang.js";
 const KAGI_SOURCE_URL =
   "https://raw.githubusercontent.com/kagisearch/bangs/main/data/bangs.json";
+
+async function generatedBangBinaryIsCurrent(): Promise<boolean> {
+  const header = await Bun.file(GENERATED_BANG_DATA_FILES[0])
+    .slice(0, 8)
+    .arrayBuffer();
+  if (header.byteLength !== 8) {
+    return false;
+  }
+  const words = new Uint32Array(header);
+  return words[0] === BANG_BINARY_MAGIC && words[1] === BANG_BINARY_VERSION;
+}
 
 export async function ensureGeneratedBangData(
   fromMerged = true
@@ -77,14 +90,15 @@ export async function ensureGeneratedBangData(
     }
   }
 
-  if (missing.length === 0) {
+  if (missing.length === 0 && (await generatedBangBinaryIsCurrent())) {
     return;
   }
 
   const mode = fromMerged ? " --from-merged" : "";
-  console.warn(
-    `Generated bang data missing (${missing.join(", ")}). Running codegen${mode}...`
-  );
+  const reason = missing.length
+    ? `missing (${missing.join(", ")})`
+    : "uses an outdated binary format";
+  console.warn(`Generated bang data ${reason}. Running codegen${mode}...`);
 
   if (fromMerged) {
     await $`bun run codegen --from-merged`;
@@ -98,6 +112,9 @@ export async function ensureGeneratedBangData(
         `Missing generated bang data after codegen: ${GENERATED_BANG_DATA_FILES.join(", ")}`
       );
     }
+  }
+  if (!(await generatedBangBinaryIsCurrent())) {
+    throw new Error("Generated bang binary format is outdated");
   }
 }
 
@@ -504,6 +521,56 @@ function align2(value: number): number {
   return (value + 1) & ~1;
 }
 
+function align4(value: number): number {
+  return (value + 3) & ~3;
+}
+
+const BANG_CHECKPOINT_SIZE = 16;
+const PREFIX_LENGTH_MASK = 0x1fff;
+const PREFIX_WWW_FLAG = 0x2000;
+const PREFIX_SCHEME_SHIFT = 14;
+
+function buildCheckpoints(
+  lengths: Uint8Array | Uint16Array,
+  lengthMask = 0xffff
+): Uint32Array {
+  const checkpoints = new Uint32Array(
+    Math.ceil(lengths.length / BANG_CHECKPOINT_SIZE)
+  );
+  let position = 0;
+  for (let i = 0; i < lengths.length; i++) {
+    if (i % BANG_CHECKPOINT_SIZE === 0) {
+      checkpoints[i / BANG_CHECKPOINT_SIZE] = position;
+    }
+    position += lengths[i] & lengthMask;
+  }
+  return checkpoints;
+}
+
+function buildPairLocalOffsets(
+  lengths: Uint8Array | Uint16Array,
+  lengthMask = 0xffff
+): Uint8Array {
+  const offsets = new Uint8Array(Math.ceil(lengths.length / 2));
+  let position = 0;
+  for (let i = 0; i < lengths.length; i += 2) {
+    if (i % BANG_CHECKPOINT_SIZE === 0) {
+      position = 0;
+    }
+    if (position > 0xff) {
+      throw new Error(
+        `Binary bang trigger checkpoint block requires offset <= 255, got ${position}`
+      );
+    }
+    offsets[i >> 1] = position;
+    position += lengths[i] & lengthMask;
+    if (i + 1 < lengths.length) {
+      position += lengths[i + 1] & lengthMask;
+    }
+  }
+  return offsets;
+}
+
 interface PackedBangData {
   entryCount: number;
   prefixIds: number[];
@@ -511,7 +578,6 @@ interface PackedBangData {
   triggers: string[];
   uniquePrefixes: string[];
   uniqueSuffixes: string[];
-  prefixBlob: ReturnType<typeof packBlob>;
   suffixBlob: ReturnType<typeof packBlob>;
 }
 
@@ -580,15 +646,7 @@ function packBangData(bangs: Bang[]): PackedBangData {
     }
   }
 
-  const prefixBlob = packBlob(uniquePrefixes);
   const suffixBlob = packBlob(uniqueSuffixes);
-  for (const len of prefixBlob.lengths) {
-    if (len > 0xffff) {
-      throw new Error(
-        `Binary bang format requires prefix length <= 65535, got ${len}`
-      );
-    }
-  }
   for (const len of suffixBlob.lengths) {
     if (len > 0xffff) {
       throw new Error(
@@ -599,7 +657,6 @@ function packBangData(bangs: Bang[]): PackedBangData {
 
   return {
     entryCount,
-    prefixBlob,
     suffixBlob,
     prefixIds,
     suffixIdsPlusOne,
@@ -612,7 +669,7 @@ function packBangData(bangs: Bang[]): PackedBangData {
 function copyTypedArray(
   output: Uint8Array,
   offset: number,
-  values: Uint8Array | Uint16Array | Int16Array | Int32Array
+  values: Uint8Array | Uint16Array | Uint32Array | Int16Array | Int32Array
 ): number {
   output.set(
     new Uint8Array(values.buffer, values.byteOffset, values.byteLength),
@@ -639,7 +696,6 @@ function generateBinary(bangs: readonly Bang[]): Uint8Array {
   const triggerBlob = packBlob(triggers);
   const encoder = new TextEncoder();
   const triggerBytes = encoder.encode(triggerBlob.blob);
-  const prefixBytes = encoder.encode(packed.prefixBlob.blob);
   const suffixBytes = encoder.encode(packed.suffixBlob.blob);
   const triggerByteLengths = triggers.map(
     (trigger) => encoder.encode(trigger).byteLength
@@ -661,15 +717,35 @@ function generateBinary(bangs: readonly Bang[]): Uint8Array {
           length === triggers[index].length ? length : length | nonAsciiFlag
         );
   // URL blobs stay byte-backed in the worker and are decoded one entry at a time.
-  const prefixLengths = Uint16Array.from(packed.uniquePrefixes, (value) => {
-    const length = encoder.encode(value).byteLength;
-    if (length > 0xffff) {
-      throw new Error(
-        `Binary bang format requires encoded prefix length <= 65535, got ${length}`
-      );
+  const prefixPayloads = new Array<string>(packed.uniquePrefixes.length);
+  const prefixLengths = Uint16Array.from(
+    packed.uniquePrefixes,
+    (value, index) => {
+      let payload = value;
+      let scheme = 0;
+      if (payload.startsWith("https://")) {
+        scheme = 1;
+        payload = payload.substring(8);
+      } else if (payload.startsWith("http://")) {
+        scheme = 2;
+        payload = payload.substring(7);
+      }
+      let flags = scheme << PREFIX_SCHEME_SHIFT;
+      if (payload.startsWith("www.")) {
+        flags |= PREFIX_WWW_FLAG;
+        payload = payload.substring(4);
+      }
+      const length = encoder.encode(payload).byteLength;
+      if (length > PREFIX_LENGTH_MASK) {
+        throw new Error(
+          `Binary bang format requires encoded prefix payload length <= ${PREFIX_LENGTH_MASK}, got ${length}`
+        );
+      }
+      prefixPayloads[index] = payload;
+      return length | flags;
     }
-    return length;
-  });
+  );
+  const prefixBytes = encoder.encode(prefixPayloads.join(""));
   const suffixLengths = Uint16Array.from(packed.uniqueSuffixes, (value) => {
     const length = encoder.encode(value).byteLength;
     if (length > 0xffff) {
@@ -681,17 +757,34 @@ function generateBinary(bangs: readonly Bang[]): Uint8Array {
   });
   const prefixIds = Uint16Array.from(reorderedPrefixIds);
   const suffixIds = Uint16Array.from(reorderedSuffixIds);
+  const triggerLengthMask = triggerLengthWidth === 1 ? 0x7f : 0x7fff;
+  const triggerCheckpoints = buildCheckpoints(
+    triggerLengths,
+    triggerLengthMask
+  );
+  const triggerLocalOffsets = buildPairLocalOffsets(
+    triggerLengths,
+    triggerLengthMask
+  );
+  const prefixCheckpoints = buildCheckpoints(prefixLengths, PREFIX_LENGTH_MASK);
+  const suffixCheckpoints = buildCheckpoints(suffixLengths);
 
   const headerWords = 13;
   const headerBytes = headerWords * Uint32Array.BYTES_PER_ELEMENT;
   let numericEnd = headerBytes + mph.displacements.byteLength;
   numericEnd += triggerLengths.byteLength;
+  numericEnd += triggerLocalOffsets.byteLength;
   numericEnd = align2(numericEnd);
   numericEnd +=
     prefixLengths.byteLength +
     suffixLengths.byteLength +
     prefixIds.byteLength +
     suffixIds.byteLength;
+  numericEnd = align4(numericEnd);
+  numericEnd +=
+    triggerCheckpoints.byteLength +
+    prefixCheckpoints.byteLength +
+    suffixCheckpoints.byteLength;
   const totalBytes =
     numericEnd +
     triggerBytes.byteLength +
@@ -699,8 +792,8 @@ function generateBinary(bangs: readonly Bang[]): Uint8Array {
     suffixBytes.byteLength;
   const output = new Uint8Array(new ArrayBuffer(totalBytes));
   new Uint32Array(output.buffer, 0, headerWords).set([
-    0x31424246,
-    4,
+    BANG_BINARY_MAGIC,
+    BANG_BINARY_VERSION,
     packed.entryCount,
     mph.displacements.length,
     triggerLengths.BYTES_PER_ELEMENT,
@@ -717,11 +810,16 @@ function generateBinary(bangs: readonly Bang[]): Uint8Array {
   let offset = headerBytes;
   offset = copyTypedArray(output, offset, mph.displacements);
   offset = copyTypedArray(output, offset, triggerLengths);
+  offset = copyTypedArray(output, offset, triggerLocalOffsets);
   offset = align2(offset);
   offset = copyTypedArray(output, offset, prefixLengths);
   offset = copyTypedArray(output, offset, suffixLengths);
   offset = copyTypedArray(output, offset, prefixIds);
   offset = copyTypedArray(output, offset, suffixIds);
+  offset = align4(offset);
+  offset = copyTypedArray(output, offset, triggerCheckpoints);
+  offset = copyTypedArray(output, offset, prefixCheckpoints);
+  offset = copyTypedArray(output, offset, suffixCheckpoints);
   output.set(triggerBytes, offset);
   offset += triggerBytes.byteLength;
   output.set(prefixBytes, offset);

@@ -1,28 +1,67 @@
 export type BuiltinUrlParts = readonly [string, string | null];
 
 const MAGIC = 0x31424246;
-// Version 4 stores blob lengths as UTF-8 bytes and flags non-ASCII triggers.
-const VERSION = 4;
+const VERSION = 7;
 const HEADER_WORDS = 13;
 const HEADER_BYTES = HEADER_WORDS * Uint32Array.BYTES_PER_ELEMENT;
 const MPH_SLOT_MULTIPLIER = 0x85ebca6b;
+const CHECKPOINT_SHIFT = 4;
+const CHECKPOINT_SIZE = 1 << CHECKPOINT_SHIFT;
+const PREFIX_LENGTH_MASK = 0x1fff;
+const PREFIX_HEADS = [
+  "",
+  "www.",
+  "https://",
+  "https://www.",
+  "http://",
+  "http://www.",
+  "",
+  "",
+] as const;
 
 let lookup: ((trigger: string, hash: number) => BuiltinUrlParts | null) | null =
   null;
 const BANG_DATA_UNAVAILABLE = new Error("Binary bang data is not initialized");
 
-function offsets(
+function checkpointCount(length: number): number {
+  return Math.ceil(length / CHECKPOINT_SIZE);
+}
+
+function checkpointOffset(
   lengths: Uint8Array | Uint16Array,
+  checkpoints: Uint32Array,
+  index: number,
   lengthMask = 0xffff
-): Uint32Array {
-  const result = new Uint32Array(lengths.length + 1);
-  let position = 0;
-  for (let i = 0; i < lengths.length; i++) {
-    result[i] = position;
+): number {
+  const block = index >> CHECKPOINT_SHIFT;
+  let position = checkpoints[block];
+  const start = block << CHECKPOINT_SHIFT;
+  for (let i = start; i < index; i++) {
     position += lengths[i] & lengthMask;
   }
-  result[lengths.length] = position;
-  return result;
+  return position;
+}
+
+function validateFinalLength(
+  lengths: Uint8Array | Uint16Array,
+  checkpoints: Uint32Array,
+  expected: number,
+  lengthMask = 0xffff
+): void {
+  if (lengths.length === 0) {
+    if (expected !== 0) {
+      throw new Error("Invalid binary bang string lengths");
+    }
+    return;
+  }
+  const lastBlock = checkpoints.length - 1;
+  let position = checkpoints[lastBlock];
+  for (let i = lastBlock << CHECKPOINT_SHIFT; i < lengths.length; i++) {
+    position += lengths[i] & lengthMask;
+  }
+  if (position !== expected) {
+    throw new Error("Invalid binary bang string lengths");
+  }
 }
 
 function matchesTrigger(
@@ -89,6 +128,12 @@ export function initializeBangData(buffer: ArrayBuffer): void {
       ? new Uint8Array(buffer, offset, entryCount)
       : new Uint16Array(buffer, offset, entryCount);
   offset += triggerLengths.byteLength;
+  const triggerLocalOffsets = new Uint8Array(
+    buffer,
+    offset,
+    Math.ceil(entryCount / 2)
+  );
+  offset += triggerLocalOffsets.byteLength;
   offset = (offset + 1) & ~1;
   const prefixLengths = new Uint16Array(buffer, offset, prefixCount);
   offset += prefixLengths.byteLength;
@@ -98,6 +143,26 @@ export function initializeBangData(buffer: ArrayBuffer): void {
   offset += prefixIds.byteLength;
   const suffixIds = new Uint16Array(buffer, offset, entryCount);
   offset += suffixIds.byteLength;
+  offset = (offset + 3) & ~3;
+
+  const triggerCheckpoints = new Uint32Array(
+    buffer,
+    offset,
+    checkpointCount(entryCount)
+  );
+  offset += triggerCheckpoints.byteLength;
+  const prefixCheckpoints = new Uint32Array(
+    buffer,
+    offset,
+    checkpointCount(prefixCount)
+  );
+  offset += prefixCheckpoints.byteLength;
+  const suffixCheckpoints = new Uint32Array(
+    buffer,
+    offset,
+    checkpointCount(suffixCount)
+  );
+  offset += suffixCheckpoints.byteLength;
   if (offset !== header[10]) {
     throw new Error("Invalid binary bang data layout");
   }
@@ -109,12 +174,20 @@ export function initializeBangData(buffer: ArrayBuffer): void {
   offset += header[8];
   const suffixBlob = new Uint8Array(buffer, offset, header[9]);
 
-  const triggerOffsets = offsets(triggerLengths, triggerLengthMask);
-  if (triggerOffsets[entryCount] !== triggerBlob.length) {
-    throw new Error("Invalid binary bang trigger lengths");
-  }
-  const prefixOffsets = offsets(prefixLengths);
-  const suffixOffsets = offsets(suffixLengths);
+  validateFinalLength(
+    triggerLengths,
+    triggerCheckpoints,
+    triggerBlob.length,
+    triggerLengthMask
+  );
+  validateFinalLength(
+    prefixLengths,
+    prefixCheckpoints,
+    prefixBlob.length,
+    PREFIX_LENGTH_MASK
+  );
+  validateFinalLength(suffixLengths, suffixCheckpoints, suffixBlob.length);
+
   const prefixCache: string[] = [];
   const suffixCache: string[] = [];
   const tupleCache: BuiltinUrlParts[] = [];
@@ -123,9 +196,17 @@ export function initializeBangData(buffer: ArrayBuffer): void {
   function prefix(id: number): string {
     let value = prefixCache[id];
     if (value === undefined) {
-      value = decoder.decode(
-        prefixBlob.subarray(prefixOffsets[id], prefixOffsets[id + 1])
+      const prefixInfo = prefixLengths[id];
+      const length = prefixInfo & PREFIX_LENGTH_MASK;
+      const start = checkpointOffset(
+        prefixLengths,
+        prefixCheckpoints,
+        id,
+        PREFIX_LENGTH_MASK
       );
+      value =
+        PREFIX_HEADS[prefixInfo >>> 13] +
+        decoder.decode(prefixBlob.subarray(start, start + length));
       prefixCache[id] = value;
     }
     return value;
@@ -134,10 +215,12 @@ export function initializeBangData(buffer: ArrayBuffer): void {
   function suffix(id: number): string {
     let value = suffixCache[id];
     if (value === undefined) {
-      const start = suffixOffsets[id];
-      const end = suffixOffsets[id + 1];
+      const start = checkpointOffset(suffixLengths, suffixCheckpoints, id);
+      const length = suffixLengths[id];
       value =
-        start === end ? "" : decoder.decode(suffixBlob.subarray(start, end));
+        length === 0
+          ? ""
+          : decoder.decode(suffixBlob.subarray(start, start + length));
       suffixCache[id] = value;
     }
     return value;
@@ -168,14 +251,22 @@ export function initializeBangData(buffer: ArrayBuffer): void {
           entryCount;
     const triggerInfo = triggerLengths[index];
     const triggerLength = triggerInfo & triggerLengthMask;
-    const triggerStart = triggerOffsets[index];
-    const triggerEnd = triggerOffsets[index + 1];
+    const isAscii = triggerInfo === triggerLength;
+    if (isAscii && triggerLength !== trigger.length) {
+      return null;
+    }
+    let triggerStart =
+      triggerCheckpoints[index >> CHECKPOINT_SHIFT] +
+      triggerLocalOffsets[index >> 1];
+    if ((index & 1) !== 0) {
+      triggerStart += triggerLengths[index - 1] & triggerLengthMask;
+    }
     return (
-      triggerInfo === triggerLength
-        ? triggerLength === trigger.length &&
-          matchesTrigger(trigger, 0, triggerBlob, triggerStart, triggerLength)
-        : decoder.decode(triggerBlob.subarray(triggerStart, triggerEnd)) ===
-          trigger
+      isAscii
+        ? matchesTrigger(trigger, 0, triggerBlob, triggerStart, triggerLength)
+        : decoder.decode(
+            triggerBlob.subarray(triggerStart, triggerStart + triggerLength)
+          ) === trigger
     )
       ? tuple(index)
       : null;

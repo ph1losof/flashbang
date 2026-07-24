@@ -81,11 +81,48 @@ describe("codegen round-trip", () => {
     const binary = await Bun.file("src/generated/bangs.bin").arrayBuffer();
     const header = new Uint32Array(binary, 0, 13);
     expect(header[0]).toBe(0x31424246);
-    expect(header[1]).toBe(4);
+    expect(header[1]).toBe(7);
     expect(header[2]).toBe(bangs.filter((bang) => !bang.regex).length);
     expect(header[11]).toBe(binary.byteLength);
     expect(header[3] & (header[3] - 1)).toBe(0);
     expect([2, 4]).toContain(header[12]);
+
+    let numericEnd = 13 * Uint32Array.BYTES_PER_ELEMENT;
+    numericEnd +=
+      header[3] * header[12] + header[2] * header[4] + Math.ceil(header[2] / 2);
+    numericEnd = (numericEnd + 1) & ~1;
+    numericEnd += (header[5] + header[6] + header[2] * 2) * 2;
+    numericEnd = (numericEnd + 3) & ~3;
+    numericEnd +=
+      (Math.ceil(header[2] / 16) +
+        Math.ceil(header[5] / 16) +
+        Math.ceil(header[6] / 16)) *
+      Uint32Array.BYTES_PER_ELEMENT;
+    expect(header[10]).toBe(numericEnd);
+
+    const triggerLengthsOffset =
+      13 * Uint32Array.BYTES_PER_ELEMENT + header[3] * header[12];
+    const triggerLengths =
+      header[4] === 1
+        ? new Uint8Array(binary, triggerLengthsOffset, header[2])
+        : new Uint16Array(binary, triggerLengthsOffset, header[2]);
+    const triggerLocalOffsets = new Uint8Array(
+      binary,
+      triggerLengthsOffset + triggerLengths.byteLength,
+      Math.ceil(header[2] / 2)
+    );
+    const triggerLengthMask = header[4] === 1 ? 0x7f : 0x7fff;
+    let expectedLocalOffset = 0;
+    for (let i = 0; i < triggerLengths.length; i += 2) {
+      if (i % 16 === 0) {
+        expectedLocalOffset = 0;
+      }
+      expect(triggerLocalOffsets[i >> 1]).toBe(expectedLocalOffset);
+      expectedLocalOffset += triggerLengths[i] & triggerLengthMask;
+      if (i + 1 < triggerLengths.length) {
+        expectedLocalOffset += triggerLengths[i + 1] & triggerLengthMask;
+      }
+    }
   });
 
   test("resolves every regular bang through the perfect hash", () => {
@@ -177,6 +214,27 @@ describe("codegen round-trip", () => {
     displacements[0] = -(header[2] + 1);
     expect(() => initializeBangData(invalidDisplacement)).toThrow(
       "Invalid binary bang MPHF displacement"
+    );
+
+    const invalidCheckpoint = binary.slice(0);
+    const checkpointHeader = new Uint32Array(invalidCheckpoint, 0, 13);
+    let checkpointOffset = 13 * Uint32Array.BYTES_PER_ELEMENT;
+    checkpointOffset +=
+      checkpointHeader[3] * checkpointHeader[12] +
+      checkpointHeader[2] * checkpointHeader[4] +
+      Math.ceil(checkpointHeader[2] / 2);
+    checkpointOffset = (checkpointOffset + 1) & ~1;
+    checkpointOffset +=
+      (checkpointHeader[5] + checkpointHeader[6] + checkpointHeader[2] * 2) * 2;
+    checkpointOffset = (checkpointOffset + 3) & ~3;
+    const triggerCheckpoints = new Uint32Array(
+      invalidCheckpoint,
+      checkpointOffset,
+      Math.ceil(checkpointHeader[2] / 16)
+    );
+    triggerCheckpoints[triggerCheckpoints.length - 1]++;
+    expect(() => initializeBangData(invalidCheckpoint)).toThrow(
+      "Invalid binary bang string lengths"
     );
   });
 
