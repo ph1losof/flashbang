@@ -75,6 +75,13 @@ function requestUrl(input: RequestInfo | URL): string {
   return input.url;
 }
 
+function requiredHeaderValue(state: NavigationPreloadState): string {
+  if (state.headerValue === undefined) {
+    throw new Error("Navigation preload metadata is missing");
+  }
+  return state.headerValue;
+}
+
 function setupSwGlobals(
   requiredAppAssets: readonly string[] = [],
   preserveCaches = false,
@@ -186,7 +193,11 @@ function setupSwGlobals(
     },
   };
 
-  (globalThis as unknown as { fetch: typeof fetch }).fetch = (input) => {
+  (
+    globalThis as unknown as {
+      fetch: (input: RequestInfo | URL) => Promise<Response>;
+    }
+  ).fetch = (input) => {
     const raw =
       typeof input === "string" || input instanceof URL ? input : input.url;
     fetchCalls.push(new URL(raw, "https://flashbang.local").pathname);
@@ -573,7 +584,10 @@ describe("sw runtime with real modules", () => {
     const activate = createExtendableEvent();
     await handlers.activate?.(activate.event);
     await Promise.all(activate.waits);
-    const initial = decodeHotBootRecord(state.headerValue, "fb-test-cache")!;
+    const initial = decodeHotBootRecord(
+      requiredHeaderValue(state),
+      "fb-test-cache"
+    )!;
     expect(initial.payloadComplete).toBe(false);
     expect(initial.baseComplete).toBe(true);
     expect(
@@ -635,7 +649,10 @@ describe("sw runtime with real modules", () => {
     await handlers.message?.(end.event);
     await Promise.all(end.waits);
     expect(endReplies).toEqual([true]);
-    const updated = decodeHotBootRecord(state.headerValue, "fb-test-cache")!;
+    const updated = decodeHotBootRecord(
+      requiredHeaderValue(state),
+      "fb-test-cache"
+    )!;
     expect(redirectRawUrl(";gh+test", updated.settings!)).toBe(
       "https://custom.example/?q=test"
     );
@@ -804,7 +821,10 @@ describe("sw runtime with real modules", () => {
     expect(response.headers.get("Location")).toContain("npmjs.com");
     await Promise.all(fetchEvt.waits);
 
-    const record = decodeHotBootRecord(state.headerValue, "fb-test-cache")!;
+    const record = decodeHotBootRecord(
+      requiredHeaderValue(state),
+      "fb-test-cache"
+    )!;
     expect(Object.keys(record.frecency!)).toContain("npm");
     expect(
       redirectRawUrl("!npm+router", record.settings!, record.hotBangLookup)
@@ -849,7 +869,7 @@ describe("sw runtime with real modules", () => {
     await handlers.message?.(endB.event);
     await Promise.all(endB.waits);
     expect(
-      parseHotBootRecord(state.headerValue, "fb-test-cache")
+      parseHotBootRecord(requiredHeaderValue(state), "fb-test-cache")
     ).toBeGreaterThan(0);
   });
 

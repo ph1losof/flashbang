@@ -13,8 +13,6 @@
     "src/**/*.ts",
     "scripts/**/*.ts",
     "functions/**/*.ts",
-    "tests/redirect.test.ts",
-    "tests/frecency.test.ts",
-    "tests/raw-url.test.ts"
+    "tests/**/*.ts"
   ]
 }

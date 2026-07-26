@@ -72,7 +72,7 @@ class FakeObjectStore {
   put(value: unknown): IDBRequest<IDBValidKey> {
     const key = (value as Record<string, unknown>)[this.store.keyPath];
     this.store.records.set(String(key), clone(value));
-    return this.request(String(key));
+    return this.request<IDBValidKey>(String(key));
   }
 }
 

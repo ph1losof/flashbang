@@ -30,14 +30,18 @@ describe("bang catalog", () => {
 
   test("retries failures, then normalizes built-ins once", async () => {
     let attempts = 0;
-    const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(() => {
-      attempts++;
-      return Promise.resolve(
-        attempts === 1
-          ? new Response(null, { status: 503, statusText: "Unavailable" })
-          : new Response(Bun.file("src/generated/bangs-meta.bin"))
-      );
-    });
+    const fetchMock: typeof fetch = Object.assign(
+      () => {
+        attempts++;
+        return Promise.resolve(
+          attempts === 1
+            ? new Response(null, { status: 503, statusText: "Unavailable" })
+            : new Response(Bun.file("src/generated/bangs-meta.bin"))
+        );
+      },
+      { preconnect: () => undefined }
+    );
+    const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(fetchMock);
 
     try {
       const failed = loadBuiltinBangCatalog();
@@ -52,8 +56,11 @@ describe("bang catalog", () => {
       const catalog = await first;
       expect(catalog.entries).toHaveLength(BANG_COUNT);
       const google = catalog.byTrigger.get("g");
-      expect(google?.name).toBe("Google");
-      expect(google?.capture).toBe(false);
+      if (!google) {
+        throw new Error("Generated bang catalog is missing Google");
+      }
+      expect(google.name).toBe("Google");
+      expect(google.capture).toBe(false);
       expect(catalog.byTrigger.get("ktr")?.capture).toBe(true);
       expect(catalog.entries).toContain(google);
       expect(fetchSpy).toHaveBeenCalledWith("/bangs-meta.bin");
