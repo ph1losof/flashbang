@@ -8,7 +8,7 @@
   "scripts": {
     "codegen": "bun scripts/codegen.ts",
     "build": "bun scripts/build.ts",
-    "build:sw": "bun build src/sw/sw.ts --outdir dist --entry-naming sw.js --minify --target browser --format esm",
+    "build:sw": "bun build src/sw/sw.ts --outdir dist --entry-naming sw.js --minify --target browser --format iife",
     "build:ui": "bun -e \"import { bundleUI } from './scripts/shared.ts'; await bundleUI()\"",
     "build:css": "bun -e \"import { generateCSS } from './scripts/shared.ts'; await generateCSS()\"",
     "dev": "bun --hot scripts/dev.ts",
