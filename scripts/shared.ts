@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { minify } from "@minify-html/node";
-import { $ } from "bun";
+import { build as buildCSS } from "@unocss/cli";
 
 const CUSTOM_SUGGEST_OPTION_MARKER = "<!-- custom-suggest-provider-option -->";
 const CUSTOM_SUGGEST_OPTION = '<option value="custom">Custom</option>';
@@ -114,14 +114,17 @@ export async function bundleUI(
   };
 }
 
-export async function generateCSS(quiet = false): Promise<void> {
+export async function generateCSS(): Promise<void> {
   const output = `${DIST_DIR}/styles.css`;
-  const command = $`bunx --no-install --package @unocss/cli unocss "src/ui/home/index.html" "src/ui/bench/index.html" "src/ui/**/*.ts" -o ${output} --minify`;
-  if (quiet) {
-    await command.quiet();
-  } else {
-    await command;
-  }
+  await buildCSS({
+    patterns: [
+      "src/ui/home/index.html",
+      "src/ui/bench/index.html",
+      "src/ui/**/*.ts",
+    ],
+    outFile: output,
+    minify: true,
+  });
 }
 
 export async function buildHTMLAssets(

@@ -63,7 +63,7 @@ jobs:
             const version = process.env.RELEASE_VERSION;
             const packageJson = await Bun.file("package.json").json();
             packageJson.version = version;
-            await Bun.write("package.json", `${JSON.stringify(packageJson, null, 2)}\n`);
+            await Bun.write("package.json", JSON.stringify(packageJson, null, 2) + "\n");
           '
 
       - name: Commit and open pull request

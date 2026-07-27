@@ -64,7 +64,7 @@ async function build() {
     bundleUI(allowUnsafeCustomSuggestUrls, "/bangs-meta.bin", "fallback.js"),
   ]);
 
-  await generateCSS(true);
+  await generateCSS();
   await assembleUIAssets(
     allowUnsafeCustomSuggestUrls,
     "/bangs.bin",

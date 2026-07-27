@@ -92,11 +92,7 @@ jobs:
         run: |
           set -euo pipefail
           cid="$(docker run -d -p 127.0.0.1:3000:3000 flashbang:pr-health)"
-          cleanup() {
-            docker logs "$cid" || true
-            docker rm -f "$cid" || true
-          }
-          trap cleanup EXIT
+          trap 'docker logs "$cid" || true; docker rm -f "$cid" || true' EXIT
 
           for _ in $(seq 1 30); do
             status="$(docker inspect --format '{{.State.Health.Status}}' "$cid")"
