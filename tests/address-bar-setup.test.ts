@@ -268,7 +268,7 @@ function installDom(): void {
       handler();
     }
     return 1 as unknown as ReturnType<typeof setTimeout>;
-  }) as typeof setTimeout;
+  }) as unknown as typeof setTimeout;
   globalThis.clearTimeout = (() => undefined) as typeof clearTimeout;
 }
 
@@ -397,7 +397,7 @@ describe("DOM helpers", () => {
 
     const button = el("button", "primary", "Copy");
     button.id = "copy";
-    testDocument.body.append(button);
+    testDocument.body.append(button as unknown as TestElement);
 
     expect($("#copy")).toBe(button);
     expect(button.className).toBe("primary");

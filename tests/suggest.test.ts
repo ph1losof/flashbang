@@ -13,6 +13,11 @@ import {
   readSuggestQueryParams,
   readTwoQueryParams,
 } from "../src/shared/raw-query";
+import {
+  encodeSuggestCookieValue,
+  parseSuggestCookieContextValueWithValidation,
+  parseSuggestCookieValueWithValidation,
+} from "../src/shared/suggest-cookie";
 import { type BuildNode, buildRadixTrie } from "../src/shared/trie";
 
 interface TestBang {
@@ -176,6 +181,7 @@ mock.module("./generated/bangs-trie.js", () => TEST_TRIE);
 mock.module("../src/generated/bangs-trie.js", () => TEST_TRIE);
 
 const {
+  parseBangSettingsFromRequestWithCleanup,
   parseCookie,
   parsePartialBang,
   parseSettings,
@@ -183,7 +189,8 @@ const {
   parseSettingsFromRawUrlWithCleanup,
   suggest,
 } = await import("../src/suggest");
-const { responseFromCandidates } = await import("../src/suggest-bang");
+const { profileTopKCount, profileWalkPrefix, responseFromCandidates } =
+  await import("../src/suggest-bang");
 
 const fetchSpy = spyOn(globalThis, "fetch");
 
@@ -212,6 +219,238 @@ const defaultSettings = {
   frecent: {},
   custom: [],
 };
+
+describe("suggest cookie codec", () => {
+  test("round-trips custom syntax and sorted context", () => {
+    const encoded = encodeSuggestCookieValue(
+      "custom",
+      "gh",
+      "https://example.com/?q={}",
+      ["z", "a"],
+      { gh: 3, g: 1 },
+      "$",
+      "~"
+    );
+    const parsed = parseSuggestCookieValueWithValidation(encoded, true, true);
+
+    expect(parsed.hasInvalidContext).toBe(false);
+    expect(parsed.settings).toEqual({
+      bangPrefix: "$",
+      provider: "custom",
+      snapPrefix: "~",
+      trigger: "gh",
+      customUrl: "https://example.com/?q={}",
+      frecent: { g: 1, gh: 3 },
+      custom: ["a", "z"],
+    });
+  });
+
+  test("distinguishes tolerant parsing from cleanup validation", () => {
+    const malformed = "google,g,%E0%A4%A|c:%5B%22ok%22%2C1%5D|unknown:x";
+    const tolerant = parseSuggestCookieValueWithValidation(
+      malformed,
+      true,
+      false
+    );
+    expect(tolerant.hasInvalidContext).toBe(false);
+    expect(tolerant.settings.customUrl).toBeNull();
+    expect(tolerant.settings.custom).toEqual(["ok"]);
+
+    const strict = parseSuggestCookieValueWithValidation(malformed, true, true);
+    expect(strict.hasInvalidContext).toBe(true);
+    expect(strict.settings.custom).toEqual(["ok"]);
+  });
+
+  test("accepts raw custom URLs and tolerates malformed custom JSON", () => {
+    expect(
+      parseSuggestCookieValueWithValidation(
+        "custom,g,https://example.test/search|c:not-json",
+        true,
+        false
+      ).settings
+    ).toMatchObject({
+      customUrl: "https://example.test/search",
+      custom: [],
+    });
+  });
+
+  test("flags malformed cleanup context sections", () => {
+    expect(
+      parseSuggestCookieContextValueWithValidation("default,g,|f:", true)
+        .hasInvalidContext
+    ).toBe(true);
+    expect(
+      parseSuggestCookieContextValueWithValidation("default,g,|c:%", true)
+        .hasInvalidContext
+    ).toBe(true);
+    expect(
+      parseSuggestCookieContextValueWithValidation("default,g,|c:%7B%7D", true)
+        .hasInvalidContext
+    ).toBe(true);
+    expect(
+      parseSuggestCookieContextValueWithValidation("default,g,|other:x", true)
+        .hasInvalidContext
+    ).toBe(true);
+  });
+
+  test("hydrates bang context separately and rewrites invalid context", () => {
+    const untouched = { ...defaultSettings, custom: [], frecent: {} };
+    expect(parseBangSettingsFromRequestWithCleanup(req(), untouched)).toEqual({
+      settings: untouched,
+      rewrittenSuggestCookie: null,
+    });
+
+    const valid = { ...defaultSettings, custom: [], frecent: {} };
+    expect(
+      parseBangSettingsFromRequestWithCleanup(
+        req(
+          `suggest=${encodeSuggestCookieValue("default", "g", "", ["z"], {
+            gh: 2,
+          })}`
+        ),
+        valid
+      )
+    ).toEqual({
+      settings: { ...valid, custom: ["z"], frecent: { gh: 2 } },
+      rewrittenSuggestCookie: null,
+    });
+
+    const invalid = { ...defaultSettings, custom: ["old"], frecent: { g: 1 } };
+    const cleaned = parseBangSettingsFromRequestWithCleanup(
+      req("suggest=custom,gh,https%3A%2F%2Fexample.com|unknown:value"),
+      invalid
+    );
+    expect(cleaned.settings.custom).toEqual([]);
+    expect(cleaned.settings.frecent).toEqual({});
+    expect(cleaned.rewrittenSuggestCookie).toBe(
+      "custom,gh,https%3A%2F%2Fexample.com"
+    );
+  });
+
+  test("ignores embedded cookie-name matches before a real cookie", () => {
+    expect(
+      parseCookie(
+        req("xsuggest=none,bad,;\t suggest=google,g,https%3A%2F%2Fexample.com")
+      )
+    ).toMatchObject({
+      provider: "google",
+      trigger: "g",
+      customUrl: "https://example.com",
+    });
+  });
+});
+
+describe("buildRadixTrie", () => {
+  test("splits partially matching edges and propagates maximum relevance", () => {
+    const items = [
+      { key: "foobar", relevance: 2 },
+      { key: "fizz", relevance: 7 },
+      { key: "foo", relevance: 5 },
+      { key: "foobar", relevance: 9 },
+    ];
+    const root = buildRadixTrie(
+      items,
+      (item) => item.key,
+      (item) => item.relevance
+    );
+
+    const f = root.children.get("f");
+    expect(f?.maxRelevance).toBe(9);
+    expect(f?.children.has("izz")).toBe(true);
+    const foo = f?.children.get("oo");
+    expect(foo?.terminal?.key).toBe("foo");
+    expect(foo?.children.get("bar")?.terminal?.relevance).toBe(9);
+    expect(root.maxRelevance).toBe(9);
+  });
+});
+
+describe("suggest parser edge cases", () => {
+  test("trims supported surrounding whitespace and rejects empty input", () => {
+    expect(parsePartialBang("\t\n !GH \r\f")).toMatchObject({
+      partial: "gh",
+      prefix: "",
+    });
+    expect(parsePartialBang("\t\n\v\f\r ")).toBeNull();
+  });
+
+  test("rejects spaces inside prefix and suffix trigger fragments", () => {
+    expect(parsePartialBang("!gh extra")).toBeNull();
+    expect(parsePartialBang("@gh,so extra")).toBeNull();
+    expect(parsePartialBang("query @gh,so extra")).toBeNull();
+    expect(parsePartialBang("query !gh extra")).toBeNull();
+  });
+
+  test("applies cleanup provider overrides without invalid context", () => {
+    const result = parseSettingsFromRawUrlWithCleanup(
+      "https://example.test/?sp=bing",
+      req("suggest=google,g,"),
+      undefined
+    );
+    expect(result.settings.provider).toBe("bing");
+    expect(result.rewrittenSuggestCookie).toBeNull();
+  });
+
+  test("uses custom provider URLs without placeholders verbatim", async () => {
+    fetchSpy.mockResolvedValueOnce(new Response('["query",[]]'));
+    await suggest(
+      "query",
+      {
+        ...defaultSettings,
+        provider: "custom",
+        customUrl: "https://example.test/suggest",
+      },
+      null,
+      true
+    );
+    expect(fetchSpy).toHaveBeenCalledWith("https://example.test/suggest");
+  });
+
+  test("rejects a non-array descriptions slot in suggestion payloads", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response('["query",[],[],"not-an-array"]')
+    );
+    expect(
+      await (
+        await suggest("query", { ...defaultSettings, provider: "google" }, null)
+      ).json()
+    ).toEqual(["query", []]);
+  });
+});
+
+describe("suggest trie edge cases", () => {
+  test("profiles prefix walks and rejects a partial compressed-edge mismatch", () => {
+    expect(profileWalkPrefix("brx")).toBeNull();
+    const root = profileWalkPrefix("");
+    expect(root).not.toBeNull();
+    expect(profileTopKCount(root![0], {}, false)).toBe(TOP_K);
+  });
+
+  test("keeps the top custom candidates when more than TOP_K match", async () => {
+    const custom = Array.from({ length: TOP_K + 3 }, (_, index) => `x${index}`);
+    const frecent = Object.fromEntries(
+      custom.map((trigger, index) => [
+        trigger,
+        index < TOP_K ? index + 1 : 1_000_000_000 + index,
+      ])
+    );
+    const payload = await (
+      await suggest("!", { ...defaultSettings, custom, frecent })
+    ).json();
+    const completions = payload[1] as string[];
+    expect(completions).toHaveLength(TOP_K);
+    expect(completions).toContain(`!x${TOP_K + 2}`);
+  });
+
+  test("stops scanning sorted custom triggers beyond the prefix range", async () => {
+    const payload = await (
+      await suggest("!m", {
+        ...defaultSettings,
+        custom: ["a", "n", "z"],
+      })
+    ).json();
+    expect(payload[1]).toContain("!mdn");
+  });
+});
 
 describe("parseCookie", () => {
   test("no cookie → defaults", () => {
@@ -449,6 +688,10 @@ describe("readQueryParam", () => {
     expect(readQueryParam("http://localhost/suggest?q=abc%", "q")).toBe("abc%");
   });
 
+  test("tolerant decoding preserves invalid escapes around plus separators", () => {
+    expect(readQueryParam("https://x.test/?q=a+%ZZ", "q")).toBe("a %ZZ");
+  });
+
   test("returns empty string for key without value", () => {
     expect(readQueryParam("http://localhost/suggest?q", "q")).toBe("");
     expect(readQueryParam("http://localhost/suggest?q=&sp=ddg", "q")).toBe("");
@@ -507,6 +750,18 @@ describe("suggest JSON serialization", () => {
 });
 
 describe("readTwoQueryParams", () => {
+  test("returns the same parsed value when both keys are equal", () => {
+    expect(
+      readTwoQueryParams("https://x.test/?q=first&q=second", "q", "q")
+    ).toEqual(["first", "first"]);
+  });
+
+  test("returns two nulls when the URL has no query string", () => {
+    expect(readTwoQueryParams("https://x.test/path", "a", "b")).toEqual([
+      null,
+      null,
+    ]);
+  });
   test("returns both values from one query string", () => {
     expect(
       readTwoQueryParams(
