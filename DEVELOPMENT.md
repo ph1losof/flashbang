@@ -158,11 +158,20 @@ flashbang/
 ├── bunfig.toml               # Bun test configuration
 ├── package.json              # Scripts and package metadata
 ├── playwright.config.ts      # End-to-end test configuration
-├── tsconfig.json             # TypeScript configuration
+├── tsconfig.base.json        # Shared strict TypeScript options
+├── tsconfig.json             # TypeScript project references
+├── tsconfig.server.json      # Server and Cloudflare Function runtime types
+├── tsconfig.sw.json          # Service Worker runtime types
+├── tsconfig.tooling.json     # Scripts, configuration, and test types
+├── tsconfig.ui.json          # Browser UI runtime types
 └── uno.config.ts             # UnoCSS theme
 ```
 
 Every tracked file must appear explicitly or match a glob in this tree. `tests/development-docs.test.ts` enforces completeness as part of `bun test`; the generated bang artifacts are also shown because builds depend on them even though they are gitignored.
+
+## Type checking
+
+`bun run typecheck` builds four referenced TypeScript projects. The UI project exposes browser DOM APIs, the Service Worker project exposes worker APIs without the DOM, the server project exposes Bun and fetch-compatible worker APIs, and the tooling project covers scripts and tests. Shared and redirect-core modules are intentionally checked in each runtime that consumes them.
 
 ## Tests
 

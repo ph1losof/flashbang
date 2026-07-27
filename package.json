@@ -14,7 +14,7 @@
     "dev": "bun --hot scripts/dev.ts",
     "start": "bun scripts/start.ts",
     "check": "biome check",
-    "typecheck": "tsc --noEmit --skipLibCheck",
+    "typecheck": "tsc --build",
     "fix": "biome check --write",
     "profile": "bun scripts/profile.ts",
     "profile:private": "DIST_DIR=dist-e2e ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=true bun run build && PROFILE_PRIVATE_REDIRECT=true DIST_DIR=dist-e2e ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=true bunx playwright test tests/e2e/private-perf.e2e.ts --workers=1",

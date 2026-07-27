@@ -1,18 +1,9 @@
 {
-  "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "strict": true,
-    "noEmit": true,
-    "lib": ["ESNext", "WebWorker", "DOM"],
-    "types": ["bun"]
-  },
-  "include": [
-    "uno.config.ts",
-    "src/**/*.ts",
-    "scripts/**/*.ts",
-    "functions/**/*.ts",
-    "tests/**/*.ts"
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.ui.json" },
+    { "path": "./tsconfig.sw.json" },
+    { "path": "./tsconfig.server.json" },
+    { "path": "./tsconfig.tooling.json" }
   ]
 }

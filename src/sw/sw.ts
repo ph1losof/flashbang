@@ -1,4 +1,5 @@
 declare const self: ServiceWorkerGlobalScope;
+declare const cookieStore: CookieStore;
 
 import { COOKIE_MAX_AGE_S } from "../shared/constants";
 import {

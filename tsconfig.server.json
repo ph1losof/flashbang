@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "lib": ["ESNext", "WebWorker"],
+    "types": ["bun"]
+  },
+  "include": [
+    "functions/**/*.ts",
+    "src/opensearch.ts",
+    "src/server/**/*.ts",
+    "src/shared/**/*.ts",
+    "src/suggest.ts",
+    "src/suggest-bang.ts"
+  ]
+}

@@ -10,5 +10,6 @@ benchmark-results/
 node_modules/
 build/target/
 src/generated/
+*.tsbuildinfo
 *.DS_Store
 .codegraph
