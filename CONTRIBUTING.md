@@ -56,7 +56,7 @@ We use **GitHub Releases** as the canonical place for release notes and version 
 - Version tags must use strict stable SemVer `vX.Y.Z` (for example `v1.5.0`) and match the version in `package.json`
 - Maintainers run the **Prepare Release** workflow to open an automated package version-bump pull request, which auto-merges after protected-branch CI; they then create and push an annotated tag and do not create the GitHub Release manually
 - The tag-triggered workflow verifies that the tagged commit is contained in `origin/master`, runs its validation gates without repeating Playwright E2E, and creates the GitHub Release with generated notes
-- After release creation, the workflow health-checks a container and publishes `linux/amd64` and `linux/arm64` images to GHCR with the version and `latest` tags
+- After release creation, the workflow health-checks a container and publishes signed `linux/amd64` and `linux/arm64` images to GHCR with OCI provenance, an SPDX SBOM, a GitHub artifact attestation, and the version and `latest` tags
 
 For the full maintainer release procedure (version bump, annotated tag, and workflow verification), see [DEVELOPMENT.md](DEVELOPMENT.md#releasing).
 

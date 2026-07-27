@@ -355,4 +355,14 @@ git push origin vX.Y.Z
 
 Do not create the GitHub Release manually. The tag-triggered release workflow (`.github/workflows/release.yaml`) accepts only strict stable `vX.Y.Z` tags, requires the tag version to match `package.json`, and verifies that the tagged commit is contained in `origin/master`. It then runs codegen (`--from-merged`), typecheck, lint/format checks, `bun audit`, the test suite, and the build. It does not rerun Playwright because protected-branch CI already covers E2E.
 
-After validation succeeds, the workflow creates the GitHub Release with generated notes. It then builds and health-checks a local image before publishing `linux/amd64` and `linux/arm64` images to `ghcr.io/<owner>/flashbang` with both the release version and `latest` tags.
+After validation succeeds, the workflow creates the GitHub Release with generated notes. It then builds and health-checks a local image before publishing `linux/amd64` and `linux/arm64` images to `ghcr.io/<owner>/flashbang` with both the release version and `latest` tags. Published images include max-level BuildKit provenance and an SPDX SBOM, receive a GitHub artifact attestation for the multi-platform digest, and are signed keylessly with Cosign using the release workflow's GitHub OIDC identity.
+
+Verify a published image's GitHub provenance and Cosign signature with:
+
+```sh
+gh attestation verify oci://ghcr.io/ph1losof/flashbang:<version> -R ph1losof/flashbang
+cosign verify \
+  --certificate-identity-regexp '^https://github.com/ph1losof/flashbang/.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/ph1losof/flashbang:<version>
+```
