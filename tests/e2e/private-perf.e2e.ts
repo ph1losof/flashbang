@@ -377,7 +377,7 @@ test("private hash redirect and public path performance profile", async ({
       navigator.serviceWorker.controller !== null
   );
   await page.goto("/").catch(() => null);
-  await page.waitForSelector("#gear-btn");
+  await page.waitForSelector('html[data-app-ready="true"]');
   await measure(page);
   const warm: Timing[] = [];
   const publicWarm: Timing[] = [];

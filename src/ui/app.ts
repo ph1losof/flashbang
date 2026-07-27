@@ -64,6 +64,8 @@ function init() {
     openDialog();
     history.replaceState(null, "", "/");
   }
+
+  document.documentElement.dataset.appReady = "true";
 }
 
 init();

@@ -18,7 +18,7 @@ import {
 } from "./shared";
 
 const PRELIMINARY_SW_PATH = `${DIST_DIR}/sw-cache-input.js`;
-const SERVER_DIST_DIR = "dist-server";
+const SERVER_DIST_DIR = `${DIST_DIR}-server`;
 
 export interface CacheVersionInput {
   bytes: Uint8Array;

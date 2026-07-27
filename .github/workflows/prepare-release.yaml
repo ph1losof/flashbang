@@ -19,9 +19,9 @@ concurrency:
 
 jobs:
   prepare:
-    name: Open release pull request
+    name: Open and validate release pull request
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -91,8 +91,30 @@ jobs:
             --head "$branch" \
             --title "chore(release): prepare v$RELEASE_VERSION" \
             --body "Automated package version bump for v$RELEASE_VERSION.")"
+          head_sha="$(git rev-parse HEAD)"
           gh workflow run ci.yaml --repo "$GITHUB_REPOSITORY" --ref "$branch"
+
+          run_id=""
+          for _ in $(seq 1 30); do
+            run_id="$(gh run list --repo "$GITHUB_REPOSITORY" \
+              --workflow ci.yaml \
+              --branch "$branch" \
+              --commit "$head_sha" \
+              --event workflow_dispatch \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId // empty')"
+            if [ -n "$run_id" ]; then
+              break
+            fi
+            sleep 2
+          done
+          if [ -z "$run_id" ]; then
+            echo "::error::Timed out waiting for the release CI run to start." >&2
+            exit 1
+          fi
+
+          gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --exit-status
           gh pr merge "$pr_url" --repo "$GITHUB_REPOSITORY" \
-            --auto \
             --merge \
             --delete-branch

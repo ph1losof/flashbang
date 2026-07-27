@@ -14,7 +14,7 @@ bun install        # install dependencies
 bun run check      # format + lint check (fails on issues)
 bun run fix        # auto-fix format + lint issues
 bun run codegen    # fetch DDG/Kagi sources, merge, and generate bang artifacts
-bun run build      # install locked dependencies, then bundle, minify + pre-compress with Brotli (auto-runs codegen --from-merged if generated bang files are missing)
+bun run build      # bundle, minify + pre-compress with Brotli (auto-runs codegen --from-merged if generated bang files are missing)
 bun run dev        # bundle + dev server with file watching & live reload (auto-runs codegen if needed)
 bun run start      # serve pre-built dist/ (run `bun run build` first)
 bun run start:bundled # serve dist/ with the bundled production server
@@ -261,7 +261,7 @@ On **self-hosted** (Docker/Railway via `start.ts`), the Bun server sets headers 
 
 1. **Bundle UI + fallback + bench** — Bun bundles `src/ui/app.ts` (with code splitting) to `dist/app.js` plus lazy chunks, the private/restricted-browser redirect fallback to a content-hashed `dist/fallback-*.js`, and `src/ui/bench/index.ts` to `dist/bench.js`. Every app chunk and the standalone fallback are marked as required offline dependencies regardless of size; benchmark assets are cached only when opened.
 2. **Bundle Service Worker** — Bun bundles `src/sw/sw.ts` and the sparse generated lookups into `dist/sw.js`, and copies `bangs.bin` and `bangs-meta.bin` to content-hashed production paths. The worker resolves controlled `#q=` navigations through the same fetch path as `?q=` and returns a minimal synthetic navigation document so the private fragment is not inherited by the destination. The lookup and fallback paths are injected into the worker and first-page fallback; the metadata path is injected into the UI bundle and included in deferred precaching. Content-hashed assets receive immutable cache headers. Hashes of the binaries, versioned assets, and a preliminary Service Worker bundle determine the injected cache version. Installation activates without lookup data; activation metadata opportunistically includes non-authoritative default/lucky URLs and both syntax markers when they can be derived without more I/O, and never seeds those compact base settings into the authoritative cache. The fallback begins its IndexedDB snapshot read as soon as its module evaluates, overlapping settings I/O with the bang-data request. First-page fallback transfers its initialized buffer and compiled redirect settings to the worker, while ordinary controlled pages warm binary data, settings, and frecency concurrently. Once settings are materialized, the worker persists a versioned registration record containing default/lucky URLs, syntax, every custom definition, and personalized hot entries; cold redirects use the canonical parser for every query form, checking personalized and generated hot entries before loading `bangs.bin` for a remaining built-in or advanced lookup. Previous caches remain available until all required current assets have been cached successfully.
-3. **Bundle production server** — Bun bundles `scripts/start.ts` and all transitive runtime modules into `dist-server/server.js`. This output stays outside the public `dist/` tree and is the only server code copied into the runtime container.
+3. **Bundle production server** — Bun bundles `scripts/start.ts` and all transitive runtime modules into `<DIST_DIR>-server/server.js` (`dist-server/server.js` by default). This output stays outside the public static tree and is the only server code copied into the runtime container. Custom builds such as `DIST_DIR=dist-e2e` use an isolated `dist-e2e-server/` output.
 4. **Generate CSS** — UnoCSS scans `src/ui/**/*.ts`, `src/ui/home/index.html`, and `src/ui/bench/index.html`, emitting atomic utility classes
 5. **Inline & minify HTML** — CSS is inlined into `<style>`, HTML is minified with `@minify-html/node`
 6. **Generate static-host headers** — Writes `dist/_headers` with shared security headers, per-page inline-script hashes, the stricter Service Worker CSP, and the OpenSearch content type
@@ -336,14 +336,14 @@ Static assets are served with Brotli pre-compression when the client supports it
 
 ## CI
 
-A CI workflow (`.github/workflows/ci.yaml`) runs on every push to `master` and every pull request targeting `master`. Its main job runs codegen (`--from-merged`), typecheck, lint/format checks, `bun audit`, tests, and a full build with no external bang-source fetching. A separate matrix builds the app and runs the Playwright projects in Chromium, Firefox, and WebKit; the WebKit project intentionally selects a supported subset of scenarios. On pull requests and manual runs, a Docker job also builds and health-checks the image when Docker-relevant files changed.
+A CI workflow (`.github/workflows/ci.yaml`) runs on every push to `master` and every pull request targeting `master`. Its main job validates all workflow files with SHA-pinned actionlint 1.7.12, then runs codegen (`--from-merged`), typecheck, lint/format checks, `bun audit`, tests, and a full build with no external bang-source fetching. A separate matrix builds the app and runs the Playwright projects in Chromium, Firefox, and WebKit; the WebKit project intentionally selects a supported subset of scenarios. On pull requests and manual runs, a Docker job also builds and health-checks the image when Docker-relevant files changed.
 
 A daily cron workflow (`.github/workflows/update-bangs.yaml`) fetches fresh bang sources from DDG and Kagi and verifies the merged data when it changes. It commits `data/bangs.json` to the `automation/update-bangs` branch, opens or updates a pull request targeting `master`, and dispatches CI for that branch.
 
 ## Releasing
 
-1. Run the **Prepare Release** workflow with the stable SemVer version without a `v` prefix. It updates `package.json`, pushes an `automation/release-vX.Y.Z` branch, opens a pull request, dispatches CI, and enables auto-merge. The README release badge reads the latest GitHub Release dynamically and needs no version bump.
-2. Review the generated pull request. It merges automatically after protected-branch checks, including Playwright E2E, pass.
+1. Run the **Prepare Release** workflow with the stable SemVer version without a `v` prefix. It updates `package.json`, pushes an `automation/release-vX.Y.Z` branch, opens a pull request, dispatches CI, waits for every CI job (including Playwright E2E) to pass, and only then merges the pull request. A failed CI run leaves the pull request open and the release unmerged. The README release badge reads the latest GitHub Release dynamically and needs no version bump.
+2. Confirm that the generated pull request merged and the protected-branch checks passed.
 3. Create and push an annotated tag from the merged `origin/master` commit:
 
 ```sh
@@ -353,9 +353,9 @@ git tag -a vX.Y.Z -m "vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-Do not create the GitHub Release manually. The tag-triggered release workflow (`.github/workflows/release.yaml`) accepts only strict stable `vX.Y.Z` tags, requires the tag version to match `package.json`, and verifies that the tagged commit is contained in `origin/master`. It then runs codegen (`--from-merged`), typecheck, lint/format checks, `bun audit`, the test suite, and the build. It does not rerun Playwright because protected-branch CI already covers E2E.
+Do not create the GitHub Release manually. The tag-triggered release workflow (`.github/workflows/release.yaml`) accepts only strict stable `vX.Y.Z` tags, requires the tag version to match `package.json`, and verifies that the tagged commit is contained in `origin/master`. It then validates workflow files with SHA-pinned actionlint 1.7.12 and runs codegen (`--from-merged`), typecheck, lint/format checks, `bun audit`, the test suite, and the build. It does not rerun Playwright because protected-branch CI already covers E2E.
 
-After validation succeeds, the workflow creates the GitHub Release with generated notes. It then builds and health-checks a local image before publishing `linux/amd64` and `linux/arm64` images to `ghcr.io/<owner>/flashbang` with both the release version and `latest` tags. Published images include max-level BuildKit provenance and an SPDX SBOM, receive a GitHub artifact attestation for the multi-platform digest, and are signed keylessly with Cosign using the release workflow's GitHub OIDC identity.
+After validation succeeds, the workflow builds and health-checks a local image before publishing `linux/amd64` and `linux/arm64` images to `ghcr.io/<owner>/flashbang` with both the release version and `latest` tags. Published images include max-level BuildKit provenance and an SPDX SBOM, receive a GitHub artifact attestation for the multi-platform digest, and are signed and verified keylessly with Cosign using the release workflow's GitHub OIDC identity. The GitHub Release with generated notes is created only after every image publication, attestation, signing, and verification step succeeds.
 
 Verify a published image's GitHub provenance and Cosign signature with:
 

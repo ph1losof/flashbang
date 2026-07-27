@@ -214,6 +214,10 @@ async function seedCustomBangs(
   throw new Error("failed to seed custom bangs after retries");
 }
 
+async function waitForAppReady(page: Page): Promise<void> {
+  await page.waitForSelector('html[data-app-ready="true"]');
+}
+
 async function openHome(page: Page): Promise<void> {
   const target = test.info().project.name === "webkit" ? "/home" : "/";
   try {
@@ -224,7 +228,7 @@ async function openHome(page: Page): Promise<void> {
       throw error;
     }
   }
-  await page.waitForSelector("#gear-btn");
+  await waitForAppReady(page);
 }
 
 async function openSettingsModal(page: Page): Promise<void> {
@@ -835,6 +839,7 @@ test("distinct configured prefixes replace bang, snap, lucky, and suggestion syn
   expect(suggestions[1][0]).toMatch(/^\$g/);
 
   await page.reload({ waitUntil: "domcontentloaded" });
+  await waitForAppReady(page);
   await page.click("#gear-btn");
   await expect(page.locator("#bang-prefix")).toHaveValue("$");
   await expect(page.locator("#snap-prefix")).toHaveValue("~");
@@ -1780,6 +1785,7 @@ test("redirect falls back when service workers are unavailable", async ({
     ).toBe(false);
     await page.goto("/");
     await expect(page).toHaveURL(/\/home$/);
+    await waitForAppReady(page);
     await expect(page.locator("#gear-btn")).toBeVisible();
     await navigateAndWaitForRedirect(page, "/?q=%21g%20hello", GOOGLE_REDIRECT);
     expect(page.url()).toMatch(GOOGLE_REDIRECT);
@@ -2114,7 +2120,7 @@ test("controlled redirect works while offline", async ({
   );
   await mockGoogleSearchRoute(page);
   await ensureWarmController(page);
-  await page.waitForSelector("#gear-btn");
+  await waitForAppReady(page);
   await expect(resolveRedirectViaWorker(page, "!g hello")).resolves.toMatch(
     GOOGLE_REDIRECT
   );
