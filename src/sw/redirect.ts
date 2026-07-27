@@ -1261,7 +1261,7 @@ function resolveRaw(
   // "cats+g!"
   if (
     lastChar === bangCode ||
-    (end >= 3 && isEncodedMarkerAt(rawQuery, end - exclCharWidth, bangMarker))
+    (end >= 3 && isEncodedMarkerAt(rawQuery, end - 3, bangMarker))
   ) {
     const bangExclEnd = lastChar === bangCode ? end - 1 : end - 3;
     const lastSpPacked = findLastSpace(rawQuery, start, bangExclEnd - 1);
