@@ -1,5 +1,9 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import {
+  buildGeneratedArtifacts,
+  generateBinary,
+  generateMeta,
+  generateSparse,
   jsEscape,
   jsonEscape,
   mergeSources,
@@ -156,6 +160,53 @@ describe("codegen source transforms", () => {
         snap: "+site:github.com",
       },
     ]);
+  });
+});
+describe("codegen artifact generators", () => {
+  const sampleBangs = [
+    {
+      trigger: "g",
+      name: "Google",
+      domain: "google.com",
+      url: "https://google.com/search?q={}",
+      relevance: 100,
+      snap: "https://google.com",
+    },
+    {
+      trigger: "raw",
+      name: "Raw",
+      domain: "example.com",
+      url: "https://example.com/{}",
+      relevance: 5,
+    },
+    {
+      trigger: "cap",
+      name: "Capture",
+      domain: "example.com",
+      url: "https://example.com/$1/$2",
+      relevance: 1,
+      regex: "(\\w+)\\s+(.*)",
+      captureEncoding: 1,
+    },
+  ];
+  test("emits binary, sparse, trie, and metadata artifacts for regular and capture bangs", () => {
+    const artifacts = buildGeneratedArtifacts(sampleBangs);
+
+    expect(new Uint32Array(artifacts.binary.buffer, 0, 2)).toEqual(
+      new Uint32Array([0x31424246, 7])
+    );
+    expect(new Uint32Array(artifacts.meta.buffer, 0, 2)).toEqual(
+      new Uint32Array([0x314d4246, 1])
+    );
+    expect(artifacts.sparseJs).toContain("lookupAdvancedBang");
+    expect(artifacts.sparseJs).toContain("lookupSnapOverride");
+    expect(artifacts.trieJs).toContain("export const NODES");
+  });
+
+  test("keeps binary and metadata generation deterministic", () => {
+    expect(generateBinary(sampleBangs)).toEqual(generateBinary(sampleBangs));
+    expect(generateMeta(sampleBangs)).toEqual(generateMeta(sampleBangs));
+    expect(generateSparse(sampleBangs)).toBe(generateSparse(sampleBangs));
   });
 });
 describe("validateBangs", () => {

@@ -678,7 +678,7 @@ function copyTypedArray(
   return offset + values.byteLength;
 }
 
-function generateBinary(bangs: readonly Bang[]): Uint8Array {
+export function generateBinary(bangs: readonly Bang[]): Uint8Array {
   const packed = packBangData(bangs.filter((bang) => !bang.regex));
   const mph = buildMinimalPerfectHash(packed.triggers);
   const triggers = Array.from(
@@ -828,7 +828,7 @@ function generateBinary(bangs: readonly Bang[]): Uint8Array {
   return output;
 }
 
-function renderAdvancedLookup(bangs: readonly Bang[]): string {
+export function renderAdvancedLookup(bangs: readonly Bang[]): string {
   if (bangs.length === 0) {
     return "export function lookupAdvancedBang(){return null}";
   }
@@ -908,7 +908,9 @@ function collectSnapOverrides(bangs: readonly Bang[]): GeneratedSnapOverride[] {
   return overrides;
 }
 
-function renderSnapLookup(overrides: readonly GeneratedSnapOverride[]): string {
+export function renderSnapLookup(
+  overrides: readonly GeneratedSnapOverride[]
+): string {
   if (overrides.length === 0) {
     return "export function lookupSnapOverride(){return null}";
   }
@@ -971,7 +973,7 @@ function renderSnapLookup(overrides: readonly GeneratedSnapOverride[]): string {
   );
 }
 
-function generateSparse(bangs: readonly Bang[]): string {
+export function generateSparse(bangs: readonly Bang[]): string {
   const snapOverrides = collectSnapOverrides(bangs);
   console.log(`  Snap overrides: ${snapOverrides.length} generated`);
   return (
@@ -981,7 +983,7 @@ function generateSparse(bangs: readonly Bang[]): string {
   );
 }
 
-function generateMeta(bangs: Bang[]): Uint8Array {
+export function generateMeta(bangs: Bang[]): Uint8Array {
   const fields: string[] = [];
   const captureIndexes: number[] = [];
   for (let i = 0; i < bangs.length; i++) {
@@ -1507,7 +1509,7 @@ function generateHotBangs(bangs: readonly Bang[]): string {
   );
 }
 
-function buildGeneratedArtifacts(bangs: Bang[]): GeneratedArtifacts {
+export function buildGeneratedArtifacts(bangs: Bang[]): GeneratedArtifacts {
   const trieRoot = buildRadixTrie(
     bangs,
     (b) => b.trigger,

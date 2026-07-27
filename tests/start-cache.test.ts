@@ -2,9 +2,29 @@ import { describe, expect, test } from "bun:test";
 import { extractInlineScriptHashes } from "../scripts/inline-script-hash";
 import {
   acceptsBrotli,
+  buildStaticManifest,
   cacheControlForAsset,
+  createStaticFetchHandler,
+  type StaticAsset,
+  serveCompressed,
   staticAssetHeaders,
 } from "../scripts/start";
+
+const staticAsset = (text: string, type: string): StaticAsset => ({
+  file: new Blob([text]) as unknown as Bun.BunFile,
+  br: null,
+  type,
+});
+
+const compressedStaticAsset = (
+  text: string,
+  compressed: string,
+  type: string
+): StaticAsset => ({
+  file: new Response(text).body! as unknown as Bun.BunFile,
+  br: new Response(compressed).body! as unknown as Bun.BunFile,
+  type,
+});
 
 describe("production static caching", () => {
   test("negotiates Brotli using encoding q-values", () => {
@@ -78,6 +98,93 @@ describe("production static caching", () => {
     );
   });
 
+  test("serves identity and Brotli static assets from a manifest", async () => {
+    const manifest = new Map([
+      [
+        "/app.js",
+        compressedStaticAsset("identity", "compressed", "text/javascript"),
+      ],
+    ]);
+
+    const identity = serveCompressed(
+      manifest,
+      new Request("https://example.com/app.js"),
+      "/app.js"
+    );
+    expect(identity).not.toBeNull();
+    expect(await identity!.text()).toBe("identity");
+    expect(identity!.headers.get("Content-Encoding")).toBeNull();
+
+    const compressed = serveCompressed(
+      manifest,
+      new Request("https://example.com/app.js", {
+        headers: { "Accept-Encoding": "gzip, br" },
+      }),
+      "/app.js",
+      { "X-Test": "1" }
+    );
+    expect(compressed).not.toBeNull();
+    expect(await compressed!.text()).toBe("compressed");
+    expect(compressed!.headers.get("Content-Encoding")).toBe("br");
+    expect(compressed!.headers.get("X-Test")).toBe("1");
+    expect(
+      serveCompressed(
+        manifest,
+        new Request("https://example.com/missing"),
+        "/missing"
+      )
+    ).toBeNull();
+  });
+
+  test("discovers static manifest entries and their compressed siblings", async () => {
+    await Bun.write("dist/start-cache-test.txt", "hello");
+    await Bun.write("dist/start-cache-test.txt.br", "br");
+    try {
+      const manifest = buildStaticManifest();
+      const asset = manifest.get("/start-cache-test.txt");
+      expect(asset).toBeDefined();
+      expect(asset!.br).not.toBeNull();
+      expect(manifest.has("/start-cache-test.txt.br")).toBe(false);
+    } finally {
+      await Bun.file("dist/start-cache-test.txt").delete();
+      await Bun.file("dist/start-cache-test.txt.br").delete();
+    }
+  });
+  test("routes production requests through the static fetch handler", async () => {
+    const manifest = new Map([
+      ["/index.html", staticAsset("index", "text/html")],
+      ["/bench.html", staticAsset("bench", "text/html")],
+      ["/app.js", staticAsset("app", "text/javascript")],
+      ["/sw.js", staticAsset("sw", "text/javascript")],
+      ["/docs.html", staticAsset("docs", "text/html")],
+    ]);
+    const fetch = createStaticFetchHandler(manifest, [["X-Security", "1"]]);
+
+    await expect(
+      fetch(new Request("https://example.com/health")).then((r) => r.text())
+    ).resolves.toBe("ok");
+    await expect(
+      fetch(new Request("https://example.com/")).then((r) => r.text())
+    ).resolves.toBe("index");
+    await expect(
+      fetch(new Request("https://example.com/bench")).then((r) => r.text())
+    ).resolves.toBe("bench");
+    await expect(
+      fetch(new Request("https://example.com/app.js")).then((r) => r.text())
+    ).resolves.toBe("app");
+    await expect(
+      fetch(new Request("https://example.com/docs")).then((r) => r.text())
+    ).resolves.toBe("docs");
+    await expect(
+      fetch(new Request("https://example.com/missing")).then((r) => r.text())
+    ).resolves.toBe("index");
+
+    const sw = await fetch(new Request("https://example.com/sw.js"));
+    expect(await sw.text()).toBe("sw");
+    expect(sw.headers.get("Content-Security-Policy")).toContain(
+      "connect-src 'self'"
+    );
+  });
   test("hashes only inline scripts for the production CSP", () => {
     const hashes = extractInlineScriptHashes(
       '<script>inline()</script><SCRIPT nonce="test">upper()</SCRIPT>' +

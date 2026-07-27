@@ -19,7 +19,7 @@ const HASHED_ASSET_RE =
 const DIST_DIR = process.env.DIST_DIR || "dist";
 const DIST_PREFIX = `${DIST_DIR}/`;
 
-interface StaticAsset {
+export interface StaticAsset {
   br: Bun.BunFile | null;
   file: Bun.BunFile;
   type: string;
@@ -84,7 +84,7 @@ export function staticAssetHeaders(
   };
 }
 
-function buildStaticManifest(): Map<string, StaticAsset> {
+export function buildStaticManifest(): Map<string, StaticAsset> {
   const files = [...new Bun.Glob("**/*").scanSync(DIST_DIR)];
   const byName = new Set(files);
   const map = new Map<string, StaticAsset>();
@@ -103,7 +103,7 @@ function buildStaticManifest(): Map<string, StaticAsset> {
   return map;
 }
 
-function serveCompressed(
+export function serveCompressed(
   manifest: ReadonlyMap<string, StaticAsset>,
   req: Request,
   assetPath: string,
@@ -124,6 +124,74 @@ function serveCompressed(
       extraHeaders
     ),
   });
+}
+
+export function createStaticFetchHandler(
+  staticManifest: ReadonlyMap<string, StaticAsset>,
+  securityHeaderEntries = Object.entries(securityHeaders)
+): (req: Request) => Promise<Response> {
+  return async (req) => {
+    const pathname = readPathname(req.url);
+
+    if (pathname === "/health") {
+      return new Response("ok", { headers: securityHeaders });
+    }
+
+    if (pathname === "/suggest") {
+      const res = await handleSuggestRequest(req);
+      for (const [k, v] of securityHeaderEntries) {
+        res.headers.set(k, v);
+      }
+      return res;
+    }
+
+    if (pathname === "/opensearch.xml") {
+      const res = handleOpenSearchRequest(req);
+      for (const [k, v] of securityHeaderEntries) {
+        res.headers.set(k, v);
+      }
+      return res;
+    }
+
+    if (pathname === "/sw.js") {
+      return serveCompressed(staticManifest, req, "/sw.js", SW_HEADERS)!;
+    }
+
+    if (pathname === "/bench") {
+      return serveCompressed(staticManifest, req, "/bench.html")!;
+    }
+
+    const path = pathname === "/" ? "/index.html" : pathname;
+    const normalized = normalize(`${DIST_DIR}${path}`);
+    if (!normalized.startsWith(DIST_PREFIX)) {
+      return new Response("Not found", {
+        status: 404,
+        headers: securityHeaders,
+      });
+    }
+    const fromDist = serveCompressed(
+      staticManifest,
+      req,
+      `/${normalized.substring(DIST_PREFIX.length)}`
+    );
+    if (fromDist) {
+      return fromDist;
+    }
+
+    const htmlNormalized = normalize(`${DIST_DIR}${path}.html`);
+    if (htmlNormalized.startsWith(DIST_PREFIX)) {
+      const fromHtml = serveCompressed(
+        staticManifest,
+        req,
+        `/${htmlNormalized.substring(DIST_PREFIX.length)}`
+      );
+      if (fromHtml) {
+        return fromHtml;
+      }
+    }
+
+    return serveCompressed(staticManifest, req, "/index.html")!;
+  };
 }
 
 async function main(): Promise<void> {
@@ -152,68 +220,7 @@ async function main(): Promise<void> {
 
   Bun.serve({
     port,
-    async fetch(req) {
-      const pathname = readPathname(req.url);
-
-      if (pathname === "/health") {
-        return new Response("ok", { headers: securityHeaders });
-      }
-
-      if (pathname === "/suggest") {
-        const res = await handleSuggestRequest(req);
-        for (const [k, v] of securityHeaderEntries) {
-          res.headers.set(k, v);
-        }
-        return res;
-      }
-
-      if (pathname === "/opensearch.xml") {
-        const res = handleOpenSearchRequest(req);
-        for (const [k, v] of securityHeaderEntries) {
-          res.headers.set(k, v);
-        }
-        return res;
-      }
-
-      if (pathname === "/sw.js") {
-        return serveCompressed(staticManifest, req, "/sw.js", SW_HEADERS)!;
-      }
-
-      if (pathname === "/bench") {
-        return serveCompressed(staticManifest, req, "/bench.html")!;
-      }
-
-      const path = pathname === "/" ? "/index.html" : pathname;
-      const normalized = normalize(`${DIST_DIR}${path}`);
-      if (!normalized.startsWith(DIST_PREFIX)) {
-        return new Response("Not found", {
-          status: 404,
-          headers: securityHeaders,
-        });
-      }
-      const fromDist = serveCompressed(
-        staticManifest,
-        req,
-        `/${normalized.substring(DIST_PREFIX.length)}`
-      );
-      if (fromDist) {
-        return fromDist;
-      }
-
-      const htmlNormalized = normalize(`${DIST_DIR}${path}.html`);
-      if (htmlNormalized.startsWith(DIST_PREFIX)) {
-        const fromHtml = serveCompressed(
-          staticManifest,
-          req,
-          `/${htmlNormalized.substring(DIST_PREFIX.length)}`
-        );
-        if (fromHtml) {
-          return fromHtml;
-        }
-      }
-
-      return serveCompressed(staticManifest, req, "/index.html")!;
-    },
+    fetch: createStaticFetchHandler(staticManifest, securityHeaderEntries),
   });
 }
 

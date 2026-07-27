@@ -79,7 +79,7 @@ export function requiredAppAssetPaths(
   ].sort();
 }
 
-async function bundleServiceWorker(
+export async function bundleServiceWorker(
   naming: string,
   cacheVersion: string,
   requiredAppAssets: readonly string[],
@@ -106,7 +106,7 @@ async function bundleServiceWorker(
   }
 }
 
-async function bundleProductionServer(): Promise<void> {
+export async function bundleProductionServer(): Promise<void> {
   const result = await Bun.build({
     entrypoints: ["scripts/start.ts"],
     outdir: SERVER_DIST_DIR,
@@ -120,7 +120,7 @@ async function bundleProductionServer(): Promise<void> {
   }
 }
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   await ensureGeneratedBangData(true);
   const allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled();
   console.log(

@@ -1,10 +1,14 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
+  main as buildProductionAssets,
+  bundleProductionServer,
+  bundleServiceWorker,
   createCacheVersion,
   precacheFileInputs,
   requiredAppAssetPaths,
 } from "../scripts/build";
 import {
+  bundleUI,
   configureBangDataAsset,
   configureCustomSuggestOption,
   configureFallbackAsset,
@@ -55,6 +59,99 @@ describe("build cache version", () => {
     ).not.toBe(version);
   });
 
+  test("bundles service worker with cache identity defines", async () => {
+    const buildSpy = spyOn(Bun, "build").mockResolvedValue({
+      success: true,
+      outputs: [],
+      logs: [],
+    } as unknown as Bun.BuildOutput);
+    try {
+      await bundleServiceWorker(
+        "sw.js",
+        "fb-test",
+        ["/chunk-a.js"],
+        "/bangs-a.bin",
+        "/fallback-a.js"
+      );
+
+      expect(buildSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          entrypoints: ["src/sw/sw.ts"],
+          naming: "sw.js",
+          target: "browser",
+          define: expect.objectContaining({
+            __BANG_DATA_ASSET__: '"/bangs-a.bin"',
+            __FALLBACK_ASSET__: '"/fallback-a.js"',
+            __CACHE_VERSION__: '"fb-test"',
+            __REQUIRED_APP_ASSETS__: '["/chunk-a.js"]',
+            __IS_DEV__: "false",
+          }),
+        })
+      );
+    } finally {
+      buildSpy.mockRestore();
+    }
+  });
+
+  test("surfaces service worker and server bundle failures", async () => {
+    const buildSpy = spyOn(Bun, "build").mockResolvedValue({
+      success: false,
+      outputs: [],
+      logs: [new Error("boom")],
+    } as unknown as Bun.BuildOutput);
+    try {
+      await expect(
+        bundleServiceWorker(
+          "sw.js",
+          "fb-test",
+          [],
+          "/bangs.bin",
+          "/fallback.js"
+        )
+      ).rejects.toThrow("Failed to bundle sw.js");
+      await expect(bundleProductionServer()).rejects.toThrow(
+        "Failed to bundle production server"
+      );
+    } finally {
+      buildSpy.mockRestore();
+    }
+  });
+
+  test("bundles UI and returns the emitted fallback asset", async () => {
+    const buildSpy = spyOn(Bun, "build")
+      .mockResolvedValueOnce({
+        success: true,
+        outputs: [{ kind: "chunk", path: "dist/chunk-12345678.js" }],
+        logs: [],
+      } as unknown as Bun.BuildOutput)
+      .mockResolvedValueOnce({
+        success: true,
+        outputs: [],
+        logs: [],
+      } as unknown as Bun.BuildOutput)
+      .mockResolvedValueOnce({
+        success: true,
+        outputs: [{ kind: "entry-point", path: "dist/fallback-abcdef12.js" }],
+        logs: [],
+      } as unknown as Bun.BuildOutput);
+    try {
+      const result = await bundleUI(
+        true,
+        "/bangs-meta-a.bin",
+        "fallback-[hash].js",
+        "/bangs-a.bin"
+      );
+      expect(result.fallbackAsset).toBe("/fallback-abcdef12.js");
+      expect(result.appOutputs).toHaveLength(1);
+      expect(result.appOutputs[0]).toMatchObject({
+        kind: "chunk",
+        path: "dist/chunk-12345678.js",
+      });
+      expect(buildSpy).toHaveBeenCalledTimes(3);
+    } finally {
+      buildSpy.mockRestore();
+    }
+  });
   test("maps every concrete core and chunk precache input", () => {
     expect(precacheFileInputs(["/chunk-abc12345.js"])).toEqual([
       ["/bangs.bin", "dist/bangs.bin"],
@@ -69,6 +166,74 @@ describe("build cache version", () => {
     ]);
   });
 
+  test("runs the production build workflow with mocked bundles", async () => {
+    const buildSpy = spyOn(Bun, "build").mockImplementation(async (config) => {
+      const entry = config.entrypoints?.[0];
+      const outdir = config.outdir ?? "dist";
+      const naming = config.naming ?? "out.js";
+      if (entry === "src/ui/app.ts") {
+        const path = `${outdir}/app.js`;
+        await Bun.write(path, "console.log('app')");
+        return {
+          success: true,
+          outputs: [{ kind: "entry-point", path }],
+          logs: [],
+        } as unknown as Bun.BuildOutput;
+      }
+      if (entry === "src/ui/bench/index.ts") {
+        const path = `${outdir}/bench.js`;
+        await Bun.write(path, "console.log('bench')");
+        return {
+          success: true,
+          outputs: [{ kind: "entry-point", path }],
+          logs: [],
+        } as unknown as Bun.BuildOutput;
+      }
+      if (entry === "src/ui/fallback.ts") {
+        const path = `${outdir}/${String(naming).replace("[hash]", "abcdef12").replace("[ext]", "js")}`;
+        await Bun.write(path, "console.log('fallback')");
+        return {
+          success: true,
+          outputs: [{ kind: "entry-point", path }],
+          logs: [],
+        } as unknown as Bun.BuildOutput;
+      }
+      if (entry === "src/sw/sw.ts") {
+        const path = `${outdir}/${naming}`;
+        await Bun.write(
+          path,
+          `console.log(${config.define?.__CACHE_VERSION__ ?? '"sw"'})`
+        );
+        return {
+          success: true,
+          outputs: [{ kind: "entry-point", path }],
+          logs: [],
+        } as unknown as Bun.BuildOutput;
+      }
+      if (entry === "scripts/start.ts") {
+        const path = `${outdir}/server.js`;
+        await Bun.write(path, "console.log('server')");
+        return {
+          success: true,
+          outputs: [{ kind: "entry-point", path }],
+          logs: [],
+        } as unknown as Bun.BuildOutput;
+      }
+      throw new Error(`Unexpected build entry ${entry}`);
+    });
+    const logSpy = spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      await buildProductionAssets();
+      expect(buildSpy).toHaveBeenCalledTimes(6);
+      expect(await Bun.file("dist/_headers").text()).toContain("/sw.js");
+      expect([...new Bun.Glob("*.br").scanSync("dist")].length).toBeGreaterThan(
+        0
+      );
+    } finally {
+      logSpy.mockRestore();
+      buildSpy.mockRestore();
+    }
+  });
   test("maps a content-hashed binary asset", () => {
     expect(precacheFileInputs([], "/bangs-0123456789ab.bin")[0]).toEqual([
       "/bangs-0123456789ab.bin",
@@ -114,9 +279,9 @@ describe("custom suggestion build flag", () => {
   });
 
   test("requires the build-time insertion marker", () => {
-    expect(() => configureCustomSuggestOption("<select></select>", true)).toThrow(
-      "Custom suggestion provider marker is missing"
-    );
+    expect(() =>
+      configureCustomSuggestOption("<select></select>", true)
+    ).toThrow("Custom suggestion provider marker is missing");
   });
   test("omits the custom provider from disabled builds", () => {
     const html = configureCustomSuggestOption(source, false);
