@@ -1,7 +1,10 @@
 .git
+.codegraph
 node_modules
 test-results/
 dist
+dist-*
+*.tsbuildinfo
 *.md
 LICENSE
 NOTICE

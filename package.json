@@ -13,6 +13,7 @@
     "build:css": "bun -e \"import { generateCSS } from './scripts/shared.ts'; await generateCSS()\"",
     "dev": "bun --hot scripts/dev.ts",
     "start": "bun scripts/start.ts",
+    "start:bundled": "bun dist-server/server.js",
     "check": "biome check",
     "typecheck": "tsc --build",
     "fix": "biome check --write",
@@ -20,7 +21,7 @@
     "profile:private": "DIST_DIR=dist-e2e ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=true bun run build && PROFILE_PRIVATE_REDIRECT=true DIST_DIR=dist-e2e ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=true bunx playwright test tests/e2e/private-perf.e2e.ts --workers=1",
     "profile:quick": "bun scripts/profile.ts --quick",
     "profile:cpu": "bun --cpu-prof --cpu-prof-md --cpu-prof-dir profiles scripts/profile.ts",
-    "clean": "bun -e \"import{rmSync}from'fs';rmSync('dist',{recursive:true,force:true})\"",
+    "clean": "bun -e \"import{rmSync}from'fs';for(const path of ['dist','dist-server'])rmSync(path,{recursive:true,force:true})\"",
     "test": "bun test",
     "test:e2e": "DIST_DIR=dist-e2e ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=true bun run build && DIST_DIR=dist-e2e ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=true bunx playwright test --workers=1"
   },

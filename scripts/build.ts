@@ -18,6 +18,7 @@ import {
 } from "./shared";
 
 const PRELIMINARY_SW_PATH = `${DIST_DIR}/sw-cache-input.js`;
+const SERVER_DIST_DIR = "dist-server";
 
 export interface CacheVersionInput {
   bytes: Uint8Array;
@@ -105,6 +106,20 @@ async function bundleServiceWorker(
   }
 }
 
+async function bundleProductionServer(): Promise<void> {
+  const result = await Bun.build({
+    entrypoints: ["scripts/start.ts"],
+    outdir: SERVER_DIST_DIR,
+    naming: "server.js",
+    minify: true,
+    target: "bun",
+    format: "esm",
+  });
+  if (!result.success) {
+    throw new AggregateError(result.logs, "Failed to bundle production server");
+  }
+}
+
 async function main(): Promise<void> {
   await ensureGeneratedBangData(true);
   const allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled();
@@ -113,8 +128,14 @@ async function main(): Promise<void> {
   );
 
   // Start from a clean dist to avoid stale artifacts (e.g. orphaned .br chunks).
-  await rm(DIST_DIR, { recursive: true, force: true });
-  await mkdir(DIST_DIR, { recursive: true });
+  await Promise.all([
+    rm(DIST_DIR, { recursive: true, force: true }),
+    rm(SERVER_DIST_DIR, { recursive: true, force: true }),
+  ]);
+  await Promise.all([
+    mkdir(DIST_DIR, { recursive: true }),
+    mkdir(SERVER_DIST_DIR, { recursive: true }),
+  ]);
   const bangDataBytes = await Bun.file("src/generated/bangs.bin").bytes();
   const bangDataHash = createHash("sha256")
     .update(bangDataBytes)
@@ -199,6 +220,9 @@ async function main(): Promise<void> {
     bangDataAsset,
     fallbackAsset
   );
+
+  console.log("=== Bundle production server ===");
+  await bundleProductionServer();
 
   console.log("=== Generate _headers with CSP ===");
   const { "Content-Security-Policy": pageCsp, ...baseHeaders } = pageHeaders(

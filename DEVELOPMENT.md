@@ -17,6 +17,7 @@ bun run codegen    # fetch DDG/Kagi sources, merge, and generate bang artifacts
 bun run build      # install locked dependencies, then bundle, minify + pre-compress with Brotli (auto-runs codegen --from-merged if generated bang files are missing)
 bun run dev        # bundle + dev server with file watching & live reload (auto-runs codegen if needed)
 bun run start      # serve pre-built dist/ (run `bun run build` first)
+bun run start:bundled # serve dist/ with the bundled production server
 bun run typecheck  # type-check with tsc (no emit)
 bun run profile    # run performance profile benchmarks (auto-runs codegen --from-merged if generated bang files are missing)
 bun run profile:private # build and profile private hash redirects in Chromium, Firefox, and WebKit
@@ -25,7 +26,7 @@ bun run profile:cpu   # write Bun CPU profiles under profiles/
 bun audit          # audit dependencies for known vulnerabilities
 bun test           # run unit, integration, performance, and docs tests
 bun run test:e2e   # run Playwright end-to-end tests (build + browser run)
-bun run clean      # remove dist/
+bun run clean      # remove dist/ and dist-server/
 ```
 
 ## Project structure
@@ -260,10 +261,11 @@ On **self-hosted** (Docker/Railway via `start.ts`), the Bun server sets headers 
 
 1. **Bundle UI + fallback + bench** — Bun bundles `src/ui/app.ts` (with code splitting) to `dist/app.js` plus lazy chunks, the private/restricted-browser redirect fallback to a content-hashed `dist/fallback-*.js`, and `src/ui/bench/index.ts` to `dist/bench.js`. Every app chunk and the standalone fallback are marked as required offline dependencies regardless of size; benchmark assets are cached only when opened.
 2. **Bundle Service Worker** — Bun bundles `src/sw/sw.ts` and the sparse generated lookups into `dist/sw.js`, and copies `bangs.bin` and `bangs-meta.bin` to content-hashed production paths. The worker resolves controlled `#q=` navigations through the same fetch path as `?q=` and returns a minimal synthetic navigation document so the private fragment is not inherited by the destination. The lookup and fallback paths are injected into the worker and first-page fallback; the metadata path is injected into the UI bundle and included in deferred precaching. Content-hashed assets receive immutable cache headers. Hashes of the binaries, versioned assets, and a preliminary Service Worker bundle determine the injected cache version. Installation activates without lookup data; activation metadata opportunistically includes non-authoritative default/lucky URLs and both syntax markers when they can be derived without more I/O, and never seeds those compact base settings into the authoritative cache. The fallback begins its IndexedDB snapshot read as soon as its module evaluates, overlapping settings I/O with the bang-data request. First-page fallback transfers its initialized buffer and compiled redirect settings to the worker, while ordinary controlled pages warm binary data, settings, and frecency concurrently. Once settings are materialized, the worker persists a versioned registration record containing default/lucky URLs, syntax, every custom definition, and personalized hot entries; cold redirects use the canonical parser for every query form, checking personalized and generated hot entries before loading `bangs.bin` for a remaining built-in or advanced lookup. Previous caches remain available until all required current assets have been cached successfully.
-3. **Generate CSS** — UnoCSS scans `src/ui/**/*.ts`, `src/ui/home/index.html`, and `src/ui/bench/index.html`, emitting atomic utility classes
-4. **Inline & minify HTML** — CSS is inlined into `<style>`, HTML is minified with `@minify-html/node`
-5. **Generate static-host headers** — Writes `dist/_headers` with shared security headers, per-page inline-script hashes, the stricter Service Worker CSP, and the OpenSearch content type
-6. **Pre-compress** — Eligible static assets, including both bang binaries, are compressed with Brotli (max quality) and written as `.br` files alongside the originals. The production server serves these automatically when the client supports it, falling back to uncompressed
+3. **Bundle production server** — Bun bundles `scripts/start.ts` and all transitive runtime modules into `dist-server/server.js`. This output stays outside the public `dist/` tree and is the only server code copied into the runtime container.
+4. **Generate CSS** — UnoCSS scans `src/ui/**/*.ts`, `src/ui/home/index.html`, and `src/ui/bench/index.html`, emitting atomic utility classes
+5. **Inline & minify HTML** — CSS is inlined into `<style>`, HTML is minified with `@minify-html/node`
+6. **Generate static-host headers** — Writes `dist/_headers` with shared security headers, per-page inline-script hashes, the stricter Service Worker CSP, and the OpenSearch content type
+7. **Pre-compress** — Eligible static assets, including both bang binaries, are compressed with Brotli (max quality) and written as `.br` files alongside the originals. The production server serves these automatically when the client supports it, falling back to uncompressed
 
 If generated bang artifacts are missing, both `bun run build` and `bun run profile` automatically run `bun run codegen --from-merged` first.
 
@@ -306,7 +308,7 @@ The in-memory state (`frecencyCounts` plus `topFrecency` in `idb.ts`) is hydrate
 
 ## Production server
 
-`bun run start` serves the pre-built `dist/` directory with no build step, file watching, or live reload injection. Useful for testing the production build locally. Requires `bun run build` to have been run first.
+`bun run start` serves the pre-built `dist/` directory from TypeScript with no build step, file watching, or live reload injection. `bun run start:bundled` runs the same server from the production `dist-server/server.js` bundle. Both require `bun run build` to have been run first.
 
 `PUBLIC_ORIGIN` optionally overrides the request origin used in `/opensearch.xml`, which is useful behind reverse proxies and TLS termination. It must be an absolute HTTP(S) URL without credentials. The URL is canonicalized to its origin, so trailing slashes, paths, queries, and fragments are discarded. When unset, the handler uses the request origin (including on Cloudflare Pages, where the optional binding is read from the Function context). An invalid configured value fails closed with a `500` response.
 
@@ -315,7 +317,7 @@ The in-memory state (`frecencyCounts` plus `topFrecency` in `idb.ts`) is hydrate
 The Dockerfile uses a multi-stage build to produce a minimal runtime image:
 
 1. **Build stage** — Installs dependencies, runs `codegen --from-merged` to generate bang artifacts from `data/bangs.json`, then runs `build` to bundle and pre-compress all assets
-2. **Runtime stage** — Copies `dist/`, `scripts/start.ts`, and only the source modules needed at runtime for dynamic `/suggest` and `/opensearch.xml` handling (plus generated trie data). Dev dependencies are not installed in the final image
+2. **Runtime stage** — Copies `dist/` and the single bundled `dist-server/server.js` entrypoint. Source files, generated source modules, and dev dependencies are not present in the final image
 
 The production server exposes `GET /health`, and the runtime image defines a Docker `HEALTHCHECK` against that endpoint.
 
