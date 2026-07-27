@@ -362,3 +362,19 @@ export function trackBangUsage(trigger: string): {
     topChanged,
   };
 }
+
+export function resetIdbStateForTests(): void {
+  persistPromise = null;
+  persistPending = null;
+  cachedRedirect = null;
+  redirectSettingsGeneration = 0;
+  redirectSettingsPromise = null;
+  redirectSettingsInvalidationPromise = null;
+  redirectSettingsPersistencePromise = null;
+  frecencyCounts = null;
+  frecencyLoaded = false;
+  loadFrecencyPromise = null;
+  topFrecency = [];
+  lastDecayTs = 0;
+  resetDB();
+}

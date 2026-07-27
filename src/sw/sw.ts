@@ -54,20 +54,33 @@ declare const __IS_DEV__: boolean;
 
 const CACHE_PREFIX = "fb-";
 const LEGACY_CACHE_NAMES = new Set(["flashbang-dev"]);
-const CACHE_NAME = __CACHE_VERSION__.startsWith(CACHE_PREFIX)
-  ? __CACHE_VERSION__
-  : `${CACHE_PREFIX}${__CACHE_VERSION__}`;
-const BANG_DATA_ASSET = __BANG_DATA_ASSET__;
-const APP_ASSETS = [
+const RAW_CACHE_VERSION =
+  typeof __CACHE_VERSION__ === "undefined" ? "test-cache" : __CACHE_VERSION__;
+const CACHE_NAME = RAW_CACHE_VERSION.startsWith(CACHE_PREFIX)
+  ? RAW_CACHE_VERSION
+  : `${CACHE_PREFIX}${RAW_CACHE_VERSION}`;
+const BANG_DATA_ASSET =
+  typeof __BANG_DATA_ASSET__ === "undefined"
+    ? "/bangs.bin"
+    : __BANG_DATA_ASSET__;
+const BASE_APP_ASSETS = [
   "/home",
   "/app.js",
-  __FALLBACK_ASSET__,
+  typeof __FALLBACK_ASSET__ === "undefined"
+    ? "/fallback.js"
+    : __FALLBACK_ASSET__,
   "/icon.svg",
   "/manifest.json",
-  ...__REQUIRED_APP_ASSETS__,
 ];
+function appAssets(): string[] {
+  return [
+    ...BASE_APP_ASSETS,
+    ...(typeof __REQUIRED_APP_ASSETS__ === "undefined"
+      ? []
+      : __REQUIRED_APP_ASSETS__),
+  ];
+}
 
-const DEFERRED_ASSETS = APP_ASSETS;
 const PRECACHE_CONCURRENCY = 4;
 let deferredPrecachePromise: Promise<void> | null = null;
 let bangDataPromise: Promise<void> | null = null;
@@ -89,40 +102,49 @@ let benchmarkState: {
 const RESOLVED_PROMISE: Promise<void> = Promise.resolve();
 const NO_HOT_BOOT_PROMISE: Promise<HotBootRecord | null> =
   Promise.resolve(null);
-const navigationPreload = self.registration?.navigationPreload;
-let hotBootAvailable = navigationPreload !== undefined;
+function currentNavigationPreload(): NavigationPreloadManager | undefined {
+  return typeof self === "undefined"
+    ? undefined
+    : self.registration?.navigationPreload;
+}
+let hotBootAvailable = currentNavigationPreload() !== undefined;
 let hotBootGeneration = 0;
 let currentHotBoot: HotBootRecord | null = null;
-const initialHotBootGeneration = hotBootGeneration;
-let hotBootPromise: Promise<HotBootRecord | null> = navigationPreload
-  ? navigationPreload
-      .getState()
-      .then((state) => {
-        const raw = state.headerValue ?? "";
-        const record = state.enabled
-          ? null
-          : decodeHotBootRecord(raw, CACHE_NAME);
-        if (hotBootGeneration !== initialHotBootGeneration) {
-          return currentHotBoot;
-        }
-        currentHotBoot = record;
-        if (record?.settings) {
-          seedRedirectSettings(record.settings);
-        }
-        return record;
-      })
-      .catch(() => {
-        if (hotBootGeneration === initialHotBootGeneration) {
-          hotBootAvailable = false;
-        }
-        return currentHotBoot;
-      })
-  : NO_HOT_BOOT_PROMISE;
+let hotBootPromise: Promise<HotBootRecord | null> = readInitialHotBoot();
 let hotBootMutation: Promise<void> = RESOLVED_PROMISE;
 const hotBootUpdateTokens = new Set<string>();
 const swallowError = () => {
   /* best-effort */
 };
+
+function readInitialHotBoot(): Promise<HotBootRecord | null> {
+  const navigationPreload = currentNavigationPreload();
+  const initialHotBootGeneration = hotBootGeneration;
+  return navigationPreload
+    ? navigationPreload
+        .getState()
+        .then((state) => {
+          const raw = state.headerValue ?? "";
+          const record = state.enabled
+            ? null
+            : decodeHotBootRecord(raw, CACHE_NAME);
+          if (hotBootGeneration !== initialHotBootGeneration) {
+            return currentHotBoot;
+          }
+          currentHotBoot = record;
+          if (record?.settings) {
+            seedRedirectSettings(record.settings);
+          }
+          return record;
+        })
+        .catch(() => {
+          if (hotBootGeneration === initialHotBootGeneration) {
+            hotBootAvailable = false;
+          }
+          return currentHotBoot;
+        })
+    : NO_HOT_BOOT_PROMISE;
+}
 
 function readCurrentRedirectSettings(
   prepared?: Promise<PreparedRedirectSettings>,
@@ -159,6 +181,7 @@ async function disableHotBoot(): Promise<void> {
   hotBootGeneration++;
   currentHotBoot = null;
   hotBootPromise = NO_HOT_BOOT_PROMISE;
+  const navigationPreload = currentNavigationPreload();
   if (!(navigationPreload && hotBootAvailable)) {
     return;
   }
@@ -175,6 +198,7 @@ async function publishHotBoot(includeSettings = false): Promise<void> {
   if (hotBootUpdateTokens.size > 0) {
     return;
   }
+  const navigationPreload = currentNavigationPreload();
   if (!(navigationPreload && hotBootAvailable)) {
     if (includeSettings && isBangDataInitialized() && !getCachedSettings()) {
       await readCurrentRedirectSettings();
@@ -228,7 +252,10 @@ async function publishHotBoot(includeSettings = false): Promise<void> {
 
 const BENCHMARK_TARGET_PATH = "/__flashbang-bench-target";
 const BENCHMARK_TARGET_HTML = `<!doctype html><meta charset="utf-8"><title>flashbang benchmark target</title><script>opener?.postMessage({type:"flashbang-benchmark-navigation",token:new URLSearchParams(location.search).get("fb-bench"),sequence:Number(new URLSearchParams(location.search).get("fb-seq"))},location.origin)</script>`;
-const APP_ORIGIN = self.location.origin;
+const APP_ORIGIN =
+  typeof self === "undefined" || self.location === undefined
+    ? "https://flashbang.local"
+    : self.location.origin;
 const ROOT_URL = `${APP_ORIGIN}/`;
 const INDEX_URL = `${APP_ORIGIN}/index.html`;
 
@@ -410,7 +437,7 @@ function ensureDeferredPrecache(): Promise<void> {
   if (deferredPrecachePromise) {
     return deferredPrecachePromise;
   }
-  const warming = precacheAssets(CACHE_NAME, DEFERRED_ASSETS).then(() =>
+  const warming = precacheAssets(CACHE_NAME, appAssets()).then(() =>
     deleteOldCaches(CACHE_NAME)
   );
   let current: Promise<void>;
@@ -513,11 +540,11 @@ function queueBangSideEffects(e: FetchEvent, trigger: string): void {
   );
 }
 
-self.addEventListener("install", (e: ExtendableEvent) => {
+export function handleInstall(e: ExtendableEvent): void {
   e.waitUntil(self.skipWaiting());
-});
+}
 
-self.addEventListener("activate", (e: ExtendableEvent) => {
+export function handleActivate(e: ExtendableEvent): void {
   e.waitUntil(
     self.clients.claim().then(() =>
       queueHotBootMutation(async () => {
@@ -526,9 +553,9 @@ self.addEventListener("activate", (e: ExtendableEvent) => {
       }).catch(swallowError)
     )
   );
-});
+}
 
-self.addEventListener("message", (e: ExtendableMessageEvent) => {
+export function handleMessage(e: ExtendableMessageEvent): void {
   if (e.origin !== self.location.origin) {
     return;
   }
@@ -709,7 +736,7 @@ self.addEventListener("message", (e: ExtendableMessageEvent) => {
       );
     }
   }
-});
+}
 
 function respondToRedirect(
   e: FetchEvent,
@@ -863,10 +890,14 @@ function refreshHome(): Response {
   });
 }
 
-self.addEventListener("fetch", (e: FetchEvent) => {
+export function handleFetch(e: FetchEvent): void {
   const raw = e.request.url;
 
-  if (__IS_DEV__ && raw.includes("/__dev/")) {
+  if (
+    typeof __IS_DEV__ !== "undefined" &&
+    __IS_DEV__ &&
+    raw.includes("/__dev/")
+  ) {
     return;
   }
 
@@ -1009,4 +1040,33 @@ self.addEventListener("fetch", (e: FetchEvent) => {
       )
       .catch(() => new Response("Offline", { status: 503 }))
   );
-});
+}
+
+export function registerServiceWorker(): void {
+  if (
+    typeof self === "undefined" ||
+    typeof self.addEventListener !== "function" ||
+    self.clients === undefined
+  ) {
+    return;
+  }
+  self.addEventListener("install", handleInstall);
+  self.addEventListener("activate", handleActivate);
+  self.addEventListener("message", handleMessage);
+  self.addEventListener("fetch", handleFetch);
+}
+
+export function resetSwStateForTests(): void {
+  deferredPrecachePromise = null;
+  bangDataPromise = null;
+  runtimeWarmPromise = null;
+  benchmarkState = null;
+  hotBootAvailable = currentNavigationPreload() !== undefined;
+  hotBootGeneration = 0;
+  currentHotBoot = null;
+  hotBootPromise = readInitialHotBoot();
+  hotBootMutation = RESOLVED_PROMISE;
+  hotBootUpdateTokens.clear();
+}
+
+registerServiceWorker();

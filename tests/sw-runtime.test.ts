@@ -14,6 +14,14 @@ import {
   redirectRawUrl,
 } from "../src/sw/redirect";
 import type { RedirectSettingsSnapshot } from "../src/sw/redirect-settings";
+import {
+  handleActivate,
+  handleFetch,
+  handleInstall,
+  handleMessage,
+  registerServiceWorker,
+  resetSwStateForTests,
+} from "../src/sw/sw";
 import { loadTestBangData } from "./helpers/bang-data";
 import { installFakeIndexedDb, reqToPromise } from "./helpers/fake-indexeddb";
 
@@ -36,7 +44,6 @@ let navigationPreloadWrites: string[] = [];
 let rejectNavigationPreloadWrites = false;
 let fetchImpl: (input: RequestInfo | URL) => Promise<Response> = () =>
   Promise.resolve(new Response("ok"));
-let loadedCanonicalRuntime = false;
 
 function loadSharedIdb() {
   return import("../src/shared/idb");
@@ -278,18 +285,14 @@ function createFetchEvent(url: string, clientId = "", mode?: RequestMode) {
   };
 }
 
-async function loadSwRuntime(
+function loadSwRuntime(
   requiredAppAssets: readonly string[] = [],
   preserveCaches = false,
   navigationPreloadState?: NavigationPreloadState
 ) {
   setupSwGlobals(requiredAppAssets, preserveCaches, navigationPreloadState);
-  if (!loadedCanonicalRuntime) {
-    loadedCanonicalRuntime = true;
-    await import("../src/sw/sw.ts");
-    return;
-  }
-  await import(`../src/sw/sw.ts?test=${Date.now()}-${Math.random()}`);
+  resetSwStateForTests();
+  registerServiceWorker();
 }
 
 beforeEach(async () => {
@@ -319,6 +322,166 @@ afterEach(async () => {
 });
 
 describe("sw runtime with real modules", () => {
+  test("canonical worker import drives lifecycle, message, hot-boot, cache, and fetch paths", async () => {
+    const state: NavigationPreloadState = {
+      enabled: false,
+      headerValue: "true",
+    };
+    await loadSwRuntime(["/chunk-canonical.js"], false, state);
+
+    const installEvt = createExtendableEvent();
+    handleInstall(installEvt.event);
+    await Promise.all(installEvt.waits);
+    expect(skipWaitingCalls).toBe(1);
+
+    const activateEvt = createExtendableEvent();
+    handleActivate(activateEvt.event);
+    await Promise.all(activateEvt.waits);
+    expect(claimCalls).toBe(1);
+
+    const bangData = await Bun.file("src/generated/bangs.bin").arrayBuffer();
+    const seedEvt = createMessageEvent({
+      type: "seed-runtime",
+      asset: "/bangs.bin",
+      bangData,
+      redirectSettings: {
+        custom: Object.create(null),
+        defaultUrl: ["https://canonical.example/search?q=", ""],
+        luckyUrl: null,
+      },
+    });
+    handleMessage(seedEvt.event);
+    await Promise.all(seedEvt.waits);
+    expect(cachePutCalls).toContain("/bangs.bin");
+
+    const redirectReplies: unknown[] = [];
+    handleMessage(
+      createMessageEvent(
+        { type: "redirect", query: "hello" },
+        {
+          id: "client-1",
+          postMessage: (message) => redirectReplies.push(message),
+        }
+      ).event
+    );
+    expect((redirectReplies[0] as { url: string }).url).toBe(
+      "https://canonical.example/search?q=hello"
+    );
+
+    const token = "canonical-token";
+    const beginReplies: unknown[] = [];
+    const begin = createMessageEvent(
+      { type: "hot-boot-begin", token },
+      undefined,
+      (message) => beginReplies.push(message)
+    );
+    handleMessage(begin.event);
+    await Promise.all(begin.waits);
+    expect(beginReplies).toEqual([true]);
+
+    const endReplies: unknown[] = [];
+    const end = createMessageEvent(
+      { type: "hot-boot-end", token },
+      undefined,
+      (message) => endReplies.push(message)
+    );
+    handleMessage(end.event);
+    await Promise.all(end.waits);
+    expect(endReplies).toEqual([true]);
+
+    const invalidateReplies: unknown[] = [];
+    const invalidate = createMessageEvent(
+      { type: "invalidate" },
+      undefined,
+      (message) => invalidateReplies.push(message)
+    );
+    handleMessage(invalidate.event);
+    await Promise.all(invalidate.waits);
+    expect(invalidateReplies).toEqual([true]);
+
+    const claimEvt = createMessageEvent({ type: "claim" });
+    handleMessage(claimEvt.event);
+    await Promise.all(claimEvt.waits);
+    expect(claimCalls).toBe(2);
+
+    const benchmarkReplies: unknown[] = [];
+    const benchmarkOn = createMessageEvent(
+      { type: "benchmark-mode", enabled: true, token: "bench-token" },
+      {
+        id: "bench-client",
+        postMessage() {
+          /* message port receives benchmark replies */
+        },
+      },
+      (message) => benchmarkReplies.push(message)
+    );
+    handleMessage(benchmarkOn.event);
+    await Promise.all(benchmarkOn.waits);
+    expect((benchmarkReplies[0] as { enabled: boolean }).enabled).toBe(true);
+
+    const benchmarkFetch = createFetchEvent(
+      "https://flashbang.local/?q=plain+query&fb-bench=bench-token&fb-seq=7",
+      "bench-client",
+      "navigate"
+    );
+    handleFetch(benchmarkFetch.event);
+    expect((await benchmarkFetch.response()).headers.get("Location")).toContain(
+      "/__flashbang-bench-target"
+    );
+
+    const targetFetch = createFetchEvent(
+      "https://flashbang.local/__flashbang-bench-target?fb-bench=bench-token",
+      "bench-client",
+      "navigate"
+    );
+    handleFetch(targetFetch.event);
+    expect(await (await targetFetch.response()).text()).toContain(
+      "flashbang-benchmark-navigation"
+    );
+
+    const countReplies: unknown[] = [];
+    handleMessage(
+      createMessageEvent(
+        { type: "benchmark-count", token: "bench-token" },
+        {
+          id: "bench-client",
+          postMessage() {
+            /* message port receives benchmark counts */
+          },
+        },
+        (message) => countReplies.push(message)
+      ).event
+    );
+    expect(
+      (countReplies[0] as { navigationCount: number }).navigationCount
+    ).toBe(1);
+
+    const privateEmpty = createFetchEvent(
+      "https://flashbang.local/home#q=",
+      "",
+      "navigate"
+    );
+    handleFetch(privateEmpty.event);
+    expect((await privateEmpty.response()).headers.get("Refresh")).toContain(
+      "/home"
+    );
+
+    const privateRedirect = createFetchEvent(
+      "https://flashbang.local/home#q=plain%20query",
+      "",
+      "navigate"
+    );
+    handleFetch(privateRedirect.event);
+    expect(await (await privateRedirect.response()).text()).toContain(
+      "location.replace"
+    );
+
+    fetchImpl = () => Promise.reject(new Error("offline"));
+    const offlineAsset = createFetchEvent("https://flashbang.local/missing.js");
+    handleFetch(offlineAsset.event);
+    expect((await offlineAsset.response()).status).toBe(503);
+  });
+
   test("lifecycle defers app precaching and preserves unrelated caches", async () => {
     await loadSwRuntime(["/chunk-catalog123.js"]);
     expect(typeof handlers.install).toBe("function");

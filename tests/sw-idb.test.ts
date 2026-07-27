@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { REDIRECT_SETTINGS_SNAPSHOT_KEY } from "../src/shared/constants";
+import * as coveredSwIdb from "../src/sw/idb";
 import {
   compileTriggerSyntax,
   type RedirectSettings,
@@ -8,12 +9,11 @@ import {
 import type { PreparedRedirectSettings } from "../src/sw/redirect-settings";
 import { loadTestBangData } from "./helpers/bang-data";
 import { installFakeIndexedDb, reqToPromise } from "./helpers/fake-indexeddb";
-import * as coveredSwIdb from "../src/sw/idb.ts";
 
 await loadTestBangData();
 
 let restoreIndexedDb: (() => void) | null = null;
-let swIdbModule: typeof import("../src/sw/idb");
+const swIdbModule: typeof import("../src/sw/idb") = coveredSwIdb;
 
 function loadSharedIdb() {
   return import("../src/shared/idb");
@@ -58,9 +58,7 @@ beforeEach(async () => {
   restoreIndexedDb = installFakeIndexedDb();
   const shared = await loadSharedIdb();
   shared.resetDB();
-  swIdbModule = await import(
-    `../src/sw/idb.ts?test=${Date.now()}-${Math.random()}`
-  );
+  swIdbModule.resetIdbStateForTests();
 });
 
 afterEach(() => {
@@ -309,9 +307,8 @@ describe("sw/idb redirect settings", () => {
       reqToPromise(tx.objectStore("settings").delete("default-bang")),
       reqToPromise(tx.objectStore("custom-bangs").clear()),
     ]);
-    const restarted = await import(
-      `../src/sw/idb.ts?restart=${Date.now()}-${Math.random()}`
-    );
+    coveredSwIdb.resetIdbStateForTests();
+    const restarted = coveredSwIdb;
     const cached = await restarted.readRedirectSettings(
       undefined,
       "catalog-a",
@@ -362,9 +359,8 @@ describe("sw/idb redirect settings", () => {
         .objectStore("settings")
         .put({ key: "default-bang", value: "ddg" })
     );
-    const restarted = await import(
-      `../src/sw/idb.ts?catalog=${Date.now()}-${Math.random()}`
-    );
+    coveredSwIdb.resetIdbStateForTests();
+    const restarted = coveredSwIdb;
     const rebuilt = await restarted.readRedirectSettings(
       undefined,
       "catalog-b",
@@ -685,6 +681,26 @@ describe("sw/idb frecency", () => {
 });
 
 describe("shared IndexedDB recovery", () => {
+  test("closes and refreshes the cached connection on versionchange", async () => {
+    const shared = await loadSharedIdb();
+    shared.resetDB();
+    const first = await shared.openDB();
+    let closeCalls = 0;
+    const realClose = first.close.bind(first);
+    first.close = () => {
+      closeCalls++;
+      realClose();
+    };
+
+    first.onversionchange?.(
+      new Event("versionchange") as IDBVersionChangeEvent
+    );
+    const second = await shared.openDB();
+
+    expect(closeCalls).toBe(1);
+    expect(second).not.toBe(first);
+  });
+
   test("retries after a failed database open", async () => {
     const shared = await loadSharedIdb();
     shared.resetDB();
