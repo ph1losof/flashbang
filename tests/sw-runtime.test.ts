@@ -36,6 +36,7 @@ let navigationPreloadWrites: string[] = [];
 let rejectNavigationPreloadWrites = false;
 let fetchImpl: (input: RequestInfo | URL) => Promise<Response> = () =>
   Promise.resolve(new Response("ok"));
+let loadedCanonicalRuntime = false;
 
 function loadSharedIdb() {
   return import("../src/shared/idb");
@@ -283,6 +284,11 @@ async function loadSwRuntime(
   navigationPreloadState?: NavigationPreloadState
 ) {
   setupSwGlobals(requiredAppAssets, preserveCaches, navigationPreloadState);
+  if (!loadedCanonicalRuntime) {
+    loadedCanonicalRuntime = true;
+    await import("../src/sw/sw.ts");
+    return;
+  }
   await import(`../src/sw/sw.ts?test=${Date.now()}-${Math.random()}`);
 }
 

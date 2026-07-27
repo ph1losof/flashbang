@@ -8,6 +8,7 @@ import {
 import type { PreparedRedirectSettings } from "../src/sw/redirect-settings";
 import { loadTestBangData } from "./helpers/bang-data";
 import { installFakeIndexedDb, reqToPromise } from "./helpers/fake-indexeddb";
+import * as coveredSwIdb from "../src/sw/idb.ts";
 
 await loadTestBangData();
 
@@ -523,6 +524,67 @@ describe("sw/idb redirect settings", () => {
 });
 
 describe("sw/idb frecency", () => {
+  test("canonical module persists frecency usage through the shared worker singleton", async () => {
+    const realNow = Date.now;
+    try {
+      Date.now = () => 1_700_000_000_000;
+      await seedDb({ settings: [{ key: "frecency", value: "g:5,ddg:2" }] });
+      await coveredSwIdb.invalidateCache();
+
+      await coveredSwIdb.loadFrecency();
+      await coveredSwIdb.trackBangUsage("docs").persistence;
+
+      expect(coveredSwIdb.hasTopFrecency()).toBe(true);
+      expect(coveredSwIdb.getTopFrecencyRecord()).toMatchObject({
+        docs: 1,
+      });
+      const shared = await loadSharedIdb();
+      const db = await shared.openDB();
+      const record = await reqToPromise<{ value: string } | undefined>(
+        db
+          .transaction("settings", "readonly")
+          .objectStore("settings")
+          .get("frecency")
+      );
+      expect(record?.value).toContain("docs:1");
+    } finally {
+      Date.now = realNow;
+      await coveredSwIdb.invalidateCache();
+    }
+  });
+
+  test("canonical module keeps usage persistence stable when the IDB factory is temporarily unavailable", async () => {
+    await coveredSwIdb.invalidateCache();
+    const working = indexedDB;
+    let allowOpen = true;
+    (globalThis as { indexedDB: IDBFactory }).indexedDB = {
+      open(...args: Parameters<IDBFactory["open"]>) {
+        if (!allowOpen) {
+          throw new Error("disk unavailable");
+        }
+        return working.open(...args);
+      },
+    } as IDBFactory;
+
+    await coveredSwIdb.loadFrecency();
+    allowOpen = false;
+    await coveredSwIdb.trackBangUsage("yt").persistence;
+    expect(coveredSwIdb.getTopFrecencyRecord()).toMatchObject({ yt: 1 });
+
+    allowOpen = true;
+    const shared = await loadSharedIdb();
+    shared.resetDB();
+    const db = await shared.openDB();
+    const record = await reqToPromise<{ value: string } | undefined>(
+      db
+        .transaction("settings", "readonly")
+        .objectStore("settings")
+        .get("frecency")
+    );
+    expect(record?.value).toContain("yt:1");
+    await coveredSwIdb.invalidateCache();
+  });
+
   test("keeps frecency outside the redirect settings critical path", async () => {
     await seedDb({
       settings: [{ key: "frecency", value: `${Date.now()}|g:5,ddg:2` }],
