@@ -92,7 +92,7 @@ export async function bundleServiceWorker(
     naming,
     minify: true,
     target: "browser",
-    format: "esm",
+    format: "iife",
     define: {
       __BANG_DATA_ASSET__: JSON.stringify(bangDataAsset),
       __FALLBACK_ASSET__: JSON.stringify(fallbackAsset),

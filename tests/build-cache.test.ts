@@ -89,6 +89,7 @@ describe("build cache version", () => {
           entrypoints: ["src/sw/sw.ts"],
           naming: "sw.js",
           target: "browser",
+          format: "iife",
           define: expect.objectContaining({
             __BANG_DATA_ASSET__: '"/bangs-a.bin"',
             __FALLBACK_ASSET__: '"/fallback-a.js"',
