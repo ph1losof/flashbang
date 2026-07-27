@@ -7,9 +7,9 @@ import {
   type RedirectSettings,
   redirectRawUrl,
   redirectUrl,
-  type UrlParts,
 } from "../src/sw/redirect";
 import { loadTestBangData } from "./helpers/bang-data";
+import { splitUrlTemplate } from "./helpers/redirect-fixtures";
 import {
   referenceRedirectRawUrl,
   referenceRedirectUrl,
@@ -17,15 +17,8 @@ import {
 
 await loadTestBangData();
 
-const DEFAULT_URL: UrlParts = ["https://default.example/search?q=", ""];
-const LUCKY_URL: UrlParts = ["https://lucky.example/?q=", ""];
-
-function splitUrl(template: string): UrlParts {
-  const placeholder = template.indexOf("{}");
-  return placeholder === -1
-    ? [template, null]
-    : [template.substring(0, placeholder), template.substring(placeholder + 2)];
-}
+const DEFAULT_URL = splitUrlTemplate("https://default.example/search?q={}");
+const LUCKY_URL = splitUrlTemplate("https://lucky.example/?q={}");
 
 const capturePercent = compileCaptureUrl(
   "https://capture.example/$1/$2",
@@ -43,15 +36,15 @@ const docsSnap = compileSnapTarget("docs.example/reference")!;
 const CUSTOM: Record<string, CustomUrlParts> = {
   cap: capturePercent,
   docs: ["https://search.example/?q=", "", docsSnap],
-  g: splitUrl("https://google.example/search?q={}"),
-  gh: splitUrl("https://github.example/search?q={}"),
-  mdn: splitUrl("https://mdn.example/search?q={}"),
+  g: splitUrlTemplate("https://google.example/search?q={}"),
+  gh: splitUrlTemplate("https://github.example/search?q={}"),
+  mdn: splitUrlTemplate("https://mdn.example/search?q={}"),
   multi: ["https://multi.example/u/", "/again/{}?q={}"],
-  path: splitUrl("https://path.example/u/{}"),
+  path: splitUrlTemplate("https://path.example/u/{}"),
   pluscap: capturePlus,
   rawcap: captureRaw,
-  so: splitUrl("https://stackoverflow.example/search?q={}"),
-  w: splitUrl("https://wikipedia.example/search?q={}"),
+  so: splitUrlTemplate("https://stackoverflow.example/search?q={}"),
+  w: splitUrlTemplate("https://wikipedia.example/search?q={}"),
 };
 
 const SETTINGS: Array<readonly [string, RedirectSettings]> = [

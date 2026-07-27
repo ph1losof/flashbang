@@ -141,10 +141,10 @@ flashbang/
 ├── tests/
 │   ├── e2e/
 │   │   ├── flashbang.e2e.ts  # Playwright browser scenarios
+│   │   ├── helpers.ts         # Shared Playwright lifecycle helpers
 │   │   └── private-perf.e2e.ts # Manual private-redirect browser performance profile
 │   ├── helpers/
-│   │   ├── bang-data.ts       # Generated binary initialization for tests
-│   │   └── fake-indexeddb.ts # IndexedDB test double
+│   │   └── *.ts               # Shared unit-test fixtures, fakes, and reference helpers
 │   └── *.test.ts             # Unit, integration, performance, and docs checks
 ├── .dockerignore             # Files excluded from Docker build context
 ├── .gitignore                # Files excluded from version control

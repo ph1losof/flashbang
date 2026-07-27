@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { compileCaptureUrl } from "../src/shared/capture-template";
-import { REDIRECT_SETTINGS_SNAPSHOT_KEY } from "../src/shared/constants";
 import {
   createHotBootState,
   decodeHotBootRecord,
@@ -13,7 +12,6 @@ import {
   type RedirectSettings,
   redirectRawUrl,
 } from "../src/sw/redirect";
-import type { RedirectSettingsSnapshot } from "../src/sw/redirect-settings";
 import {
   handleActivate,
   handleFetch,
@@ -23,7 +21,12 @@ import {
   resetSwStateForTests,
 } from "../src/sw/sw";
 import { loadTestBangData } from "./helpers/bang-data";
-import { installFakeIndexedDb, reqToPromise } from "./helpers/fake-indexeddb";
+import { installFakeIndexedDb } from "./helpers/fake-indexeddb";
+import {
+  redirectSettings,
+  redirectSettingsSnapshot,
+} from "./helpers/redirect-fixtures";
+import { loadSharedIdb, resetSharedDb, seedDb } from "./helpers/shared-db";
 
 type SwHandler = (event: unknown) => Promise<void> | void;
 type HandlerMap = Partial<
@@ -44,34 +47,6 @@ let navigationPreloadWrites: string[] = [];
 let rejectNavigationPreloadWrites = false;
 let fetchImpl: (input: RequestInfo | URL) => Promise<Response> = () =>
   Promise.resolve(new Response("ok"));
-
-function loadSharedIdb() {
-  return import("../src/shared/idb");
-}
-
-async function seedDb(data: {
-  customBangs?: Array<{ trigger: string; url: string }>;
-  settings?: Array<{ key: string; value: string }>;
-}) {
-  const shared = await loadSharedIdb();
-  shared.resetDB();
-  const db = await shared.openDB();
-  const tx = db.transaction(["settings", "custom-bangs"], "readwrite");
-  const settingsStore = tx.objectStore("settings");
-  const customStore = tx.objectStore("custom-bangs");
-  await reqToPromise(settingsStore.delete(REDIRECT_SETTINGS_SNAPSHOT_KEY));
-
-  if (data.settings) {
-    for (const row of data.settings) {
-      await reqToPromise(settingsStore.put(row));
-    }
-  }
-  if (data.customBangs) {
-    for (const row of data.customBangs) {
-      await reqToPromise(customStore.put(row));
-    }
-  }
-}
 
 function requestUrl(input: RequestInfo | URL): string {
   if (typeof input === "string") {
@@ -310,8 +285,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  const shared = await loadSharedIdb();
-  shared.resetDB();
+  await resetSharedDb();
   const swIdb = await import("../src/sw/idb");
   swIdb.invalidateCache();
   restoreIndexedDb?.();
@@ -837,19 +811,17 @@ describe("sw runtime with real modules", () => {
         "plus"
       )!,
     });
-    const snapshot: RedirectSettingsSnapshot = {
+    const snapshot = redirectSettingsSnapshot({
       custom,
       defaultBang: "ddg",
-      luckyProvider: "default",
-      luckyUrl: null,
       syntax,
-    };
-    const settings: RedirectSettings = {
+    });
+    const settings: RedirectSettings = redirectSettings({
       custom,
       defaultUrl: ["https://duckduckgo.com/?q=", ""],
       luckyUrl: null,
       syntax,
-    };
+    });
     const state: NavigationPreloadState = {
       enabled: false,
       headerValue: encodeHotBootRecord(

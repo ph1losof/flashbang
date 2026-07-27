@@ -12,6 +12,12 @@ import {
   parseKagi,
   validateBangs,
 } from "../scripts/codegen";
+import {
+  BANG_BINARY_MAGIC,
+  BANG_BINARY_VERSION,
+  BANG_META_MAGIC,
+  BANG_META_VERSION,
+} from "./helpers/bang-binary";
 
 describe("codegen string escaping", () => {
   test("preserves the minimal custom escape sets", () => {
@@ -193,10 +199,10 @@ describe("codegen artifact generators", () => {
     const artifacts = buildGeneratedArtifacts(sampleBangs);
 
     expect(new Uint32Array(artifacts.binary.buffer, 0, 2)).toEqual(
-      new Uint32Array([0x31424246, 7])
+      new Uint32Array([BANG_BINARY_MAGIC, BANG_BINARY_VERSION])
     );
     expect(new Uint32Array(artifacts.meta.buffer, 0, 2)).toEqual(
-      new Uint32Array([0x314d4246, 1])
+      new Uint32Array([BANG_META_MAGIC, BANG_META_VERSION])
     );
     expect(artifacts.sparseJs).toContain("lookupAdvancedBang");
     expect(artifacts.sparseJs).toContain("lookupSnapOverride");

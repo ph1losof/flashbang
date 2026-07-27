@@ -1,35 +1,20 @@
-import { afterAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import {
   handleOpenSearchRequest,
   handleSuggestRequest,
 } from "../src/server/handlers";
 import { TOP_K } from "../src/shared/constants";
 import { encodeSuggestCookieValue } from "../src/shared/suggest-cookie";
+import { installManagedFetchSpy, requestWithCookie } from "./helpers/http";
 
-const fetchSpy = spyOn(globalThis, "fetch");
-
-beforeEach(() => {
-  fetchSpy.mockReset();
-});
-
-afterAll(() => {
-  fetchSpy.mockRestore();
-});
+const fetchSpy = installManagedFetchSpy();
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
-
-function req(url: string, cookie?: string): Request {
-  const headers = new Headers();
-  if (cookie) {
-    headers.set("Cookie", cookie);
-  }
-  return new Request(url, { headers });
-}
 
 describe("handleSuggestRequest", () => {
   test("returns 400 when q is missing", async () => {
     const response = await handleSuggestRequest(
-      req("http://localhost/suggest")
+      requestWithCookie("http://localhost/suggest")
     );
     expect(response.status).toBe(400);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
@@ -38,7 +23,7 @@ describe("handleSuggestRequest", () => {
 
   test("returns bang suggestions without remote fetch for bang-prefixed query", async () => {
     const response = await handleSuggestRequest(
-      req(
+      requestWithCookie(
         "http://localhost/suggest?q=%21",
         encodeSuggestCookieValue("default", "g", "", ["mybang"], null)
       )
@@ -55,7 +40,9 @@ describe("handleSuggestRequest", () => {
 
   test("uses URL-backed Firefox syntax without cookies", async () => {
     const bangResponse = await handleSuggestRequest(
-      req("http://localhost/suggest?q=%24gh&sp=google&bp=%24&np=~")
+      requestWithCookie(
+        "http://localhost/suggest?q=%24gh&sp=google&bp=%24&np=~"
+      )
     );
     const [, bangCompletions] = await bangResponse.json();
     expect(bangCompletions.length).toBeGreaterThan(0);
@@ -64,7 +51,7 @@ describe("handleSuggestRequest", () => {
     ).toBe(true);
 
     const snapResponse = await handleSuggestRequest(
-      req("http://localhost/suggest?q=~gh&sp=google&bp=%24&np=~")
+      requestWithCookie("http://localhost/suggest?q=~gh&sp=google&bp=%24&np=~")
     );
     const [, snapCompletions] = await snapResponse.json();
     expect(snapCompletions.length).toBeGreaterThan(0);
@@ -77,7 +64,7 @@ describe("handleSuggestRequest", () => {
   test("blocks custom suggest provider request by default", async () => {
     const custom = "https://example.com/suggest?q={}";
     const response = await handleSuggestRequest(
-      req(
+      requestWithCookie(
         "http://localhost/suggest?q=flash",
         `suggest=${encodeSuggestCookieValue("custom", "g", custom)}`
       )
@@ -101,7 +88,7 @@ describe("handleSuggestRequest", () => {
 
     const custom = "https://example.com/suggest?q={}";
     const response = await handleSuggestRequest(
-      req(
+      requestWithCookie(
         "http://localhost/suggest?q=flash",
         `suggest=${encodeSuggestCookieValue("custom", "g", custom)}`
       ),
@@ -118,7 +105,7 @@ describe("handleSuggestRequest", () => {
     fetchSpy.mockResolvedValue(new Response("[]", { headers: JSON_HEADERS }));
 
     const response = await handleSuggestRequest(
-      req("http://localhost/suggest?q=test&sp=ddg")
+      requestWithCookie("http://localhost/suggest?q=test&sp=ddg")
     );
 
     expect(response.status).toBe(200);
@@ -131,7 +118,10 @@ describe("handleSuggestRequest", () => {
     fetchSpy.mockResolvedValue(new Response("[]", { headers: JSON_HEADERS }));
 
     const response = await handleSuggestRequest(
-      req("http://localhost/suggest?q=%21g", "suggest=custom,g,|f:%E0%A4%A")
+      requestWithCookie(
+        "http://localhost/suggest?q=%21g",
+        "suggest=custom,g,|f:%E0%A4%A"
+      )
     );
 
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -144,7 +134,7 @@ describe("handleSuggestRequest", () => {
 describe("handleOpenSearchRequest", () => {
   test("uses the request origin when PUBLIC_ORIGIN is absent", async () => {
     const response = handleOpenSearchRequest(
-      req("https://flashbang.pages.dev/opensearch.xml"),
+      requestWithCookie("https://flashbang.pages.dev/opensearch.xml"),
       {}
     );
 
@@ -156,7 +146,7 @@ describe("handleOpenSearchRequest", () => {
 
   test("uses a canonical configured public origin", async () => {
     const response = handleOpenSearchRequest(
-      req("http://internal:3000/opensearch.xml"),
+      requestWithCookie("http://internal:3000/opensearch.xml"),
       {
         PUBLIC_ORIGIN:
           "https://Public.Example:443/proxy/path/?ignored=true#fragment",
@@ -172,7 +162,7 @@ describe("handleOpenSearchRequest", () => {
 
   test("fails closed for an invalid configured scheme", async () => {
     const response = handleOpenSearchRequest(
-      req("https://safe.example/opensearch.xml"),
+      requestWithCookie("https://safe.example/opensearch.xml"),
       { PUBLIC_ORIGIN: "javascript:alert(1)" }
     );
 

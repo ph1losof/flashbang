@@ -234,14 +234,18 @@ function restoreGlobal(
   });
 }
 
+function setNavigator(value: unknown): void {
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value,
+  });
+}
+
 afterEach(() => {
   restoreGlobal("document", originalDocument);
   restoreGlobal("location", originalLocation);
   restoreGlobal("window", originalWindow);
-  Object.defineProperty(globalThis, "navigator", {
-    configurable: true,
-    value: originalNavigator,
-  });
+  setNavigator(originalNavigator);
   globalThis.setTimeout = originalSetTimeout;
   globalThis.clearTimeout = originalClearTimeout;
 });
@@ -411,11 +415,8 @@ describe("clipboard helper", () => {
   test("uses navigator clipboard when available", async () => {
     installDom();
     const writes: string[] = [];
-    Object.defineProperty(globalThis, "navigator", {
-      configurable: true,
-      value: {
-        clipboard: { writeText: async (text: string) => writes.push(text) },
-      },
+    setNavigator({
+      clipboard: { writeText: async (text: string) => writes.push(text) },
     });
 
     await copyText("hello");
@@ -426,12 +427,9 @@ describe("clipboard helper", () => {
 
   test("falls back to execCommand and cleans temporary textareas", async () => {
     installDom();
-    Object.defineProperty(globalThis, "navigator", {
-      configurable: true,
-      value: {
-        clipboard: {
-          writeText: () => Promise.reject(new Error("denied")),
-        },
+    setNavigator({
+      clipboard: {
+        writeText: () => Promise.reject(new Error("denied")),
       },
     });
     let copiedValue = "";
@@ -449,10 +447,7 @@ describe("clipboard helper", () => {
 
   test("reuses fallback inputs and throws when copy fails", async () => {
     installDom();
-    Object.defineProperty(globalThis, "navigator", {
-      configurable: true,
-      value: {},
-    });
+    setNavigator({});
     testDocument.execCommand = () => false;
     const input = new TestElement("input");
 
@@ -551,10 +546,7 @@ describe("modal dialog", () => {
 describe("address bar setup sheet", () => {
   test("initializes browser tabs on first open and refreshes Firefox suggestions", async () => {
     const dom = setupAddressBarDom();
-    Object.defineProperty(globalThis, "navigator", {
-      configurable: true,
-      value: { userAgent: "Mozilla/5.0 Firefox/128.0" },
-    });
+    setNavigator({ userAgent: "Mozilla/5.0 Firefox/128.0" });
 
     const sheet = setupAddressBarSheet(() => ({
       bangPrefix: "$",
@@ -589,9 +581,8 @@ describe("address bar setup sheet", () => {
 
   test("copies URLs and handles settings link copy failures", async () => {
     const dom = setupAddressBarDom();
-    Object.defineProperty(globalThis, "navigator", {
-      configurable: true,
-      value: { userAgent: "Mozilla/5.0 Chrome/126.0.0.0 Safari/537.36" },
+    setNavigator({
+      userAgent: "Mozilla/5.0 Chrome/126.0.0.0 Safari/537.36",
     });
     let shouldCopy = true;
     testDocument.execCommand = () => shouldCopy;
@@ -629,11 +620,8 @@ describe("address bar setup sheet", () => {
 
   test("renders Edge warning and supports Home and End tab keys", () => {
     const dom = setupAddressBarDom();
-    Object.defineProperty(globalThis, "navigator", {
-      configurable: true,
-      value: {
-        userAgent: "Mozilla/5.0 Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0",
-      },
+    setNavigator({
+      userAgent: "Mozilla/5.0 Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0",
     });
 
     setupAddressBarSheet(() => ({

@@ -1,12 +1,4 @@
-import {
-  afterAll,
-  beforeEach,
-  describe,
-  expect,
-  mock,
-  spyOn,
-  test,
-} from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { TOP_K } from "../src/shared/constants";
 import {
   readQueryParam,
@@ -19,6 +11,7 @@ import {
   parseSuggestCookieValueWithValidation,
 } from "../src/shared/suggest-cookie";
 import { type BuildNode, buildRadixTrie } from "../src/shared/trie";
+import { installManagedFetchSpy, requestWithCookie } from "./helpers/http";
 
 interface TestBang {
   k: string;
@@ -192,22 +185,10 @@ const {
 const { profileTopKCount, profileWalkPrefix, responseFromCandidates } =
   await import("../src/suggest-bang");
 
-const fetchSpy = spyOn(globalThis, "fetch");
-
-beforeEach(() => {
-  fetchSpy.mockReset();
-});
-
-afterAll(() => {
-  fetchSpy.mockRestore();
-});
+const fetchSpy = installManagedFetchSpy();
 
 function req(cookie?: string): Request {
-  const headers = new Headers();
-  if (cookie) {
-    headers.set("Cookie", cookie);
-  }
-  return new Request("http://localhost", { headers });
+  return requestWithCookie("http://localhost", cookie);
 }
 
 const defaultSettings = {

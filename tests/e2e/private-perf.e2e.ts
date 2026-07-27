@@ -1,4 +1,5 @@
 import { type Page, test } from "@playwright/test";
+import { closeServiceWorkerTarget, disableServiceWorkers } from "./helpers";
 
 const GOOGLE = "https://www.google.com";
 const COLD_RUNS = Number(process.env.PROFILE_COLD_RUNS ?? 12);
@@ -254,9 +255,7 @@ test("private hash redirect and public path performance profile", async ({
     const context = await browser.newContext();
     const page = await context.newPage();
     await conditionIdbOpen(page);
-    await page.addInitScript(() => {
-      Reflect.deleteProperty(Navigator.prototype, "serviceWorker");
-    });
+    await page.addInitScript(disableServiceWorkers);
     await conditionColdNetwork(page, baseURL);
     await mockGoogle(page);
     cold.push(await measure(page));
@@ -266,9 +265,7 @@ test("private hash redirect and public path performance profile", async ({
   const fallbackWarmContext = await browser.newContext();
   const fallbackWarmPage = await fallbackWarmContext.newPage();
   await conditionIdbOpen(fallbackWarmPage);
-  await fallbackWarmPage.addInitScript(() => {
-    Reflect.deleteProperty(Navigator.prototype, "serviceWorker");
-  });
+  await fallbackWarmPage.addInitScript(disableServiceWorkers);
   await mockGoogle(fallbackWarmPage);
   await measure(fallbackWarmPage);
   const fallbackWarm: Timing[] = [];
@@ -326,9 +323,7 @@ test("private hash redirect and public path performance profile", async ({
       }
     });
   }
-  await publicFallbackPage.addInitScript(() => {
-    Reflect.deleteProperty(Navigator.prototype, "serviceWorker");
-  });
+  await publicFallbackPage.addInitScript(disableServiceWorkers);
   await seedLocalProfileBang(publicFallbackPage);
   const localTarget = new URL("/health?q=", baseURL).href;
   await measure(publicFallbackPage, "/?q=%21profile%20warm", localTarget);
@@ -483,14 +478,11 @@ test("private hash redirect and public path performance profile", async ({
     const workerUrl = new URL("/sw.js", baseURL).href;
 
     const closeWorker = async () => {
-      const { targetInfos } = await cdp.send("Target.getTargets");
-      const worker = targetInfos.find(
-        (target) => target.type === "service_worker" && target.url === workerUrl
+      await closeServiceWorkerTarget(
+        cdp,
+        (url) => url === workerUrl,
+        "Service Worker target missing from restart profile"
       );
-      if (!worker) {
-        throw new Error("Service Worker target missing from restart profile");
-      }
-      await cdp.send("Target.closeTarget", { targetId: worker.targetId });
     };
 
     for (let i = 0; i < COLD_RUNS; i++) {
@@ -561,17 +553,11 @@ test("private hash redirect and public path performance profile", async ({
     const floorWorkerCdp = await browser.newBrowserCDPSession();
     for (let i = 0; i < COLD_RUNS; i++) {
       await floorWorkerPage.goto("/__profile/warm");
-      const { targetInfos } = await floorWorkerCdp.send("Target.getTargets");
-      const worker = targetInfos.find(
-        (target) =>
-          target.type === "service_worker" && target.url === profileWorkerUrl
+      await closeServiceWorkerTarget(
+        floorWorkerCdp,
+        (url) => url === profileWorkerUrl,
+        "Minimal Service Worker target missing from profile"
       );
-      if (!worker) {
-        throw new Error("Minimal Service Worker target missing from profile");
-      }
-      await floorWorkerCdp.send("Target.closeTarget", {
-        targetId: worker.targetId,
-      });
       workerRedirectFloor.push(
         await measure(floorWorkerPage, "/__profile/start")
       );
@@ -582,9 +568,7 @@ test("private hash redirect and public path performance profile", async ({
 
   const floorContext = await browser.newContext();
   const floorPage = await floorContext.newPage();
-  await floorPage.addInitScript(() => {
-    Reflect.deleteProperty(Navigator.prototype, "serviceWorker");
-  });
+  await floorPage.addInitScript(disableServiceWorkers);
   await mockGoogle(floorPage);
   await floorPage.goto("/health");
   const rootUrl = new URL("/", floorPage.url()).href;

@@ -3,10 +3,23 @@ import { expect, type Page, test } from "@playwright/test";
 import { DB_VERSION } from "../../src/shared/constants";
 import { encodeSuggestCookieValue } from "../../src/shared/suggest-cookie";
 import { SETTINGS_SCHEMA_VERSION } from "../../src/ui/db";
+import { closeServiceWorkerTarget, disableServiceWorkers } from "./helpers";
 
 const GOOGLE_REDIRECT = /google\.com\/search\?q=hello/;
 const GOOGLE_HOST = "https://www.google.com";
 const CUSTOM_HOST = "https://example.com";
+const WEBKIT_SERVICE_WORKER_SKIP =
+  "Playwright WebKit does not support service worker lifecycle testing";
+
+const MY_DOCS_BANG = {
+  trigger: "mydocs",
+  name: "My Docs",
+  url: `${CUSTOM_HOST}/search?q={}`,
+};
+
+function skipWebKitServiceWorker(browserName: string): void {
+  test.skip(browserName === "webkit", WEBKIT_SERVICE_WORKER_SKIP);
+}
 
 async function mockGoogleSearchRoute(page: Page): Promise<void> {
   await page.context().route(`${GOOGLE_HOST}/**`, (route) => {
@@ -212,6 +225,30 @@ async function seedCustomBangs(
   }
 
   throw new Error("failed to seed custom bangs after retries");
+}
+
+async function setupMyDocsBang(page: Page): Promise<void> {
+  await mockCustomHostRoute(page);
+  await ensureWarmController(page);
+  await seedCustomBangs(page, [MY_DOCS_BANG]);
+}
+
+async function waitForCachedAsset(
+  page: Page,
+  cacheName: string,
+  assetPath: string
+): Promise<void> {
+  await expect
+    .poll(() =>
+      page.evaluate(
+        async ({ path, name }) => {
+          const cache = await caches.open(name);
+          return Boolean(await cache.match(path));
+        },
+        { name: cacheName, path: assetPath }
+      )
+    )
+    .toBe(true);
 }
 
 async function waitForAppReady(page: Page): Promise<void> {
@@ -642,10 +679,7 @@ test("homepage command bar executes bang commands", async ({
   browserName,
   page,
 }) => {
-  test.skip(
-    browserName === "webkit",
-    "Playwright WebKit does not support service worker lifecycle testing"
-  );
+  skipWebKitServiceWorker(browserName);
   await mockGoogleSearchRoute(page);
   await ensureWarmController(page);
   await openHome(page);
@@ -1459,15 +1493,7 @@ test("warm redirect uses lucky URL for trailing bare bang", async ({
 });
 
 test("custom bang redirects to custom target", async ({ page }) => {
-  await mockCustomHostRoute(page);
-  await ensureWarmController(page);
-  await seedCustomBangs(page, [
-    {
-      trigger: "mydocs",
-      name: "My Docs",
-      url: `${CUSTOM_HOST}/search?q={}`,
-    },
-  ]);
+  await setupMyDocsBang(page);
 
   await navigateAndWaitForRedirect(
     page,
@@ -1506,15 +1532,7 @@ test("custom bang overrides built-in bang trigger", async ({ page }) => {
 test("custom bang with no term redirects to custom origin", async ({
   page,
 }) => {
-  await mockCustomHostRoute(page);
-  await ensureWarmController(page);
-  await seedCustomBangs(page, [
-    {
-      trigger: "mydocs",
-      name: "My Docs",
-      url: `${CUSTOM_HOST}/search?q={}`,
-    },
-  ]);
+  await setupMyDocsBang(page);
 
   await navigateAndWaitForRedirect(page, "/?q=%21mydocs", /example\.com/);
   const redirected = new URL(page.url());
@@ -1522,15 +1540,7 @@ test("custom bang with no term redirects to custom origin", async ({
 });
 
 test("custom bang supports suffix syntax", async ({ page }) => {
-  await mockCustomHostRoute(page);
-  await ensureWarmController(page);
-  await seedCustomBangs(page, [
-    {
-      trigger: "mydocs",
-      name: "My Docs",
-      url: `${CUSTOM_HOST}/search?q={}`,
-    },
-  ]);
+  await setupMyDocsBang(page);
 
   await navigateAndWaitForRedirect(
     page,
@@ -1545,15 +1555,7 @@ test("custom bang supports suffix syntax", async ({ page }) => {
 test("custom bang persists after reload in the same context", async ({
   page,
 }) => {
-  await mockCustomHostRoute(page);
-  await ensureWarmController(page);
-  await seedCustomBangs(page, [
-    {
-      trigger: "mydocs",
-      name: "My Docs",
-      url: `${CUSTOM_HOST}/search?q={}`,
-    },
-  ]);
+  await setupMyDocsBang(page);
 
   await navigateAndWaitForRedirect(
     page,
@@ -1575,10 +1577,7 @@ test("first installation redirects before a controller exists", async ({
   browser,
   browserName,
 }) => {
-  test.skip(
-    browserName === "webkit",
-    "Playwright WebKit does not support service worker lifecycle testing"
-  );
+  skipWebKitServiceWorker(browserName);
   const context = await browser.newContext();
   try {
     const page = await context.newPage();
@@ -1609,10 +1608,7 @@ test("first fallback seeds the worker for the next offline redirect", async ({
   browser,
   browserName,
 }) => {
-  test.skip(
-    browserName === "webkit",
-    "Playwright WebKit does not support service worker lifecycle testing"
-  );
+  skipWebKitServiceWorker(browserName);
   const context = await browser.newContext();
   try {
     const page = await context.newPage();
@@ -1714,9 +1710,7 @@ test("private hash redirect keeps the query out of origin requests", async ({
   const context = await browser.newContext();
   try {
     const page = await context.newPage();
-    await page.addInitScript(() => {
-      Reflect.deleteProperty(Navigator.prototype, "serviceWorker");
-    });
+    await page.addInitScript(disableServiceWorkers);
     await mockGoogleSearchRoute(page);
     await page.goto("/health");
     const origin = new URL(page.url()).origin;
@@ -1773,9 +1767,7 @@ test("redirect falls back when service workers are unavailable", async ({
   const context = await browser.newContext();
   try {
     const page = await context.newPage();
-    await page.addInitScript(() => {
-      Reflect.deleteProperty(Navigator.prototype, "serviceWorker");
-    });
+    await page.addInitScript(disableServiceWorkers);
     await mockGoogleSearchRoute(page);
 
     expect(
@@ -1831,13 +1823,7 @@ test("redirect survives a service worker restart", async ({
   await ensureWarmController(page);
 
   const cdp = await browser.newBrowserCDPSession();
-  const { targetInfos } = await cdp.send("Target.getTargets");
-  const workerTarget = targetInfos.find(
-    (target) =>
-      target.type === "service_worker" && target.url.endsWith("/sw.js")
-  );
-  expect(workerTarget).toBeDefined();
-  await cdp.send("Target.closeTarget", { targetId: workerTarget!.targetId });
+  await closeServiceWorkerTarget(cdp, (url) => url.endsWith("/sw.js"));
 
   await navigateAndWaitForRedirect(page, "/?q=%21g%20hello", GOOGLE_REDIRECT);
   expect(page.url()).toMatch(GOOGLE_REDIRECT);
@@ -1947,13 +1933,7 @@ test("rich hot boot redirects without IndexedDB or bang data", async ({
     }
   });
   const cdp = await browser.newBrowserCDPSession();
-  const { targetInfos } = await cdp.send("Target.getTargets");
-  const workerTarget = targetInfos.find(
-    (target) =>
-      target.type === "service_worker" && target.url.endsWith("/sw.js")
-  );
-  expect(workerTarget).toBeDefined();
-  await cdp.send("Target.closeTarget", { targetId: workerTarget!.targetId });
+  await closeServiceWorkerTarget(cdp, (url) => url.endsWith("/sw.js"));
   await cdp.detach();
 
   const origin = new URL(page.url()).origin;
@@ -2091,13 +2071,7 @@ test("executable settings bundle redirects before bang data is available", async
   });
 
   const cdp = await browser.newBrowserCDPSession();
-  const { targetInfos } = await cdp.send("Target.getTargets");
-  const workerTarget = targetInfos.find(
-    (target) =>
-      target.type === "service_worker" && target.url.endsWith("/sw.js")
-  );
-  expect(workerTarget).toBeDefined();
-  await cdp.send("Target.closeTarget", { targetId: workerTarget!.targetId });
+  await closeServiceWorkerTarget(cdp, (url) => url.endsWith("/sw.js"));
   await cdp.detach();
 
   try {
@@ -2114,10 +2088,7 @@ test("controlled redirect works while offline", async ({
   context,
   page,
 }) => {
-  test.skip(
-    browserName === "webkit",
-    "Playwright WebKit does not support service worker lifecycle testing"
-  );
+  skipWebKitServiceWorker(browserName);
   await mockGoogleSearchRoute(page);
   await ensureWarmController(page);
   await waitForAppReady(page);
@@ -2138,10 +2109,7 @@ test("settings catalog works on its first offline open", async ({
   context,
   page,
 }) => {
-  test.skip(
-    browserName === "webkit",
-    "Playwright WebKit does not support service worker lifecycle testing"
-  );
+  skipWebKitServiceWorker(browserName);
   const catalogResponse = page.waitForResponse(
     (response) => response.url().includes("/bangs-meta-") && response.ok()
   );
@@ -2165,10 +2133,7 @@ test("redirect falls back safely when IndexedDB cannot be opened", async ({
   browser,
   browserName,
 }) => {
-  test.skip(
-    browserName === "webkit",
-    "Playwright WebKit does not support service worker lifecycle testing"
-  );
+  skipWebKitServiceWorker(browserName);
   const context = await browser.newContext();
   try {
     const page = await context.newPage();
@@ -2270,17 +2235,11 @@ test("worker retains the old cache until current assets are complete", async ({
     await lifecyclePage.evaluate(() =>
       fetch("/?q=%21g%20atomic", { redirect: "manual" })
     );
-    await expect
-      .poll(() =>
-        lifecyclePage.evaluate(
-          async ({ assetPath, cacheName }) => {
-            const cache = await caches.open(cacheName);
-            return Boolean(await cache.match(assetPath));
-          },
-          { cacheName: builtCacheName!, assetPath: builtBangDataAsset! }
-        )
-      )
-      .toBe(true);
+    await waitForCachedAsset(
+      lifecyclePage,
+      builtCacheName!,
+      builtBangDataAsset!
+    );
     await expect(
       lifecyclePage.evaluate(() =>
         fetch("/atomic-old-asset").then((response) => response.text())
@@ -2294,39 +2253,9 @@ test("worker retains the old cache until current assets are complete", async ({
   await expect
     .poll(() => lifecyclePage.evaluate(() => caches.keys()))
     .toContain(builtCacheName!);
-  await expect
-    .poll(() =>
-      lifecyclePage.evaluate(
-        async ({ assetPath, cacheName }) => {
-          const cache = await caches.open(cacheName);
-          return Boolean(await cache.match(assetPath));
-        },
-        { cacheName: builtCacheName!, assetPath: builtBangDataAsset! }
-      )
-    )
-    .toBe(true);
-  await expect
-    .poll(() =>
-      lifecyclePage.evaluate(
-        async ({ assetPath, cacheName }) => {
-          const cache = await caches.open(cacheName);
-          return Boolean(await cache.match(assetPath));
-        },
-        { cacheName: builtCacheName!, assetPath: builtFallbackAsset! }
-      )
-    )
-    .toBe(true);
-  await expect
-    .poll(() =>
-      lifecyclePage.evaluate(
-        async ({ assetPath, cacheName }) => {
-          const cache = await caches.open(cacheName);
-          return Boolean(await cache.match(assetPath));
-        },
-        { cacheName: builtCacheName!, assetPath: builtBangMetaAsset! }
-      )
-    )
-    .toBe(true);
+  await waitForCachedAsset(lifecyclePage, builtCacheName!, builtBangDataAsset!);
+  await waitForCachedAsset(lifecyclePage, builtCacheName!, builtFallbackAsset!);
+  await waitForCachedAsset(lifecyclePage, builtCacheName!, builtBangMetaAsset!);
   await expect
     .poll(() => lifecyclePage.evaluate(() => caches.keys()))
     .not.toContain(initialCacheName);

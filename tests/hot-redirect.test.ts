@@ -20,34 +20,30 @@ import {
   type RedirectSettings,
   redirectRawUrl,
 } from "../src/sw/redirect";
-import type { RedirectSettingsSnapshot } from "../src/sw/redirect-settings";
 import { loadTestBangData } from "./helpers/bang-data";
+import {
+  redirectSettings,
+  redirectSettingsSnapshot,
+} from "./helpers/redirect-fixtures";
 
 const syntax = compileTriggerSyntax(";", "@")!;
 
 function snapshot(
   custom: Record<string, CustomUrlParts> = Object.create(null),
   triggerSyntax = syntax
-): RedirectSettingsSnapshot {
-  return {
-    custom,
-    defaultBang: "g",
-    luckyProvider: "default",
-    luckyUrl: null,
-    syntax: triggerSyntax,
-  };
+) {
+  return redirectSettingsSnapshot({ custom, syntax: triggerSyntax });
 }
 
 function settings(
   custom: Record<string, CustomUrlParts> = Object.create(null),
   triggerSyntax = syntax
 ): RedirectSettings {
-  return {
+  return redirectSettings({
     custom,
-    defaultUrl: ["https://www.google.com/search?q=", ""],
     luckyUrl: ["https://duckduckgo.com/?q=\\", ""],
     syntax: triggerSyntax,
-  };
+  });
 }
 
 function recordWithCustomEntry(entry: unknown): string {

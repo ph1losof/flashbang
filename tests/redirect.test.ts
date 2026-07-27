@@ -13,6 +13,12 @@ import {
   redirectUrl,
 } from "../src/sw/redirect";
 import { loadTestBangData } from "./helpers/bang-data";
+import {
+  DEFAULT_LUCKY_URL,
+  DEFAULT_REDIRECT_URL,
+  redirectSettings,
+  splitUrlTemplate,
+} from "./helpers/redirect-fixtures";
 
 await loadTestBangData();
 
@@ -28,9 +34,6 @@ function redirectRawTrigger(
 }
 
 import type { CustomUrlParts, UrlParts } from "../src/sw/redirect";
-
-const DEFAULT_URL: UrlParts = ["https://www.google.com/search?q=", ""];
-const LUCKY_URL: UrlParts = ["https://www.google.com/search?btnI&q=", ""];
 
 const TEST_BANGS: Record<string, UrlParts> = {
   b: ["https://www.bing.com/search?q=", ""],
@@ -49,92 +52,79 @@ function testBangs(
   return { ...TEST_BANGS, ...overrides };
 }
 
-function splitUrl(url: string): UrlParts {
-  const idx = url.indexOf("{}");
-  return idx === -1
-    ? [url, null]
-    : [url.substring(0, idx), url.substring(idx + 2)];
-}
-
 function settings(overrides: Partial<RedirectSettings> = {}): RedirectSettings {
   const { custom, ...rest } = overrides;
-  return {
-    defaultUrl: DEFAULT_URL,
+  return redirectSettings({
+    defaultUrl: DEFAULT_REDIRECT_URL,
     custom: testBangs(custom),
-    luckyUrl: LUCKY_URL,
+    luckyUrl: DEFAULT_LUCKY_URL,
     ...rest,
-  };
+  });
 }
 
 function loc(r: Response): string {
   return r.headers.get("Location")!;
 }
 
+function expectRedirect(r: Response, location: string): void {
+  expect(r.status).toBe(302);
+  expect(loc(r)).toBe(location);
+}
+
 describe("parse — bang syntax patterns", () => {
   test('"!g cats" → prefix bang with term', () => {
     const r = redirect("!g cats", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=cats");
+    expectRedirect(r, "https://www.google.com/search?q=cats");
   });
 
   test('"!G CATS" → case-insensitive bang', () => {
     const r = redirect("!G CATS", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=CATS");
+    expectRedirect(r, "https://www.google.com/search?q=CATS");
   });
 
   test('"!g" → prefix bang, no term → google.com origin', () => {
     const r = redirect("!g", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com");
+    expectRedirect(r, "https://www.google.com");
   });
 
   test('"g! cats" → prefix suffix-bang', () => {
     const r = redirect("g! cats", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=cats");
+    expectRedirect(r, "https://www.google.com/search?q=cats");
   });
 
   test('"g!" → suffix-bang alone → google.com origin', () => {
     const r = redirect("g!", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com");
+    expectRedirect(r, "https://www.google.com");
   });
 
   test('"cats !g" → trailing prefix-bang', () => {
     const r = redirect("cats !g", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=cats");
+    expectRedirect(r, "https://www.google.com/search?q=cats");
   });
 
   test('"cats g!" → trailing suffix-bang', () => {
     const r = redirect("cats g!", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=cats");
+    expectRedirect(r, "https://www.google.com/search?q=cats");
   });
 
   test('"\\cats" → backslash lucky', () => {
     const r = redirect("\\cats", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?btnI&q=cats");
+    expectRedirect(r, "https://www.google.com/search?btnI&q=cats");
   });
 
   test('"! cats" → leading bare bang lucky', () => {
     const r = redirect("! cats", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?btnI&q=cats");
+    expectRedirect(r, "https://www.google.com/search?btnI&q=cats");
   });
 
   test('"cats !" → trailing bare bang lucky', () => {
     const r = redirect("cats !", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?btnI&q=cats");
+    expectRedirect(r, "https://www.google.com/search?btnI&q=cats");
   });
 
   test('"cats" → no bang → default URL', () => {
     const r = redirect("cats", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=cats");
+    expectRedirect(r, "https://www.google.com/search?q=cats");
   });
 });
 
@@ -223,29 +213,27 @@ describe("parse — configurable bang and snap prefixes", () => {
 describe("redirect — routing logic", () => {
   test('"!" alone → redirect to "/"', () => {
     const r = redirect("!", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("/");
+    expectRedirect(r, "/");
   });
 
   test("lucky + luckyUrl + term → lucky redirect", () => {
     const r = redirect("\\hello world", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?btnI&q=hello+world");
+    expectRedirect(r, "https://www.google.com/search?btnI&q=hello+world");
   });
 
   test("lucky without luckyUrl → falls through to default", () => {
     const r = redirect("\\cats", settings({ luckyUrl: null }));
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=cats");
+    expectRedirect(r, "https://www.google.com/search?q=cats");
   });
 
   test("custom bang overrides built-in", () => {
     const r = redirect(
       "!g cats",
-      settings({ custom: { g: splitUrl("https://custom.search/?q={}") } })
+      settings({
+        custom: { g: splitUrlTemplate("https://custom.search/?q={}") },
+      })
     );
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://custom.search/?q=cats");
+    expectRedirect(r, "https://custom.search/?q=cats");
   });
 
   test("fills every placeholder in a built-in template", () => {
@@ -275,29 +263,28 @@ describe("redirect — routing logic", () => {
 
   test('"!zzz cats" → unknown bang → default URL with full raw query', () => {
     const r = redirect("!zzz cats", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=!zzz+cats");
+    expectRedirect(r, "https://www.google.com/search?q=!zzz+cats");
   });
 
   test("empty term → origin extraction via new URL().origin", () => {
     const r = redirect("!gh", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://github.com");
+    expectRedirect(r, "https://github.com");
   });
 
   test("empty term with unparseable URL → fallback to replace", () => {
     const r = redirect(
       "!g",
-      settings({ custom: { g: splitUrl("not-a-url/{}") } })
+      settings({ custom: { g: splitUrlTemplate("not-a-url/{}") } })
     );
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("not-a-url/");
+    expectRedirect(r, "not-a-url/");
   });
 
   test("bare custom bang strips a query without an intervening slash", () => {
     const r = redirect(
       "!g",
-      settings({ custom: { g: splitUrl("https://custom.search?q={}") } })
+      settings({
+        custom: { g: splitUrlTemplate("https://custom.search?q={}") },
+      })
     );
     expect(loc(r)).toBe("https://custom.search");
   });
@@ -401,168 +388,144 @@ describe("encode — URL encoding", () => {
 describe("redirectRaw — bang syntax patterns (+ as space)", () => {
   test('"!g+cats" → prefix bang with term', () => {
     const r = redirectRaw("!g+cats", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=cats");
+    expectRedirect(r, "https://www.google.com/search?q=cats");
   });
 
   test('"!G+CATS" → case-insensitive bang', () => {
     const r = redirectRaw("!G+CATS", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=CATS");
+    expectRedirect(r, "https://www.google.com/search?q=CATS");
   });
 
   test('"!g" → prefix bang, no term → google.com origin', () => {
     const r = redirectRaw("!g", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com");
+    expectRedirect(r, "https://www.google.com");
   });
 
   test('"g!+cats" → prefix suffix-bang', () => {
     const r = redirectRaw("g!+cats", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=cats");
+    expectRedirect(r, "https://www.google.com/search?q=cats");
   });
 
   test('"g!" → suffix-bang alone → google.com origin', () => {
     const r = redirectRaw("g!", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com");
+    expectRedirect(r, "https://www.google.com");
   });
 
   test('"cats+!g" → trailing prefix-bang', () => {
     const r = redirectRaw("cats+!g", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=cats");
+    expectRedirect(r, "https://www.google.com/search?q=cats");
   });
 
   test('"cats+g!" → trailing suffix-bang', () => {
     const r = redirectRaw("cats+g!", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=cats");
+    expectRedirect(r, "https://www.google.com/search?q=cats");
   });
 
   test('"\\cats" → backslash lucky', () => {
     const r = redirectRaw("\\cats", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?btnI&q=cats");
+    expectRedirect(r, "https://www.google.com/search?btnI&q=cats");
   });
 
   test('"!+cats" → leading bare bang lucky', () => {
     const r = redirectRaw("!+cats", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?btnI&q=cats");
+    expectRedirect(r, "https://www.google.com/search?btnI&q=cats");
   });
 
   test('"cats+!" → trailing bare bang lucky', () => {
     const r = redirectRaw("cats+!", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?btnI&q=cats");
+    expectRedirect(r, "https://www.google.com/search?btnI&q=cats");
   });
 
   test('"cats" → no bang → default URL', () => {
     const r = redirectRaw("cats", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=cats");
+    expectRedirect(r, "https://www.google.com/search?q=cats");
   });
 });
 
 describe("redirectRaw — bang syntax patterns (%20 as space)", () => {
   test('"!g%20cats" → prefix bang with term', () => {
     const r = redirectRaw("!g%20cats", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=cats");
+    expectRedirect(r, "https://www.google.com/search?q=cats");
   });
 
   test('"g!%20cats" → prefix suffix-bang', () => {
     const r = redirectRaw("g!%20cats", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=cats");
+    expectRedirect(r, "https://www.google.com/search?q=cats");
   });
 
   test('"cats%20!g" → trailing prefix-bang', () => {
     const r = redirectRaw("cats%20!g", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=cats");
+    expectRedirect(r, "https://www.google.com/search?q=cats");
   });
 
   test('"cats%20g!" → trailing suffix-bang', () => {
     const r = redirectRaw("cats%20g!", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=cats");
+    expectRedirect(r, "https://www.google.com/search?q=cats");
   });
 
   test('"!%20cats" → leading bare bang lucky', () => {
     const r = redirectRaw("!%20cats", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?btnI&q=cats");
+    expectRedirect(r, "https://www.google.com/search?btnI&q=cats");
   });
 
   test('"cats%20!" → trailing bare bang lucky', () => {
     const r = redirectRaw("cats%20!", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?btnI&q=cats");
+    expectRedirect(r, "https://www.google.com/search?btnI&q=cats");
   });
 });
 
 describe("redirectRaw — routing logic", () => {
   test('"!" alone → redirect to "/"', () => {
     const r = redirectRaw("!", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("/");
+    expectRedirect(r, "/");
   });
 
   test("empty string → redirect to /", () => {
     const r = redirectRaw("", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("/");
+    expectRedirect(r, "/");
   });
 
   test("only spaces → redirect to /", () => {
     const r = redirectRaw("+++", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("/");
+    expectRedirect(r, "/");
   });
 
   test("lucky + luckyUrl + term → lucky redirect", () => {
     const r = redirectRaw("\\hello+world", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?btnI&q=hello+world");
+    expectRedirect(r, "https://www.google.com/search?btnI&q=hello+world");
   });
 
   test("lucky without luckyUrl → falls through to default", () => {
     const r = redirectRaw("\\cats", settings({ luckyUrl: null }));
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=cats");
+    expectRedirect(r, "https://www.google.com/search?q=cats");
   });
 
   test("custom bang overrides built-in", () => {
     const r = redirectRaw(
       "!g+cats",
-      settings({ custom: { g: splitUrl("https://custom.search/?q={}") } })
+      settings({
+        custom: { g: splitUrlTemplate("https://custom.search/?q={}") },
+      })
     );
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://custom.search/?q=cats");
+    expectRedirect(r, "https://custom.search/?q=cats");
   });
 
   test('"!zzz+cats" → unknown bang → default URL with full query', () => {
     const r = redirectRaw("!zzz+cats", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=!zzz+cats");
+    expectRedirect(r, "https://www.google.com/search?q=!zzz+cats");
   });
 
   test("empty term → origin extraction via new URL().origin", () => {
     const r = redirectRaw("!gh", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://github.com");
+    expectRedirect(r, "https://github.com");
   });
 
   test("empty term with unparseable URL → fallback to replace", () => {
     const r = redirectRaw(
       "!g",
-      settings({ custom: { g: splitUrl("not-a-url/{}") } })
+      settings({ custom: { g: splitUrlTemplate("not-a-url/{}") } })
     );
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("not-a-url/");
+    expectRedirect(r, "not-a-url/");
   });
 });
 
@@ -656,50 +619,42 @@ describe("redirectRaw — leading/trailing space trimming", () => {
 describe("redirectRaw — %21 encoded bang", () => {
   test('"%21gh" → prefix bang → github.com', () => {
     const r = redirectRaw("%21gh", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://github.com");
+    expectRedirect(r, "https://github.com");
   });
 
   test('"%21g+cats" → prefix bang with term', () => {
     const r = redirectRaw("%21g+cats", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=cats");
+    expectRedirect(r, "https://www.google.com/search?q=cats");
   });
 
   test('"g%21+cats" → prefix suffix-bang', () => {
     const r = redirectRaw("g%21+cats", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=cats");
+    expectRedirect(r, "https://www.google.com/search?q=cats");
   });
 
   test('"cats+%21g" → trailing prefix-bang', () => {
     const r = redirectRaw("cats+%21g", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=cats");
+    expectRedirect(r, "https://www.google.com/search?q=cats");
   });
 
   test('"cats+g%21" → trailing suffix-bang', () => {
     const r = redirectRaw("cats+g%21", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=cats");
+    expectRedirect(r, "https://www.google.com/search?q=cats");
   });
 
   test('"%21+cats" → leading bare bang lucky', () => {
     const r = redirectRaw("%21+cats", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?btnI&q=cats");
+    expectRedirect(r, "https://www.google.com/search?btnI&q=cats");
   });
 
   test('"cats+%21" → trailing bare bang lucky', () => {
     const r = redirectRaw("cats+%21", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?btnI&q=cats");
+    expectRedirect(r, "https://www.google.com/search?btnI&q=cats");
   });
 
   test('"%21" alone → redirect to "/"', () => {
     const r = redirectRaw("%21", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("/");
+    expectRedirect(r, "/");
   });
 });
 
@@ -765,92 +720,84 @@ describe("redirectUrl ↔ redirect parity", () => {
 describe("snap — prefix @trigger patterns", () => {
   test('"@w quantum" → default search with site:en.wikipedia.org', () => {
     const r = redirect("@w quantum", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe(
+    expectRedirect(
+      r,
       "https://www.google.com/search?q=quantum+site:en.wikipedia.org"
     );
   });
 
   test('"@gh api" → default search with site:github.com', () => {
     const r = redirect("@gh api", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=api+site:github.com");
+    expectRedirect(r, "https://www.google.com/search?q=api+site:github.com");
   });
 
   test('"@G CATS" → case-insensitive, site:google.com (www stripped)', () => {
     const r = redirect("@G CATS", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=CATS+site:google.com");
+    expectRedirect(r, "https://www.google.com/search?q=CATS+site:google.com");
   });
 
   test('"@yt music video" → site:youtube.com (www stripped)', () => {
     const r = redirect("@yt music video", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe(
+    expectRedirect(
+      r,
       "https://www.google.com/search?q=music+video+site:youtube.com"
     );
   });
 
   test('"@mdn array methods" → site:developer.mozilla.org, uses default URL not bang URL', () => {
     const r = redirect("@mdn array methods", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe(
+    expectRedirect(
+      r,
       "https://www.google.com/search?q=array+methods+site:developer.mozilla.org"
     );
   });
 
   test('"@w" → bare snap, no query → origin redirect', () => {
     const r = redirect("@w", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://en.wikipedia.org");
+    expectRedirect(r, "https://en.wikipedia.org");
   });
 
   test('"@g" → bare snap → google.com origin (www stripped from domain, but origin preserved)', () => {
     const r = redirect("@g", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com");
+    expectRedirect(r, "https://www.google.com");
   });
 
   test('"@zzz cats" → unknown trigger → default search', () => {
     const r = redirect("@zzz cats", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=@zzz+cats");
+    expectRedirect(r, "https://www.google.com/search?q=@zzz+cats");
   });
 
   test('"@ cats" → bare @ with space → default search', () => {
     const r = redirect("@ cats", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=@+cats");
+    expectRedirect(r, "https://www.google.com/search?q=@+cats");
   });
 
   test('"@" → bare @ → home', () => {
     const r = redirectRaw("@", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("/");
+    expectRedirect(r, "/");
   });
 });
 
 describe("snap — suffix query @trigger patterns", () => {
   test('"headphones @w" → site:en.wikipedia.org', () => {
     const r = redirect("headphones @w", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe(
+    expectRedirect(
+      r,
       "https://www.google.com/search?q=headphones+site:en.wikipedia.org"
     );
   });
 
   test('"python async @gh" → site:github.com', () => {
     const r = redirect("python async @gh", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe(
+    expectRedirect(
+      r,
       "https://www.google.com/search?q=python+async+site:github.com"
     );
   });
 
   test('"headphones @zzz" → unknown trigger → default search', () => {
     const r = redirect("headphones @zzz", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=headphones+@zzz");
+    expectRedirect(r, "https://www.google.com/search?q=headphones+@zzz");
   });
 });
 
@@ -888,7 +835,7 @@ describe("snap chains", () => {
 
   test("duplicate normalized targets are removed in first-seen order", () => {
     const custom: Record<string, CustomUrlParts> = {
-      github: splitUrl("https://github.com/search?q={}"),
+      github: splitUrlTemplate("https://github.com/search?q={}"),
     };
     expect(redirectUrl("@gh,github,so,gh query", settings({ custom }))).toBe(
       "https://www.google.com/search?q=query+(site:github.com+OR+site:stackoverflow.com)"
@@ -948,60 +895,56 @@ describe("snap chains", () => {
 describe("snap — raw URL-encoded patterns", () => {
   test('"%40w+quantum" → same as @w quantum', () => {
     const r = redirectRaw("%40w+quantum", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe(
+    expectRedirect(
+      r,
       "https://www.google.com/search?q=quantum+site:en.wikipedia.org"
     );
   });
 
   test('"@w+quantum" → literal @, same result', () => {
     const r = redirectRaw("@w+quantum", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe(
+    expectRedirect(
+      r,
       "https://www.google.com/search?q=quantum+site:en.wikipedia.org"
     );
   });
 
   test('"headphones+%40w" → suffix snap with encoded @', () => {
     const r = redirectRaw("headphones+%40w", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe(
+    expectRedirect(
+      r,
       "https://www.google.com/search?q=headphones+site:en.wikipedia.org"
     );
   });
 
   test('"headphones+@w" → suffix snap with literal @', () => {
     const r = redirectRaw("headphones+@w", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe(
+    expectRedirect(
+      r,
       "https://www.google.com/search?q=headphones+site:en.wikipedia.org"
     );
   });
 
   test('"%40" → bare encoded @ → home', () => {
     const r = redirectRaw("%40", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("/");
+    expectRedirect(r, "/");
   });
 
   test('"%40w" → bare encoded snap → origin', () => {
     const r = redirectRaw("%40w", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://en.wikipedia.org");
+    expectRedirect(r, "https://en.wikipedia.org");
   });
 });
 
 describe("snap — bang takes precedence over snap", () => {
   test('"!g @w cats" → bang wins, searches google for @w cats', () => {
     const r = redirect("!g @w cats", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=@w+cats");
+    expectRedirect(r, "https://www.google.com/search?q=@w+cats");
   });
 
   test('"!g cats" still works as bang', () => {
     const r = redirect("!g cats", settings());
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=cats");
+    expectRedirect(r, "https://www.google.com/search?q=cats");
   });
 });
 
@@ -1009,24 +952,22 @@ describe("snap — custom bangs work as snaps", () => {
   test('"@mysite test" → site:mysite.com with custom bang', () => {
     const custom: Record<string, readonly [string, string | null]> =
       Object.create(null);
-    custom.mysite = splitUrl("https://mysite.com/s?q={}");
+    custom.mysite = splitUrlTemplate("https://mysite.com/s?q={}");
     const r = redirect("@mysite test", settings({ custom }));
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://www.google.com/search?q=test+site:mysite.com");
+    expectRedirect(r, "https://www.google.com/search?q=test+site:mysite.com");
   });
 
   test('"@mysite" → bare snap with custom bang → origin', () => {
     const custom: Record<string, readonly [string, string | null]> =
       Object.create(null);
-    custom.mysite = splitUrl("https://mysite.com/s?q={}");
+    custom.mysite = splitUrlTemplate("https://mysite.com/s?q={}");
     const r = redirect("@mysite", settings({ custom }));
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe("https://mysite.com");
+    expectRedirect(r, "https://mysite.com");
   });
 
   test("custom snap extracts a host before query parameters", () => {
     const custom: Record<string, UrlParts> = Object.create(null);
-    custom.mysite = splitUrl("https://mysite.com?q={}");
+    custom.mysite = splitUrlTemplate("https://mysite.com?q={}");
     expect(loc(redirect("@mysite test", settings({ custom })))).toBe(
       "https://www.google.com/search?q=test+site:mysite.com"
     );
@@ -1117,8 +1058,8 @@ describe("snap — default URL with suffix", () => {
       defaultUrl: ["https://search.example.com/q?s=", "&lang=en"],
     });
     const r = redirect("@w quantum", s);
-    expect(r.status).toBe(302);
-    expect(loc(r)).toBe(
+    expectRedirect(
+      r,
       "https://search.example.com/q?s=quantum+site:en.wikipedia.org&lang=en"
     );
   });

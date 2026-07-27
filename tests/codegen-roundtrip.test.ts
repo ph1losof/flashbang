@@ -6,6 +6,17 @@ import {
 import { hashFNV1a } from "../src/shared/hash";
 import { initializeBangData, lookupBang } from "../src/sw/bang-data";
 import { decodeBangCatalog } from "../src/ui/bang-catalog";
+import {
+  BANG_BINARY_HEADER_WORDS,
+  BANG_BINARY_MAGIC,
+  BANG_BINARY_VERSION,
+  BANG_META_MAGIC,
+  BANG_META_VERSION,
+  bangBinaryCheckpointOffset,
+  bangBinaryNumericEnd,
+  bangBinaryTriggerLengths,
+  bangBinaryTriggerLocalOffsets,
+} from "./helpers/bang-binary";
 import { loadTestBangData } from "./helpers/bang-data";
 
 await loadTestBangData();
@@ -80,36 +91,20 @@ describe("codegen round-trip", () => {
   test("emits the binary lookup artifact", async () => {
     const binary = await Bun.file("src/generated/bangs.bin").arrayBuffer();
     const header = new Uint32Array(binary, 0, 13);
-    expect(header[0]).toBe(0x31424246);
-    expect(header[1]).toBe(7);
+    expect(header[0]).toBe(BANG_BINARY_MAGIC);
+    expect(header[1]).toBe(BANG_BINARY_VERSION);
     expect(header[2]).toBe(bangs.filter((bang) => !bang.regex).length);
     expect(header[11]).toBe(binary.byteLength);
     expect(header[3] & (header[3] - 1)).toBe(0);
     expect([2, 4]).toContain(header[12]);
 
-    let numericEnd = 13 * Uint32Array.BYTES_PER_ELEMENT;
-    numericEnd +=
-      header[3] * header[12] + header[2] * header[4] + Math.ceil(header[2] / 2);
-    numericEnd = (numericEnd + 1) & ~1;
-    numericEnd += (header[5] + header[6] + header[2] * 2) * 2;
-    numericEnd = (numericEnd + 3) & ~3;
-    numericEnd +=
-      (Math.ceil(header[2] / 16) +
-        Math.ceil(header[5] / 16) +
-        Math.ceil(header[6] / 16)) *
-      Uint32Array.BYTES_PER_ELEMENT;
-    expect(header[10]).toBe(numericEnd);
+    expect(header[10]).toBe(bangBinaryNumericEnd(header));
 
-    const triggerLengthsOffset =
-      13 * Uint32Array.BYTES_PER_ELEMENT + header[3] * header[12];
-    const triggerLengths =
-      header[4] === 1
-        ? new Uint8Array(binary, triggerLengthsOffset, header[2])
-        : new Uint16Array(binary, triggerLengthsOffset, header[2]);
-    const triggerLocalOffsets = new Uint8Array(
+    const triggerLengths = bangBinaryTriggerLengths(binary, header);
+    const triggerLocalOffsets = bangBinaryTriggerLocalOffsets(
       binary,
-      triggerLengthsOffset + triggerLengths.byteLength,
-      Math.ceil(header[2] / 2)
+      header,
+      triggerLengths
     );
     const triggerLengthMask = header[4] === 1 ? 0x7f : 0x7fff;
     let expectedLocalOffset = 0;
@@ -150,8 +145,8 @@ describe("codegen round-trip", () => {
   test("preserves metadata records and sparse captures in source order", async () => {
     const binary = await Bun.file("src/generated/bangs-meta.bin").arrayBuffer();
     const header = new Uint32Array(binary, 0, 6);
-    expect(header[0]).toBe(0x314d4246);
-    expect(header[1]).toBe(1);
+    expect(header[0]).toBe(BANG_META_MAGIC);
+    expect(header[1]).toBe(BANG_META_VERSION);
     expect(header[2]).toBe(bangs.length);
     expect(header[3]).toBe(bangs.filter((bang) => bang.regex).length);
     expect(header[5]).toBe(binary.byteLength);
@@ -201,7 +196,7 @@ describe("codegen round-trip", () => {
       [12, 3, "Invalid binary bang MPHF displacement width"],
     ] as const) {
       const invalid = binary.slice(0);
-      new Uint32Array(invalid, 0, 13)[word] = value;
+      new Uint32Array(invalid, 0, BANG_BINARY_HEADER_WORDS)[word] = value;
       expect(() => initializeBangData(invalid)).toThrow(message);
     }
 
@@ -209,8 +204,16 @@ describe("codegen round-trip", () => {
     const header = new Uint32Array(invalidDisplacement, 0, 13);
     const displacements =
       header[12] === 2
-        ? new Int16Array(invalidDisplacement, 13 * 4, header[3])
-        : new Int32Array(invalidDisplacement, 13 * 4, header[3]);
+        ? new Int16Array(
+            invalidDisplacement,
+            BANG_BINARY_HEADER_WORDS * Uint32Array.BYTES_PER_ELEMENT,
+            header[3]
+          )
+        : new Int32Array(
+            invalidDisplacement,
+            BANG_BINARY_HEADER_WORDS * Uint32Array.BYTES_PER_ELEMENT,
+            header[3]
+          );
     displacements[0] = -(header[2] + 1);
     expect(() => initializeBangData(invalidDisplacement)).toThrow(
       "Invalid binary bang MPHF displacement"
@@ -218,15 +221,7 @@ describe("codegen round-trip", () => {
 
     const invalidCheckpoint = binary.slice(0);
     const checkpointHeader = new Uint32Array(invalidCheckpoint, 0, 13);
-    let checkpointOffset = 13 * Uint32Array.BYTES_PER_ELEMENT;
-    checkpointOffset +=
-      checkpointHeader[3] * checkpointHeader[12] +
-      checkpointHeader[2] * checkpointHeader[4] +
-      Math.ceil(checkpointHeader[2] / 2);
-    checkpointOffset = (checkpointOffset + 1) & ~1;
-    checkpointOffset +=
-      (checkpointHeader[5] + checkpointHeader[6] + checkpointHeader[2] * 2) * 2;
-    checkpointOffset = (checkpointOffset + 3) & ~3;
+    const checkpointOffset = bangBinaryCheckpointOffset(checkpointHeader);
     const triggerCheckpoints = new Uint32Array(
       invalidCheckpoint,
       checkpointOffset,

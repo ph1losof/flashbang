@@ -15,6 +15,20 @@ import {
   customSuggestUrlsEnabled,
 } from "../scripts/shared";
 
+interface BuildOutputFixture {
+  logs?: Array<Error>;
+  outputs?: Array<Partial<Bun.BuildArtifact>>;
+  success?: boolean;
+}
+
+function buildOutput({
+  logs = [],
+  outputs = [],
+  success = true,
+}: BuildOutputFixture = {}): Bun.BuildOutput {
+  return { logs, outputs, success } as unknown as Bun.BuildOutput;
+}
+
 describe("build cache version", () => {
   test("is deterministic regardless of input order", () => {
     const inputs = [
@@ -60,11 +74,7 @@ describe("build cache version", () => {
   });
 
   test("bundles service worker with cache identity defines", async () => {
-    const buildSpy = spyOn(Bun, "build").mockResolvedValue({
-      success: true,
-      outputs: [],
-      logs: [],
-    } as unknown as Bun.BuildOutput);
+    const buildSpy = spyOn(Bun, "build").mockResolvedValue(buildOutput());
     try {
       await bundleServiceWorker(
         "sw.js",
@@ -94,11 +104,9 @@ describe("build cache version", () => {
   });
 
   test("surfaces service worker and server bundle failures", async () => {
-    const buildSpy = spyOn(Bun, "build").mockResolvedValue({
-      success: false,
-      outputs: [],
-      logs: [new Error("boom")],
-    } as unknown as Bun.BuildOutput);
+    const buildSpy = spyOn(Bun, "build").mockResolvedValue(
+      buildOutput({ logs: [new Error("boom")], success: false })
+    );
     try {
       await expect(
         bundleServiceWorker(
@@ -119,21 +127,17 @@ describe("build cache version", () => {
 
   test("bundles UI and returns the emitted fallback asset", async () => {
     const buildSpy = spyOn(Bun, "build")
-      .mockResolvedValueOnce({
-        success: true,
-        outputs: [{ kind: "chunk", path: "dist/chunk-12345678.js" }],
-        logs: [],
-      } as unknown as Bun.BuildOutput)
-      .mockResolvedValueOnce({
-        success: true,
-        outputs: [],
-        logs: [],
-      } as unknown as Bun.BuildOutput)
-      .mockResolvedValueOnce({
-        success: true,
-        outputs: [{ kind: "entry-point", path: "dist/fallback-abcdef12.js" }],
-        logs: [],
-      } as unknown as Bun.BuildOutput);
+      .mockResolvedValueOnce(
+        buildOutput({
+          outputs: [{ kind: "chunk", path: "dist/chunk-12345678.js" }],
+        })
+      )
+      .mockResolvedValueOnce(buildOutput())
+      .mockResolvedValueOnce(
+        buildOutput({
+          outputs: [{ kind: "entry-point", path: "dist/fallback-abcdef12.js" }],
+        })
+      );
     try {
       const result = await bundleUI(
         true,
@@ -174,29 +178,17 @@ describe("build cache version", () => {
       if (entry === "src/ui/app.ts") {
         const path = `${outdir}/app.js`;
         await Bun.write(path, "console.log('app')");
-        return {
-          success: true,
-          outputs: [{ kind: "entry-point", path }],
-          logs: [],
-        } as unknown as Bun.BuildOutput;
+        return buildOutput({ outputs: [{ kind: "entry-point", path }] });
       }
       if (entry === "src/ui/bench/index.ts") {
         const path = `${outdir}/bench.js`;
         await Bun.write(path, "console.log('bench')");
-        return {
-          success: true,
-          outputs: [{ kind: "entry-point", path }],
-          logs: [],
-        } as unknown as Bun.BuildOutput;
+        return buildOutput({ outputs: [{ kind: "entry-point", path }] });
       }
       if (entry === "src/ui/fallback.ts") {
         const path = `${outdir}/${String(naming).replace("[hash]", "abcdef12").replace("[ext]", "js")}`;
         await Bun.write(path, "console.log('fallback')");
-        return {
-          success: true,
-          outputs: [{ kind: "entry-point", path }],
-          logs: [],
-        } as unknown as Bun.BuildOutput;
+        return buildOutput({ outputs: [{ kind: "entry-point", path }] });
       }
       if (entry === "src/sw/sw.ts") {
         const path = `${outdir}/${naming}`;
@@ -204,20 +196,12 @@ describe("build cache version", () => {
           path,
           `console.log(${config.define?.__CACHE_VERSION__ ?? '"sw"'})`
         );
-        return {
-          success: true,
-          outputs: [{ kind: "entry-point", path }],
-          logs: [],
-        } as unknown as Bun.BuildOutput;
+        return buildOutput({ outputs: [{ kind: "entry-point", path }] });
       }
       if (entry === "scripts/start.ts") {
         const path = `${outdir}/server.js`;
         await Bun.write(path, "console.log('server')");
-        return {
-          success: true,
-          outputs: [{ kind: "entry-point", path }],
-          logs: [],
-        } as unknown as Bun.BuildOutput;
+        return buildOutput({ outputs: [{ kind: "entry-point", path }] });
       }
       throw new Error(`Unexpected build entry ${entry}`);
     });

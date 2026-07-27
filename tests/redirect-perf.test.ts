@@ -8,7 +8,6 @@ import {
   encodeHotBootRecord,
   materializeCompactBaseSettings,
 } from "../src/sw/hot-redirect";
-import type { UrlParts } from "../src/sw/redirect";
 import {
   compileTriggerSyntax,
   type HotBangLookup,
@@ -16,11 +15,15 @@ import {
   redirectRaw,
 } from "../src/sw/redirect";
 import { loadTestBangData } from "./helpers/bang-data";
+import {
+  DEFAULT_LUCKY_URL,
+  DEFAULT_REDIRECT_URL,
+  redirectSettings,
+  redirectSettingsSnapshot,
+} from "./helpers/redirect-fixtures";
 
 await loadTestBangData();
 
-const DEFAULT_URL: UrlParts = ["https://www.google.com/search?q=", ""];
-const LUCKY_URL: UrlParts = ["https://www.google.com/search?btnI&q=", ""];
 const CAPTURE_URL = compileCaptureUrl(
   "https://translate.example/$1/$2",
   "(\\w+)\\s+(.*)",
@@ -29,8 +32,8 @@ const CAPTURE_URL = compileCaptureUrl(
 const SNAP_TARGET = compileSnapTarget("docs.example.com/reference")!;
 
 function settings(): RedirectSettings {
-  return {
-    defaultUrl: DEFAULT_URL,
+  return redirectSettings({
+    defaultUrl: DEFAULT_REDIRECT_URL,
     custom: {
       g: ["https://www.google.com/search?q=", ""],
       tw: ["https://twitter.com/", ""],
@@ -41,8 +44,8 @@ function settings(): RedirectSettings {
       so: ["https://stackoverflow.com/search?q=", ""],
       w: ["https://en.wikipedia.org/search?q=", ""],
     },
-    luckyUrl: LUCKY_URL,
-  };
+    luckyUrl: DEFAULT_LUCKY_URL,
+  });
 }
 
 const WARMUP = 10_000;
@@ -65,12 +68,7 @@ function benchRedirectRaw(
 
 function hotBootRecord(custom: RedirectSettings["custom"]): string {
   const sourceSettings = { ...settings(), custom };
-  const snapshot = {
-    custom,
-    defaultBang: "g",
-    luckyProvider: "default",
-    luckyUrl: null,
-  };
+  const snapshot = redirectSettingsSnapshot({ custom });
   return encodeHotBootRecord(
     "fb-perf",
     createHotBootState(snapshot),
@@ -94,13 +92,9 @@ function benchHotBootDecode(record: string): number {
 
 describe("redirect performance regression", () => {
   test("canonical hot bang resolution stays under 0.005ms", () => {
-    const snapshot = {
-      custom: Object.create(null),
-      defaultBang: "g",
-      luckyProvider: "default",
-      luckyUrl: null,
+    const snapshot = redirectSettingsSnapshot({
       syntax: compileTriggerSyntax(";", "@"),
-    };
+    });
     const compactSettings = materializeCompactBaseSettings(snapshot)!;
     const compact = decodeHotBootRecord(
       encodeHotBootRecord(

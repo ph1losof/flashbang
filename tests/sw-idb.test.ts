@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { REDIRECT_SETTINGS_SNAPSHOT_KEY } from "../src/shared/constants";
 import * as coveredSwIdb from "../src/sw/idb";
 import {
   compileTriggerSyntax,
@@ -8,56 +7,30 @@ import {
 } from "../src/sw/redirect";
 import type { PreparedRedirectSettings } from "../src/sw/redirect-settings";
 import { loadTestBangData } from "./helpers/bang-data";
-import { installFakeIndexedDb, reqToPromise } from "./helpers/fake-indexeddb";
+import { installFakeIndexedDb } from "./helpers/fake-indexeddb";
+import {
+  clearCustomBangs,
+  deleteSettingRecord,
+  loadSharedIdb,
+  putSettingRecord,
+  REDIRECT_SETTINGS_SNAPSHOT_KEY,
+  readSettingRecord,
+  resetSharedDb,
+  seedDb,
+} from "./helpers/shared-db";
 
 await loadTestBangData();
 
 let restoreIndexedDb: (() => void) | null = null;
 const swIdbModule: typeof import("../src/sw/idb") = coveredSwIdb;
 
-function loadSharedIdb() {
-  return import("../src/shared/idb");
-}
-
 function loadSwIdb() {
   return Promise.resolve(swIdbModule);
 }
 
-async function seedDb(data: {
-  customBangs?: Array<{
-    trigger: string;
-    url: string;
-    regex?: string;
-    encoding?: "percent" | "plus" | "raw";
-    snap?: string;
-  }>;
-  settings?: Array<{ key: string; value: string }>;
-}): Promise<void> {
-  const shared = await loadSharedIdb();
-  shared.resetDB();
-  const db = await shared.openDB();
-  const tx = db.transaction(["settings", "custom-bangs"], "readwrite");
-  const settingsStore = tx.objectStore("settings");
-  const customStore = tx.objectStore("custom-bangs");
-  await reqToPromise(settingsStore.delete(REDIRECT_SETTINGS_SNAPSHOT_KEY));
-
-  if (data.settings) {
-    for (const row of data.settings) {
-      await reqToPromise(settingsStore.put(row));
-    }
-  }
-
-  if (data.customBangs) {
-    for (const row of data.customBangs) {
-      await reqToPromise(customStore.put(row));
-    }
-  }
-}
-
 beforeEach(async () => {
   restoreIndexedDb = installFakeIndexedDb();
-  const shared = await loadSharedIdb();
-  shared.resetDB();
+  await resetSharedDb();
   swIdbModule.resetIdbStateForTests();
 });
 
@@ -202,8 +175,7 @@ describe("sw/idb redirect settings", () => {
       },
     };
 
-    const shared = await loadSharedIdb();
-    shared.resetDB();
+    await resetSharedDb();
 
     const mod = await loadSwIdb();
     const realNow = Date.now;
@@ -232,8 +204,7 @@ describe("sw/idb redirect settings", () => {
         throw new Error("boom");
       },
     };
-    const shared = await loadSharedIdb();
-    shared.resetDB();
+    await resetSharedDb();
     const startupSettings: RedirectSettings = {
       custom: Object.create(null),
       defaultUrl: ["https://duckduckgo.com/?q=", ""],
@@ -300,12 +271,9 @@ describe("sw/idb redirect settings", () => {
     await mod.waitForRedirectSettingsPersistence();
     expect(first.custom.translate?.[3]).toBeInstanceOf(RegExp);
 
-    const shared = await loadSharedIdb();
-    const db = await shared.openDB();
-    const tx = db.transaction(["settings", "custom-bangs"], "readwrite");
     await Promise.all([
-      reqToPromise(tx.objectStore("settings").delete("default-bang")),
-      reqToPromise(tx.objectStore("custom-bangs").clear()),
+      deleteSettingRecord("default-bang"),
+      clearCustomBangs(),
     ]);
     coveredSwIdb.resetIdbStateForTests();
     const restarted = coveredSwIdb;
@@ -324,24 +292,15 @@ describe("sw/idb redirect settings", () => {
     await seedDb({
       settings: [{ key: "default-bang", value: "ddg" }],
     });
-    const shared = await loadSharedIdb();
-    const db = await shared.openDB();
-    await reqToPromise(
-      db.transaction("settings", "readwrite").objectStore("settings").put({
-        key: REDIRECT_SETTINGS_SNAPSHOT_KEY,
-        snapshot: {},
-        version: 0,
-      })
-    );
+    await putSettingRecord({
+      key: REDIRECT_SETTINGS_SNAPSHOT_KEY,
+      snapshot: {},
+      version: 0,
+    });
 
     const settings = await (await loadSwIdb()).readRedirectSettings();
     expect(settings.defaultUrl[0]).toContain("duckduckgo.com");
-    const rebuilt = await reqToPromise<{ version: number } | undefined>(
-      db
-        .transaction("settings", "readonly")
-        .objectStore("settings")
-        .get(REDIRECT_SETTINGS_SNAPSHOT_KEY)
-    );
+    const rebuilt = await readSettingRecord(REDIRECT_SETTINGS_SNAPSHOT_KEY);
     expect(rebuilt?.version).toBe(2);
   });
 
@@ -351,14 +310,7 @@ describe("sw/idb redirect settings", () => {
     await mod.readRedirectSettings(undefined, "catalog-a", Promise.resolve());
     await mod.waitForRedirectSettingsPersistence();
 
-    const shared = await loadSharedIdb();
-    const db = await shared.openDB();
-    await reqToPromise(
-      db
-        .transaction("settings", "readwrite")
-        .objectStore("settings")
-        .put({ key: "default-bang", value: "ddg" })
-    );
+    await putSettingRecord({ key: "default-bang", value: "ddg" });
     coveredSwIdb.resetIdbStateForTests();
     const restarted = coveredSwIdb;
     const rebuilt = await restarted.readRedirectSettings(
@@ -505,17 +457,11 @@ describe("sw/idb redirect settings", () => {
       "",
     ]);
     await mod.waitForRedirectSettingsPersistence();
-    const shared = await loadSharedIdb();
-    const db = await shared.openDB();
-    const stored = await reqToPromise<
-      { snapshot?: { custom?: Record<string, unknown> } } | undefined
-    >(
-      db
-        .transaction("settings", "readonly")
-        .objectStore("settings")
-        .get(REDIRECT_SETTINGS_SNAPSHOT_KEY)
-    );
-    expect(stored?.snapshot?.custom?.mydocs).toBeDefined();
+    const stored = await readSettingRecord(REDIRECT_SETTINGS_SNAPSHOT_KEY);
+    const snapshot = stored?.snapshot as
+      | { custom?: Record<string, unknown> }
+      | undefined;
+    expect(snapshot?.custom?.mydocs).toBeDefined();
   });
 });
 
@@ -534,14 +480,7 @@ describe("sw/idb frecency", () => {
       expect(coveredSwIdb.getTopFrecencyRecord()).toMatchObject({
         docs: 1,
       });
-      const shared = await loadSharedIdb();
-      const db = await shared.openDB();
-      const record = await reqToPromise<{ value: string } | undefined>(
-        db
-          .transaction("settings", "readonly")
-          .objectStore("settings")
-          .get("frecency")
-      );
+      const record = await readSettingRecord<string>("frecency");
       expect(record?.value).toContain("docs:1");
     } finally {
       Date.now = realNow;
@@ -568,15 +507,8 @@ describe("sw/idb frecency", () => {
     expect(coveredSwIdb.getTopFrecencyRecord()).toMatchObject({ yt: 1 });
 
     allowOpen = true;
-    const shared = await loadSharedIdb();
-    shared.resetDB();
-    const db = await shared.openDB();
-    const record = await reqToPromise<{ value: string } | undefined>(
-      db
-        .transaction("settings", "readonly")
-        .objectStore("settings")
-        .get("frecency")
-    );
+    await resetSharedDb();
+    const record = await readSettingRecord<string>("frecency");
     expect(record?.value).toContain("yt:1");
     await coveredSwIdb.invalidateCache();
   });
@@ -642,14 +574,7 @@ describe("sw/idb frecency", () => {
     expect(second.persistence).toBe(third.persistence);
     await third.persistence;
 
-    const shared = await loadSharedIdb();
-    const db = await shared.openDB();
-    const record = await reqToPromise<{ value: string } | undefined>(
-      db
-        .transaction("settings", "readonly")
-        .objectStore("settings")
-        .get("frecency")
-    );
+    const record = await readSettingRecord<string>("frecency");
     expect(record?.value).toContain("g:1");
     expect(record?.value).toContain("yt:3");
   });
@@ -667,23 +592,16 @@ describe("sw/idb frecency", () => {
     }
     await persistence;
 
-    const shared = await loadSharedIdb();
-    const db = await shared.openDB();
-    const record = await reqToPromise<{ value: string } | undefined>(
-      db
-        .transaction("settings", "readonly")
-        .objectStore("settings")
-        .get("frecency")
-    );
-    const entries = record?.value.split("|")[1]?.split(",").filter(Boolean);
+    const record = await readSettingRecord<string>("frecency");
+    const entries = record?.value?.split("|")[1]?.split(",").filter(Boolean);
     expect(entries).toHaveLength(64);
   });
 });
 
 describe("shared IndexedDB recovery", () => {
   test("closes and refreshes the cached connection on versionchange", async () => {
+    await resetSharedDb();
     const shared = await loadSharedIdb();
-    shared.resetDB();
     const first = await shared.openDB();
     let closeCalls = 0;
     const realClose = first.close.bind(first);
@@ -702,8 +620,8 @@ describe("shared IndexedDB recovery", () => {
   });
 
   test("retries after a failed database open", async () => {
+    await resetSharedDb();
     const shared = await loadSharedIdb();
-    shared.resetDB();
     const working = indexedDB;
     let attempts = 0;
     (globalThis as { indexedDB: IDBFactory }).indexedDB = {

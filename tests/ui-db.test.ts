@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { REDIRECT_SETTINGS_SNAPSHOT_KEY } from "../src/shared/constants";
-import { openDB, resetDB } from "../src/shared/idb";
+import { resetDB } from "../src/shared/idb";
 import { DB, SETTINGS_SCHEMA_VERSION } from "../src/ui/db";
 import { resolveSuggestProvider } from "../src/ui/suggest-provider";
-import { installFakeIndexedDb, reqToPromise } from "./helpers/fake-indexeddb";
+import { installFakeIndexedDb } from "./helpers/fake-indexeddb";
+import {
+  putSettingRecord,
+  REDIRECT_SETTINGS_SNAPSHOT_KEY,
+  readSettingRecord,
+} from "./helpers/shared-db";
 
 let restoreIndexedDb: (() => void) | null = null;
 
@@ -19,34 +23,20 @@ afterEach(() => {
 });
 
 async function seedRedirectSnapshot(): Promise<void> {
-  const db = await openDB();
-  await reqToPromise(
-    db
-      .transaction("settings", "readwrite")
-      .objectStore("settings")
-      .put({
-        key: REDIRECT_SETTINGS_SNAPSHOT_KEY,
-        snapshot: {
-          custom: {},
-          defaultBang: "g",
-          luckyProvider: "default",
-          luckyUrl: null,
-        },
-        version: 1,
-      })
-  );
+  await putSettingRecord({
+    key: REDIRECT_SETTINGS_SNAPSHOT_KEY,
+    snapshot: {
+      custom: {},
+      defaultBang: "g",
+      luckyProvider: "default",
+      luckyUrl: null,
+    },
+    version: 1,
+  });
 }
 
 async function hasRedirectSnapshot(): Promise<boolean> {
-  const db = await openDB();
-  return Boolean(
-    await reqToPromise(
-      db
-        .transaction("settings", "readonly")
-        .objectStore("settings")
-        .get(REDIRECT_SETTINGS_SNAPSHOT_KEY)
-    )
-  );
+  return Boolean(await readSettingRecord(REDIRECT_SETTINGS_SNAPSHOT_KEY));
 }
 
 describe("custom bang import and export", () => {

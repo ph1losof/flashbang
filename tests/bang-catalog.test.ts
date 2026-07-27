@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { BANG_COUNT } from "../src/generated/bangs-sparse.js";
 import {
   createBangMeta,
@@ -6,6 +6,14 @@ import {
   loadBuiltinBangCatalog,
   searchBangs,
 } from "../src/ui/bang-catalog";
+import {
+  BANG_META_HEADER_WORDS,
+  BANG_META_MAGIC,
+  BANG_META_VERSION,
+} from "./helpers/bang-binary";
+import { installManagedFetchSpy } from "./helpers/http";
+
+const fetchSpy = installManagedFetchSpy();
 
 describe("bang catalog", () => {
   test("bounded search applies the shared ranking order", () => {
@@ -53,33 +61,29 @@ describe("bang catalog", () => {
       },
       { preconnect: () => undefined }
     );
-    const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(fetchMock);
+    fetchSpy.mockImplementation(fetchMock);
 
-    try {
-      const failed = loadBuiltinBangCatalog();
-      expect(loadBuiltinBangCatalog()).toBe(failed);
-      await expect(failed).rejects.toThrow(
-        "Failed to load /bangs-meta.bin: 503 Unavailable"
-      );
+    const failed = loadBuiltinBangCatalog();
+    expect(loadBuiltinBangCatalog()).toBe(failed);
+    await expect(failed).rejects.toThrow(
+      "Failed to load /bangs-meta.bin: 503 Unavailable"
+    );
 
-      const first = loadBuiltinBangCatalog();
-      const second = loadBuiltinBangCatalog();
-      expect(first).toBe(second);
-      const catalog = await first;
-      expect(catalog.entries).toHaveLength(BANG_COUNT);
-      const google = catalog.byTrigger.get("g");
-      if (!google) {
-        throw new Error("Generated bang catalog is missing Google");
-      }
-      expect(google.name).toBe("Google");
-      expect(google.capture).toBe(false);
-      expect(catalog.byTrigger.get("ktr")?.capture).toBe(true);
-      expect(catalog.entries).toContain(google);
-      expect(fetchSpy).toHaveBeenCalledWith("/bangs-meta.bin");
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
-    } finally {
-      fetchSpy.mockRestore();
+    const first = loadBuiltinBangCatalog();
+    const second = loadBuiltinBangCatalog();
+    expect(first).toBe(second);
+    const catalog = await first;
+    expect(catalog.entries).toHaveLength(BANG_COUNT);
+    const google = catalog.byTrigger.get("g");
+    if (!google) {
+      throw new Error("Generated bang catalog is missing Google");
     }
+    expect(google.name).toBe("Google");
+    expect(google.capture).toBe(false);
+    expect(catalog.byTrigger.get("ktr")?.capture).toBe(true);
+    expect(catalog.entries).toContain(google);
+    expect(fetchSpy).toHaveBeenCalledWith("/bangs-meta.bin");
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
   test("rejects malformed bang metadata headers and layouts", () => {
@@ -87,9 +91,9 @@ describe("bang catalog", () => {
       "Truncated bang metadata"
     );
 
-    const header = new Uint32Array(6);
-    header[0] = 0x314d4246;
-    header[1] = 1;
+    const header = new Uint32Array(BANG_META_HEADER_WORDS);
+    header[0] = BANG_META_MAGIC;
+    header[1] = BANG_META_VERSION;
     header[5] = header.byteLength;
 
     const unsupported = header.slice();
@@ -113,8 +117,8 @@ describe("bang catalog", () => {
     const invalidCapture = new ArrayBuffer(header.byteLength + 4);
     const captureHeader = new Uint32Array(invalidCapture, 0, 6);
     captureHeader.set([
-      0x314d4246,
-      1,
+      BANG_META_MAGIC,
+      BANG_META_VERSION,
       1,
       1,
       header.byteLength + 4,
@@ -128,8 +132,8 @@ describe("bang catalog", () => {
     const invalidFields = new ArrayBuffer(header.byteLength + 1);
     const fieldsHeader = new Uint32Array(invalidFields, 0, 6);
     fieldsHeader.set([
-      0x314d4246,
-      1,
+      BANG_META_MAGIC,
+      BANG_META_VERSION,
       1,
       0,
       header.byteLength,
