@@ -16,6 +16,12 @@ describe("production static caching", () => {
     expect(acceptsBrotli("xbr, gzip")).toBe(false);
   });
 
+  test("ignores absent, invalid, and disabled Brotli negotiation", () => {
+    expect(acceptsBrotli(null)).toBe(false);
+    expect(acceptsBrotli("br;q=bogus")).toBe(false);
+    expect(acceptsBrotli("br;q=2, *;q=0")).toBe(false);
+    expect(acceptsBrotli("gzip;q=0.5, *;q=0.25")).toBe(true);
+  });
   test("only content-hashed assets are immutable", () => {
     expect(cacheControlForAsset("/chunk-abc12345.js")).toBe(
       "public, max-age=31536000, immutable"

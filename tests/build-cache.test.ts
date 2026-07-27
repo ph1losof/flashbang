@@ -23,6 +23,14 @@ describe("build cache version", () => {
     );
   });
 
+  test("hashes duplicate paths deterministically", () => {
+    const repeated = [
+      { path: "/same", bytes: new TextEncoder().encode("first") },
+      { path: "/same", bytes: new TextEncoder().encode("second") },
+    ];
+
+    expect(createCacheVersion(repeated)).toBe(createCacheVersion(repeated));
+  });
   test("changes for asset paths, asset bytes, and preliminary SW bytes", () => {
     const base = [
       { path: "/home", bytes: new TextEncoder().encode("home") },
@@ -105,6 +113,11 @@ describe("custom suggestion build flag", () => {
     expect(customSuggestUrlsEnabled("1")).toBe(false);
   });
 
+  test("requires the build-time insertion marker", () => {
+    expect(() => configureCustomSuggestOption("<select></select>", true)).toThrow(
+      "Custom suggestion provider marker is missing"
+    );
+  });
   test("omits the custom provider from disabled builds", () => {
     const html = configureCustomSuggestOption(source, false);
     expect(html).not.toContain('value="custom"');

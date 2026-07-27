@@ -179,7 +179,7 @@ function appendBangWithAliases(
   }
 }
 
-function parseDdg(raw: string): Bang[] {
+export function parseDdg(raw: string): Bang[] {
   const entries: RawDdgEntry[] = JSON.parse(raw);
   const bangs: Bang[] = [];
   for (const entry of entries) {
@@ -195,7 +195,7 @@ function parseDdg(raw: string): Bang[] {
   return bangs;
 }
 
-function parseKagi(raw: string): Bang[] {
+export function parseKagi(raw: string): Bang[] {
   const entries: RawKagiEntry[] = JSON.parse(raw);
   const bangs: Bang[] = [];
   for (const entry of entries) {
@@ -227,7 +227,7 @@ function parseKagi(raw: string): Bang[] {
   return bangs;
 }
 
-function parseCustom(data: CustomBangMap): Bang[] {
+export function parseCustom(data: CustomBangMap): Bang[] {
   return Object.entries(data).map(([trigger, b]) => ({
     trigger: trigger.toLowerCase(),
     name: b.name,
@@ -238,7 +238,7 @@ function parseCustom(data: CustomBangMap): Bang[] {
   }));
 }
 
-function mergeSources(sources: readonly NamedBangSource[]): Bang[] {
+export function mergeSources(sources: readonly NamedBangSource[]): Bang[] {
   const map = new Map<string, Bang>();
 
   for (const { bangs, name } of sources) {
