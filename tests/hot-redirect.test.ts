@@ -125,6 +125,14 @@ describe("service worker hot redirects", () => {
   });
 
   test("materializes compact base settings only from available data", () => {
+    const prepared = settings();
+    expect(materializeCompactBaseSettings(snapshot(), prepared)).toEqual({
+      custom: Object.create(null),
+      defaultUrl: prepared.defaultUrl,
+      luckyUrl: prepared.luckyUrl,
+      syntax: prepared.syntax,
+    });
+
     const unknown = snapshot();
     unknown.defaultBang = "not-a-generated-hot-bang";
     expect(materializeCompactBaseSettings(unknown)).toBeNull();
@@ -138,6 +146,43 @@ describe("service worker hot redirects", () => {
       "https://docs.example/search?q=",
       "",
     ]);
+
+    const captureDefault = snapshot(
+      Object.assign(Object.create(null), {
+        capture: compileCaptureUrl(
+          "https://capture.example/$1",
+          "^(.+)$",
+          "percent"
+        )!,
+      })
+    );
+    captureDefault.defaultBang = "capture";
+    expect(
+      materializeCompactBaseSettings(captureDefault)?.defaultUrl[0]
+    ).toContain("google.com");
+
+    for (const [provider, expected] of [
+      ["none", null],
+      ["google", "google.com"],
+      ["ddg", "duckduckgo.com"],
+      ["kagi", "kagi.com"],
+    ] as const) {
+      const providerSnapshot = snapshot();
+      providerSnapshot.luckyProvider = provider;
+      const luckyUrl =
+        materializeCompactBaseSettings(providerSnapshot)?.luckyUrl;
+      if (expected) {
+        expect(luckyUrl?.[0]).toContain(expected);
+      } else {
+        expect(luckyUrl).toBeNull();
+      }
+    }
+    const customLucky = snapshot();
+    customLucky.luckyProvider = "custom";
+    customLucky.luckyUrl = ["https://lucky.example/?q=", ""];
+    expect(materializeCompactBaseSettings(customLucky)?.luckyUrl).toEqual(
+      customLucky.luckyUrl
+    );
   });
 
   test("round-trips materialized settings and every custom entry", () => {

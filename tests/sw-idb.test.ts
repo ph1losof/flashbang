@@ -5,7 +5,12 @@ import {
   type RedirectSettings,
   redirectUrl,
 } from "../src/sw/redirect";
-import type { PreparedRedirectSettings } from "../src/sw/redirect-settings";
+import {
+  loadRedirectSettings,
+  materializeRedirectSettings,
+  type PreparedRedirectSettings,
+  type RedirectSettingsSnapshot,
+} from "../src/sw/redirect-settings";
 import { loadTestBangData } from "./helpers/bang-data";
 import { installFakeIndexedDb } from "./helpers/fake-indexeddb";
 import {
@@ -40,6 +45,62 @@ afterEach(() => {
 });
 
 describe("sw/idb redirect settings", () => {
+  test("uses prepared settings or materializes and persists a snapshot", async () => {
+    const snapshot: RedirectSettingsSnapshot = {
+      custom: Object.create(null),
+      defaultBang: "g",
+      luckyProvider: "default",
+      luckyUrl: null,
+    };
+    const preparedSettings = materializeRedirectSettings(snapshot);
+
+    expect(
+      await loadRedirectSettings(
+        Promise.resolve({ settings: preparedSettings, snapshot })
+      )
+    ).toBe(preparedSettings);
+
+    const rebuilt = await loadRedirectSettings(
+      Promise.resolve({ settings: null, snapshot }),
+      "/bangs.bin"
+    );
+    expect(rebuilt.defaultUrl).toEqual(preparedSettings.defaultUrl);
+    await Bun.sleep(0);
+    expect(
+      await readSettingRecord(REDIRECT_SETTINGS_SNAPSHOT_KEY)
+    ).toBeDefined();
+  });
+
+  test("materializes every explicit lucky provider", () => {
+    const base: RedirectSettingsSnapshot = {
+      custom: Object.create(null),
+      defaultBang: "g",
+      luckyProvider: "default",
+      luckyUrl: null,
+    };
+
+    expect(
+      materializeRedirectSettings({ ...base, luckyProvider: "none" }).luckyUrl
+    ).toBeNull();
+    for (const [provider, hostname] of [
+      ["google", "google.com"],
+      ["ddg", "duckduckgo.com"],
+      ["kagi", "kagi.com"],
+    ] as const) {
+      expect(
+        materializeRedirectSettings({ ...base, luckyProvider: provider })
+          .luckyUrl?.[0]
+      ).toContain(hostname);
+    }
+    expect(
+      materializeRedirectSettings({
+        ...base,
+        luckyProvider: "custom",
+        luckyUrl: ["https://lucky.example/?q=", ""],
+      }).luckyUrl
+    ).toEqual(["https://lucky.example/?q=", ""]);
+  });
+
   test("reads default/lucky/custom settings from IndexedDB", async () => {
     await seedDb({
       settings: [

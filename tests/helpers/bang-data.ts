@@ -1,12 +1,16 @@
-import { initializeBangData } from "../../src/sw/bang-data";
+import {
+  initializeBangData,
+  isBangDataInitialized,
+} from "../../src/sw/bang-data";
 
-let loadPromise: Promise<void> | null = null;
+let dataPromise: Promise<ArrayBuffer> | null = null;
 
-export function loadTestBangData(): Promise<void> {
-  if (!loadPromise) {
-    loadPromise = Bun.file("src/generated/bangs.bin")
-      .arrayBuffer()
-      .then(initializeBangData);
+export async function loadTestBangData(): Promise<void> {
+  if (!dataPromise) {
+    dataPromise = Bun.file("src/generated/bangs.bin").arrayBuffer();
   }
-  return loadPromise;
+  const buffer = await dataPromise;
+  if (!isBangDataInitialized()) {
+    initializeBangData(buffer);
+  }
 }

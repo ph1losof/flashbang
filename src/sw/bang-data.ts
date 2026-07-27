@@ -273,6 +273,10 @@ export function isBangDataInitialized(): boolean {
   return lookup !== null;
 }
 
+export function resetBangDataForTests(): void {
+  lookup = null;
+}
+
 export function lookupBang(
   trigger: string,
   hash: number

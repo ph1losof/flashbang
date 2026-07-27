@@ -187,6 +187,19 @@ describe("codegen round-trip", () => {
   test("rejects invalid binary lookup metadata", async () => {
     const binary = await Bun.file("src/generated/bangs.bin").arrayBuffer();
     for (const [word, value, message] of [
+      [0, 0, "Unsupported binary bang data"],
+      [11, binary.byteLength + 1, "Truncated binary bang data"],
+      [
+        10,
+        new Uint32Array(binary, 0, BANG_BINARY_HEADER_WORDS)[10] + 1,
+        "Invalid binary bang data layout",
+      ],
+    ] as const) {
+      const invalid = binary.slice(0);
+      new Uint32Array(invalid, 0, BANG_BINARY_HEADER_WORDS)[word] = value;
+      expect(() => initializeBangData(invalid)).toThrow(message);
+    }
+    for (const [word, value, message] of [
       [2, 0, "Invalid binary bang entry count"],
       [3, 0, "Invalid binary bang MPHF bucket count"],
       [3, 3, "Invalid binary bang MPHF bucket count"],

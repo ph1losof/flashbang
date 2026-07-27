@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { compileCaptureUrl } from "../src/shared/capture-template";
+import { resetBangDataForTests } from "../src/sw/bang-data";
 import {
   createHotBootState,
   decodeHotBootRecord,
@@ -618,6 +619,63 @@ describe("sw runtime with real modules", () => {
     await Promise.all([first.response(), second.response()]);
   });
 
+  test("loads cold bang data from an older managed cache without a network request", async () => {
+    await loadSwRuntime();
+    resetBangDataForTests();
+    const bangData = await Bun.file("src/generated/bangs.bin").arrayBuffer();
+    cacheEntries
+      .get("fb-old-cache")!
+      .set("https://flashbang.local/bangs.bin", new Response(bangData));
+
+    const fetchEvt = createFetchEvent(
+      "https://flashbang.local/?q=!g+cold",
+      "",
+      "navigate"
+    );
+    await handlers.fetch?.(fetchEvt.event);
+    const response = await fetchEvt.response();
+    await Promise.all(fetchEvt.waits);
+
+    expect(response.headers.get("Location")).toContain("google.com");
+    expect(fetchCalls).not.toContain("/bangs.bin");
+    expect(cachePutCalls).toContain("/bangs.bin");
+  });
+
+  test("retries cold bang data loading after a failed response", async () => {
+    await loadSwRuntime();
+    resetBangDataForTests();
+    const bangData = await Bun.file("src/generated/bangs.bin").arrayBuffer();
+    let attempts = 0;
+    fetchImpl = (input) => {
+      const path = new URL(requestUrl(input), "https://flashbang.local")
+        .pathname;
+      if (path !== "/bangs.bin") {
+        return Promise.resolve(new Response("ok"));
+      }
+      attempts++;
+      return Promise.resolve(
+        attempts === 1
+          ? new Response("missing", { status: 503, statusText: "Unavailable" })
+          : new Response(bangData)
+      );
+    };
+
+    const failed = createFetchEvent("https://flashbang.local/?q=!hn+retry");
+    await handlers.fetch?.(failed.event);
+    await expect(failed.response()).rejects.toThrow(
+      "Failed to load /bangs.bin: 503 Unavailable"
+    );
+    await Promise.all(failed.waits);
+
+    const retried = createFetchEvent("https://flashbang.local/?q=!hn+retry");
+    await handlers.fetch?.(retried.event);
+    expect((await retried.response()).headers.get("Location")).toContain(
+      "hn.algolia.com"
+    );
+    await Promise.all(retried.waits);
+    expect(attempts).toBe(2);
+  });
+
   test("does not block installation when deferred app precaching fails", async () => {
     await loadSwRuntime(["/chunk-catalog123.js"]);
     fetchImpl = (input) => {
@@ -1181,5 +1239,42 @@ describe("sw runtime with real modules", () => {
 
     expect(fetchCalls.filter((path) => path === "/bench")).toHaveLength(1);
     expect(cachePutCalls).toContain("/bench");
+  });
+
+  test("serves benchmark scripts and settings fallbacks through dedicated routes", async () => {
+    await loadSwRuntime();
+    fetchImpl = (input) => {
+      const path = new URL(requestUrl(input), "https://flashbang.local")
+        .pathname;
+      if (path === "/bench.js") {
+        return Promise.resolve(new Response("benchmark-script"));
+      }
+      if (path === "/home") {
+        return Promise.reject(new Error("offline"));
+      }
+      return Promise.resolve(new Response("ok"));
+    };
+
+    const script = createFetchEvent("https://flashbang.local/bench.js");
+    await handlers.fetch?.(script.event);
+    await expect((await script.response()).text()).resolves.toBe(
+      "benchmark-script"
+    );
+    expect(cachePutCalls).toContain("/bench.js");
+
+    const offlineSettings = createFetchEvent(
+      "https://flashbang.local/account/settings"
+    );
+    await handlers.fetch?.(offlineSettings.event);
+    expect((await offlineSettings.response()).status).toBe(503);
+
+    cacheEntries
+      .get("fb-test-cache")!
+      .set("https://flashbang.local/home", new Response("cached-home"));
+    const cachedSettings = createFetchEvent("https://flashbang.local/settings");
+    await handlers.fetch?.(cachedSettings.event);
+    await expect((await cachedSettings.response()).text()).resolves.toBe(
+      "cached-home"
+    );
   });
 });

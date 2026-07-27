@@ -5,3 +5,12 @@ production = false
 
 [install.lockfile]
 save = true
+
+[test]
+coveragePathIgnorePatterns = [
+  "scripts/**",
+  "tests/**",
+  "src/generated/**",
+  "*.config.ts",
+]
+coverageThreshold = { lines = 0.97, functions = 0.9 }
