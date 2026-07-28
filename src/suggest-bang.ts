@@ -42,12 +42,14 @@ export const EDGE_STRIDE = 3;
 
 const TERM_K_CACHE = new Array<string | undefined>(TERM_R.length);
 const EMPTY_DETAIL: Record<string, string> = {};
-interface TerminalMeta {
+export interface BangSuggestionMeta {
   detail: Record<string, string>;
   label: string;
   url: string;
 }
-const TERM_META_CACHE = new Array<TerminalMeta | undefined>(TERM_R.length);
+const TERM_META_CACHE = new Array<BangSuggestionMeta | undefined>(
+  TERM_R.length
+);
 
 function readPackedStringCached(
   blob: string,
@@ -68,7 +70,7 @@ function readTerminalTrigger(index: number): string {
   return readPackedStringCached(TERM_K_BLOB, TERM_K_OFF, TERM_K_CACHE, index);
 }
 
-function readTerminalMeta(index: number): TerminalMeta {
+function readTerminalMeta(index: number): BangSuggestionMeta {
   const cached = TERM_META_CACHE[index];
   if (cached !== undefined) {
     return cached;
@@ -89,6 +91,96 @@ function readTerminalMeta(index: number): TerminalMeta {
   };
   TERM_META_CACHE[index] = meta;
   return meta;
+}
+
+export function findBangSuggestionMeta(
+  trigger: string
+): BangSuggestionMeta | null {
+  let node = ROOT;
+  let pos = 0;
+
+  while (pos < trigger.length) {
+    const nodeOff = node * NODE_STRIDE;
+    const edgeStart = NODES[nodeOff + NODE_EDGE_START];
+    const edgeCount = NODES[nodeOff + NODE_EDGE_COUNT];
+    let child = -1;
+
+    for (let i = 0; i < edgeCount; i++) {
+      const edgeOff = (edgeStart + i) * EDGE_STRIDE;
+      const labelStart = EDGES[edgeOff + EDGE_LABEL_START];
+      const labelLength = EDGES[edgeOff + EDGE_LABEL_LENGTH];
+      if (
+        LABELS.charCodeAt(labelStart) !== trigger.charCodeAt(pos) ||
+        pos + labelLength > trigger.length
+      ) {
+        continue;
+      }
+      let match = 1;
+      while (
+        match < labelLength &&
+        LABELS.charCodeAt(labelStart + match) ===
+          trigger.charCodeAt(pos + match)
+      ) {
+        match++;
+      }
+      if (match !== labelLength) {
+        return null;
+      }
+      child = EDGES[edgeOff + EDGE_CHILD_INDEX];
+      pos += labelLength;
+      break;
+    }
+
+    if (child < 0) {
+      return null;
+    }
+    node = child;
+  }
+
+  const terminalIndex = NODES[node * NODE_STRIDE + NODE_TERMINAL_INDEX];
+  return terminalIndex < 0 ? null : readTerminalMeta(terminalIndex);
+}
+
+function writeBangSuggestionMeta(
+  descriptions: string[],
+  urls: string[],
+  details: unknown[],
+  index: number,
+  meta: BangSuggestionMeta
+): void {
+  if (descriptions[index] === undefined) {
+    descriptions[index] = meta.label;
+  }
+  if (urls[index] === undefined) {
+    urls[index] = meta.url;
+  }
+  const detail = details[index];
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const record = detail as Record<string, unknown>;
+    record.a = meta.detail.a;
+    record.i = meta.detail.i;
+  } else {
+    details[index] = meta.detail;
+  }
+}
+
+export function addBangSuggestionMeta(
+  payload: unknown[],
+  completionCount: number,
+  meta: BangSuggestionMeta
+): void {
+  const descriptions = (payload[2] ?? []) as string[];
+  const urls = (payload[3] ?? []) as string[];
+  const extra = (payload[4] ?? {}) as Record<string, unknown>;
+  const existing = extra["google:suggestdetail"];
+  const details = Array.isArray(existing) ? existing : [];
+  for (let i = 0; i < completionCount; i++) {
+    writeBangSuggestionMeta(descriptions, urls, details, i, meta);
+  }
+  extra["google:suggestdetail"] = details;
+  payload[2] = descriptions;
+  payload[3] = urls;
+  payload[4] = extra;
 }
 
 function effectiveScore(
@@ -339,9 +431,7 @@ export function responseFromCandidates(
       const terminalIndex = c.terminalIndex;
       completions[i] = `${prefixBang}${readTerminalTrigger(terminalIndex)}`;
       const meta = readTerminalMeta(terminalIndex);
-      descriptions[i] = meta.label;
-      urls[i] = meta.url;
-      details[i] = meta.detail;
+      writeBangSuggestionMeta(descriptions, urls, details, i, meta);
     } else {
       completions[i] = `${prefixBang}${c.trigger}`;
       descriptions[i] = "";
@@ -390,9 +480,7 @@ function responseFromRanked(
 
     completions[i] = `${prefixBang}${readTerminalTrigger(idx)}`;
     const meta = readTerminalMeta(idx);
-    descriptions[i] = meta.label;
-    urls[i] = meta.url;
-    details[i] = meta.detail;
+    writeBangSuggestionMeta(descriptions, urls, details, i, meta);
   }
 
   return new Response(

@@ -470,6 +470,7 @@ const [
   { handleSuggestRequest },
   {
     bangSuggestions,
+    findBangSuggestionMeta,
     profileTopKCount,
     profileWalkPrefix,
     responseFromCandidates,
@@ -724,6 +725,17 @@ console.log(
 
 const WALK_PREFIX_ITERS = iterations(500_000);
 const TOPK_ONLY_ITERS = iterations(500_000);
+const exactTriggers = ["g", "gh", "mdn", "yt", "stackoverflow", "missing"];
+
+const exactMetaStats = bench(
+  WALK_PREFIX_ITERS,
+  (i, run) => {
+    const offset = run === -1 ? 0 : run;
+    const trigger = exactTriggers[(i + offset) % exactTriggers.length];
+    sink += findBangSuggestionMeta(trigger)?.url.length ?? 0;
+  },
+  20_000
+);
 
 const walkPrefixStats = bench(
   WALK_PREFIX_ITERS,
@@ -754,6 +766,9 @@ const topKOnlyStats = bench(
 console.log("\n  Breakdown (isolated):");
 console.log(
   `    walkPrefix only: ${fmt(walkPrefixStats.p50)} median, ${fmt(walkPrefixStats.p90)} p90, ${fmt(walkPrefixStats.p99)} p99`
+);
+console.log(
+  `    exact metadata:  ${fmt(exactMetaStats.p50)} median, ${fmt(exactMetaStats.p90)} p90, ${fmt(exactMetaStats.p99)} p99`
 );
 console.log(
   `    topK only:       ${fmt(topKOnlyStats.p50)} median, ${fmt(topKOnlyStats.p90)} p90, ${fmt(topKOnlyStats.p99)} p99`

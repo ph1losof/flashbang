@@ -201,6 +201,23 @@ const defaultSettings = {
   custom: [],
 };
 
+function githubRichResponse(query: string, completions: string[]): unknown[] {
+  const label = "GitHub \u2014 github.com";
+  const url = "https://github.com";
+  return [
+    query,
+    completions,
+    new Array(completions.length).fill(label),
+    new Array(completions.length).fill(url),
+    {
+      "google:suggestdetail": completions.map(() => ({
+        a: label,
+        i: `${url}/favicon.ico`,
+      })),
+    },
+  ];
+}
+
 describe("suggest cookie codec", () => {
   test("round-trips custom syntax and sorted context", () => {
     const encoded = encodeSuggestCookieValue(
@@ -1051,10 +1068,9 @@ describe("provider proxying — via suggest()", () => {
     expect(fetchSpy).toHaveBeenCalledWith(
       "https://www.google.com/complete/search?client=firefox&channel=fen&q=testf"
     );
-    expect(await r.json()).toEqual([
-      "!gh testf",
-      ["!gh testflight", "!gh testfreaks"],
-    ]);
+    expect(await r.json()).toEqual(
+      githubRichResponse("!gh testf", ["!gh testflight", "!gh testfreaks"])
+    );
   });
 
   test("omits suffix snaps after the trigger is completed", async () => {
@@ -1070,10 +1086,12 @@ describe("provider proxying — via suggest()", () => {
     expect(fetchSpy).toHaveBeenCalledWith(
       "https://www.google.com/complete/search?client=firefox&channel=fen&q=testf"
     );
-    expect(await r.json()).toEqual([
-      "testf @gh ",
-      ["testflight @gh", "testflight status @gh"],
-    ]);
+    expect(await r.json()).toEqual(
+      githubRichResponse("testf @gh ", [
+        "testflight @gh",
+        "testflight status @gh",
+      ])
+    );
   });
 
   test("omits interspersed configured bangs and snaps", async () => {
@@ -1091,10 +1109,11 @@ describe("provider proxying — via suggest()", () => {
     expect(fetchSpy).toHaveBeenCalledWith(
       "https://www.google.com/complete/search?client=firefox&channel=fen&q=find%20package"
     );
-    expect(await r.json()).toEqual([
-      "$gh find ~mdn package",
-      ["$gh find ~mdn package docs"],
-    ]);
+    expect(await r.json()).toEqual(
+      githubRichResponse("$gh find ~mdn package", [
+        "$gh find ~mdn package docs",
+      ])
+    );
   });
 
   test("restores multiple leading triggers and snap chains", async () => {
@@ -1129,10 +1148,12 @@ describe("provider proxying — via suggest()", () => {
     expect(fetchSpy).toHaveBeenCalledWith(
       "https://www.google.com/complete/search?client=firefox&channel=fen&q=testf"
     );
-    expect(await r.json()).toEqual([
-      "testf !gh @mdn ",
-      ["testflight !gh @mdn", "testflight status !gh @mdn"],
-    ]);
+    expect(await r.json()).toEqual(
+      githubRichResponse("testf !gh @mdn ", [
+        "testflight !gh @mdn",
+        "testflight status !gh @mdn",
+      ])
+    );
   });
 
   test("restores leading, interspersed, and trailing triggers together", async () => {
@@ -1148,10 +1169,11 @@ describe("provider proxying — via suggest()", () => {
     expect(fetchSpy).toHaveBeenCalledWith(
       "https://www.google.com/complete/search?client=firefox&channel=fen&q=find%20package"
     );
-    expect(await r.json()).toEqual([
-      "!gh find @mdn package !so ",
-      ["!gh find @mdn package docs !so"],
-    ]);
+    expect(await r.json()).toEqual(
+      githubRichResponse("!gh find @mdn package !so ", [
+        "!gh find @mdn package docs !so",
+      ])
+    );
   });
 
   test("preserves provider metadata while restoring triggers", async () => {
@@ -1161,7 +1183,7 @@ describe("provider proxying — via suggest()", () => {
         ["testflight"],
         ["description"],
         ["https://example.test/testflight"],
-        { "google:suggestdetail": [{ a: "detail" }] },
+        { "google:suggestdetail": [{ t: "detail" }] },
       ])
     );
 
@@ -1175,8 +1197,34 @@ describe("provider proxying — via suggest()", () => {
       ["!gh testflight"],
       ["description"],
       ["https://example.test/testflight"],
-      { "google:suggestdetail": [{ a: "detail" }] },
+      {
+        "google:suggestdetail": [
+          {
+            t: "detail",
+            a: "GitHub \u2014 github.com",
+            i: "https://github.com/favicon.ico",
+          },
+        ],
+      },
     ]);
+  });
+
+  test("preserves bang rich metadata on provider completions", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      Response.json(["testf", ["testflight", "testflight status"]])
+    );
+
+    const r = await suggest("!gh testf", {
+      ...defaultSettings,
+      provider: "google",
+    });
+
+    expect(await r.json()).toEqual(
+      githubRichResponse("!gh testf", [
+        "!gh testflight",
+        "!gh testflight status",
+      ])
+    );
   });
 
   test("handles supported whitespace without sending it upstream", async () => {
@@ -1193,7 +1241,9 @@ describe("provider proxying — via suggest()", () => {
     expect(fetchSpy).toHaveBeenCalledWith(
       "https://www.google.com/complete/search?client=firefox&channel=fen&q=testf"
     );
-    expect(await r.json()).toEqual([query, ["!gh testflight status"]]);
+    expect(await r.json()).toEqual(
+      githubRichResponse(query, ["!gh testflight status"])
+    );
   });
 
   test("does not treat embedded trigger characters as trigger tokens", async () => {

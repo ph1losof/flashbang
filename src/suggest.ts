@@ -19,7 +19,11 @@ import {
   isTriggerPrefix,
   type TriggerPrefix,
 } from "./shared/trigger-prefix";
-import { bangSuggestions } from "./suggest-bang";
+import {
+  addBangSuggestionMeta,
+  bangSuggestions,
+  findBangSuggestionMeta,
+} from "./suggest-bang";
 
 const JSON_HEADERS_INIT = { headers: JSON_HEADERS };
 
@@ -80,7 +84,9 @@ function isTrimWs(code: number): boolean {
 }
 
 interface ProviderQuery {
+  bangTrigger: string | null;
   insertions: Array<{ index: number; value: string }>;
+  snapTrigger: string | null;
   termCount: number;
   value: string;
 }
@@ -116,6 +122,8 @@ function providerQueryWithoutTriggers(
   }
 
   const insertions: ProviderQuery["insertions"] = [];
+  let bangTrigger: string | null = null;
+  let snapTrigger: string | null = null;
   let termCount = 0;
   let value = "";
   let index = 0;
@@ -136,6 +144,11 @@ function providerQueryWithoutTriggers(
     const prefix = term.charAt(0);
     if (prefix === bangPrefix || prefix === snapPrefix) {
       insertions.push({ index: termCount, value: term });
+      if (prefix === bangPrefix) {
+        bangTrigger ??= term.substring(1);
+      } else {
+        snapTrigger ??= term.substring(1);
+      }
     } else {
       value += value ? ` ${term}` : term;
       termCount++;
@@ -145,7 +158,7 @@ function providerQueryWithoutTriggers(
   if (insertions.length === 0) {
     return null;
   }
-  return { insertions, termCount, value };
+  return { bangTrigger, insertions, snapTrigger, termCount, value };
 }
 
 function restoreTriggers(
@@ -225,6 +238,22 @@ function restoreTriggers(
     result += insertions[insertionIndex++].value;
   }
   return result;
+}
+
+function providerBangMeta(
+  providerQuery: ProviderQuery,
+  settings: SuggestSettings
+): ReturnType<typeof findBangSuggestionMeta> {
+  const value = providerQuery.bangTrigger ?? providerQuery.snapTrigger;
+  if (!value) {
+    return null;
+  }
+  const comma = value.indexOf(",");
+  const trigger = (comma < 0 ? value : value.substring(0, comma)).toLowerCase();
+  if (settings.custom.length > 0 && settings.custom.includes(trigger)) {
+    return null;
+  }
+  return findBangSuggestionMeta(trigger);
 }
 
 function fillTemplate(url: string, encodedQuery: string): string {
@@ -669,6 +698,10 @@ export async function suggest(
       const completions = payload[1] as string[];
       for (let i = 0; i < completions.length; i++) {
         completions[i] = restoreTriggers(completions[i], providerQuery);
+      }
+      const bangMeta = providerBangMeta(providerQuery, settings);
+      if (bangMeta) {
+        addBangSuggestionMeta(payload, completions.length, bangMeta);
       }
       return new Response(JSON.stringify(payload), JSON_HEADERS_INIT);
     }
