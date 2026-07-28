@@ -361,6 +361,12 @@ describe("suggest parser edge cases", () => {
     expect(parsePartialBang("query !gh extra")).toBeNull();
   });
 
+  test("treats trailing whitespace as a completed suffix trigger", () => {
+    expect(parsePartialBang("query !gh")).not.toBeNull();
+    expect(parsePartialBang("query !gh ")).toBeNull();
+    expect(parsePartialBang("query @gh\t")).toBeNull();
+  });
+
   test("applies cleanup provider overrides without invalid context", () => {
     const result = parseSettingsFromRawUrlWithCleanup(
       "https://example.test/?sp=bing",
@@ -1030,6 +1036,190 @@ describe("provider proxying — via suggest()", () => {
     expect(await r.json()).toEqual(["cats", ["cats and dogs"]]);
     expect(r.headers.get("Cache-Control")).toBe("no-store");
     expect(r.headers.get("Content-Type")).toBe("application/json");
+  });
+
+  test("omits prefix bangs from provider requests and restores them", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      Response.json(["testf", ["testflight", "testfreaks"]])
+    );
+
+    const r = await suggest("!gh testf", {
+      ...defaultSettings,
+      provider: "google",
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://www.google.com/complete/search?client=firefox&channel=fen&q=testf"
+    );
+    expect(await r.json()).toEqual([
+      "!gh testf",
+      ["!gh testflight", "!gh testfreaks"],
+    ]);
+  });
+
+  test("omits suffix snaps after the trigger is completed", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      Response.json(["testf", ["testflight", "testflight status"]])
+    );
+
+    const r = await suggest("testf @gh ", {
+      ...defaultSettings,
+      provider: "google",
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://www.google.com/complete/search?client=firefox&channel=fen&q=testf"
+    );
+    expect(await r.json()).toEqual([
+      "testf @gh ",
+      ["testflight @gh", "testflight status @gh"],
+    ]);
+  });
+
+  test("omits interspersed configured bangs and snaps", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      Response.json(["find package", ["find package docs"]])
+    );
+
+    const r = await suggest("$gh find ~mdn package", {
+      ...defaultSettings,
+      bangPrefix: "$",
+      provider: "google",
+      snapPrefix: "~",
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://www.google.com/complete/search?client=firefox&channel=fen&q=find%20package"
+    );
+    expect(await r.json()).toEqual([
+      "$gh find ~mdn package",
+      ["$gh find ~mdn package docs"],
+    ]);
+  });
+
+  test("restores multiple leading triggers and snap chains", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      Response.json(["testf", ["testflight", "testflight status"]])
+    );
+
+    const r = await suggest("@gh,so !repo testf", {
+      ...defaultSettings,
+      provider: "google",
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://www.google.com/complete/search?client=firefox&channel=fen&q=testf"
+    );
+    expect(await r.json()).toEqual([
+      "@gh,so !repo testf",
+      ["@gh,so !repo testflight", "@gh,so !repo testflight status"],
+    ]);
+  });
+
+  test("restores multiple completed trailing triggers", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      Response.json(["testf", ["testflight", "testflight status"]])
+    );
+
+    const r = await suggest("testf !gh @mdn ", {
+      ...defaultSettings,
+      provider: "google",
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://www.google.com/complete/search?client=firefox&channel=fen&q=testf"
+    );
+    expect(await r.json()).toEqual([
+      "testf !gh @mdn ",
+      ["testflight !gh @mdn", "testflight status !gh @mdn"],
+    ]);
+  });
+
+  test("restores leading, interspersed, and trailing triggers together", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      Response.json(["find package", ["find package docs"]])
+    );
+
+    const r = await suggest("!gh find @mdn package !so ", {
+      ...defaultSettings,
+      provider: "google",
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://www.google.com/complete/search?client=firefox&channel=fen&q=find%20package"
+    );
+    expect(await r.json()).toEqual([
+      "!gh find @mdn package !so ",
+      ["!gh find @mdn package docs !so"],
+    ]);
+  });
+
+  test("preserves provider metadata while restoring triggers", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      Response.json([
+        "testf",
+        ["testflight"],
+        ["description"],
+        ["https://example.test/testflight"],
+        { "google:suggestdetail": [{ a: "detail" }] },
+      ])
+    );
+
+    const r = await suggest("!gh testf", {
+      ...defaultSettings,
+      provider: "google",
+    });
+
+    expect(await r.json()).toEqual([
+      "!gh testf",
+      ["!gh testflight"],
+      ["description"],
+      ["https://example.test/testflight"],
+      { "google:suggestdetail": [{ a: "detail" }] },
+    ]);
+  });
+
+  test("handles supported whitespace without sending it upstream", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      Response.json(["testf", ["\t testflight status \r\n"]])
+    );
+    const query = "\t!gh \n\vtestf\r";
+
+    const r = await suggest(query, {
+      ...defaultSettings,
+      provider: "google",
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://www.google.com/complete/search?client=firefox&channel=fen&q=testf"
+    );
+    expect(await r.json()).toEqual([query, ["!gh testflight status"]]);
+  });
+
+  test("does not treat embedded trigger characters as trigger tokens", async () => {
+    const body = '[ "email@example.test", [ "email@example.test login" ] ]';
+    fetchSpy.mockResolvedValueOnce(new Response(body));
+
+    const r = await suggest("email@example.test", {
+      ...defaultSettings,
+      provider: "google",
+    });
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://www.google.com/complete/search?client=firefox&channel=fen&q=email%40example.test"
+    );
+    expect(await r.text()).toBe(body);
+  });
+
+  test("does not request suggestions when only trigger tokens remain", async () => {
+    const query = "!gh @mdn";
+    const r = await suggest(query, {
+      ...defaultSettings,
+      provider: "google",
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(await r.json()).toEqual([query, []]);
   });
 
   test("provider=ddg → fetches duckduckgo suggest URL", async () => {

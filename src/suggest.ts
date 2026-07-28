@@ -79,6 +79,154 @@ function isTrimWs(code: number): boolean {
   );
 }
 
+interface ProviderQuery {
+  insertions: Array<{ index: number; value: string }>;
+  termCount: number;
+  value: string;
+}
+
+function providerQueryWithoutTriggers(
+  query: string,
+  bangPrefix: TriggerPrefix,
+  snapPrefix: TriggerPrefix
+): ProviderQuery | null {
+  if (query.indexOf(bangPrefix) === -1 && query.indexOf(snapPrefix) === -1) {
+    return null;
+  }
+
+  const bangCode = bangPrefix.charCodeAt(0);
+  const snapCode = snapPrefix.charCodeAt(0);
+  let atBoundary = true;
+  let hasTrigger = false;
+
+  for (let i = 0; i < query.length; i++) {
+    const code = query.charCodeAt(i);
+    if (isTrimWs(code)) {
+      atBoundary = true;
+    } else {
+      if (atBoundary && (code === bangCode || code === snapCode)) {
+        hasTrigger = true;
+        break;
+      }
+      atBoundary = false;
+    }
+  }
+  if (!hasTrigger) {
+    return null;
+  }
+
+  const insertions: ProviderQuery["insertions"] = [];
+  let termCount = 0;
+  let value = "";
+  let index = 0;
+
+  while (index < query.length) {
+    while (index < query.length && isTrimWs(query.charCodeAt(index))) {
+      index++;
+    }
+    const start = index;
+    while (index < query.length && !isTrimWs(query.charCodeAt(index))) {
+      index++;
+    }
+    if (start === index) {
+      break;
+    }
+
+    const term = query.substring(start, index);
+    const prefix = term.charAt(0);
+    if (prefix === bangPrefix || prefix === snapPrefix) {
+      insertions.push({ index: termCount, value: term });
+    } else {
+      value += value ? ` ${term}` : term;
+      termCount++;
+    }
+  }
+
+  if (insertions.length === 0) {
+    return null;
+  }
+  return { insertions, termCount, value };
+}
+
+function restoreTriggers(
+  completion: string,
+  providerQuery: ProviderQuery
+): string {
+  const { insertions, termCount } = providerQuery;
+  let start = 0;
+  let end = completion.length;
+  while (start < end && isTrimWs(completion.charCodeAt(start))) {
+    start++;
+  }
+  while (end > start && isTrimWs(completion.charCodeAt(end - 1))) {
+    end--;
+  }
+
+  const lastInsertion = insertions.length - 1;
+  if (insertions[lastInsertion].index === 0) {
+    let result = insertions[0].value;
+    for (let i = 1; i < insertions.length; i++) {
+      result += ` ${insertions[i].value}`;
+    }
+    return start === end
+      ? result
+      : `${result} ${completion.substring(start, end)}`;
+  }
+  if (insertions[0].index === termCount) {
+    let result = start === end ? "" : completion.substring(start, end);
+    let i = 0;
+    while (i < insertions.length) {
+      if (result) {
+        result += " ";
+      }
+      result += insertions[i].value;
+      i++;
+    }
+    return result;
+  }
+
+  let result = "";
+  let insertionIndex = 0;
+  let completionTerm = 0;
+  let position = start;
+  while (position < end) {
+    while (position < end && isTrimWs(completion.charCodeAt(position))) {
+      position++;
+    }
+    const termStart = position;
+    while (position < end && !isTrimWs(completion.charCodeAt(position))) {
+      position++;
+    }
+    if (termStart === position) {
+      break;
+    }
+
+    while (
+      insertionIndex < insertions.length &&
+      insertions[insertionIndex].index === completionTerm &&
+      completionTerm < termCount
+    ) {
+      if (result) {
+        result += " ";
+      }
+      result += insertions[insertionIndex++].value;
+    }
+    if (result) {
+      result += " ";
+    }
+    result += completion.substring(termStart, position);
+    completionTerm++;
+  }
+
+  while (insertionIndex < insertions.length) {
+    if (result) {
+      result += " ";
+    }
+    result += insertions[insertionIndex++].value;
+  }
+  return result;
+}
+
 function fillTemplate(url: string, encodedQuery: string): string {
   const parts = resolveTemplateParts(url);
   if (!parts) {
@@ -181,6 +329,9 @@ export function parsePartialBang(
     const ci1 = q.charCodeAt(i + 1);
     if (ci !== CH_SPACE || (ci1 !== bangCode && ci1 !== snapCode)) {
       continue;
+    }
+    if (end < q.length) {
+      return null;
     }
     const triggerStart = i + 2;
     const isSnap = ci1 === snapCode;
@@ -491,8 +642,20 @@ export async function suggest(
     return empty(query);
   }
 
+  const providerQuery = providerQueryWithoutTriggers(
+    query,
+    settings.bangPrefix,
+    settings.snapPrefix
+  );
+  const queryValue = providerQuery?.value ?? query;
+  if (!queryValue) {
+    return empty(query);
+  }
+
   try {
-    const res = await fetch(fillTemplate(endpoint, encodeURIComponent(query)));
+    const res = await fetch(
+      fillTemplate(endpoint, encodeURIComponent(queryValue))
+    );
     if (!res.ok) {
       return empty(query);
     }
@@ -500,6 +663,14 @@ export async function suggest(
     const payload: unknown = JSON.parse(body);
     if (!isSuggestionPayload(payload)) {
       return empty(query);
+    }
+    if (providerQuery) {
+      payload[0] = query;
+      const completions = payload[1] as string[];
+      for (let i = 0; i < completions.length; i++) {
+        completions[i] = restoreTriggers(completions[i], providerQuery);
+      }
+      return new Response(JSON.stringify(payload), JSON_HEADERS_INIT);
     }
     return new Response(body, JSON_HEADERS_INIT);
   } catch {
