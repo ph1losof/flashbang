@@ -274,6 +274,10 @@ function isStringArray(value: unknown): value is string[] {
   );
 }
 
+function isSuggestionExtra(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 function isSuggestionPayload(value: unknown): value is unknown[] {
   if (
     !Array.isArray(value) ||
@@ -288,15 +292,13 @@ function isSuggestionPayload(value: unknown): value is unknown[] {
   if (value.length > 2 && !isStringArray(value[2])) {
     return false;
   }
+  if (value.length === 4 && isSuggestionExtra(value[3])) {
+    return true;
+  }
   if (value.length > 3 && !isStringArray(value[3])) {
     return false;
   }
-  return (
-    value.length < 5 ||
-    (value[4] !== null &&
-      typeof value[4] === "object" &&
-      !Array.isArray(value[4]))
-  );
+  return value.length < 5 || isSuggestionExtra(value[4]);
 }
 
 export function parsePartialBang(
@@ -698,6 +700,10 @@ export async function suggest(
       const completions = payload[1] as string[];
       for (let i = 0; i < completions.length; i++) {
         completions[i] = restoreTriggers(completions[i], providerQuery);
+      }
+      if (payload.length === 4 && isSuggestionExtra(payload[3])) {
+        payload[4] = payload[3];
+        payload[3] = [];
       }
       const bangMeta = providerBangMeta(providerQuery, settings);
       if (bangMeta) {

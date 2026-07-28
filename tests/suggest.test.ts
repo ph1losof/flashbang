@@ -1209,6 +1209,38 @@ describe("provider proxying — via suggest()", () => {
     ]);
   });
 
+  test("normalizes compact Google metadata while restoring triggers", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      Response.json([
+        "testf",
+        ["testflight"],
+        [],
+        { "google:suggestsubtypes": [[512]] },
+      ])
+    );
+
+    const r = await suggest("!gh testf", {
+      ...defaultSettings,
+      provider: "google",
+    });
+
+    expect(await r.json()).toEqual([
+      "!gh testf",
+      ["!gh testflight"],
+      ["GitHub \u2014 github.com"],
+      ["https://github.com"],
+      {
+        "google:suggestsubtypes": [[512]],
+        "google:suggestdetail": [
+          {
+            a: "GitHub \u2014 github.com",
+            i: "https://github.com/favicon.ico",
+          },
+        ],
+      },
+    ]);
+  });
+
   test("preserves bang rich metadata on provider completions", async () => {
     fetchSpy.mockResolvedValueOnce(
       Response.json(["testf", ["testflight", "testflight status"]])
@@ -1569,6 +1601,19 @@ describe("provider proxying — via suggest()", () => {
       provider: "google",
     });
     expect(await r.json()).toEqual(payload);
+  });
+
+  test("valid compact Google metadata is preserved", async () => {
+    const body =
+      '[ "cats", [ "cats and dogs" ], [], { "google:suggestsubtypes": [[512]] } ]';
+    fetchSpy.mockResolvedValueOnce(new Response(body));
+
+    const r = await suggest("cats", {
+      ...defaultSettings,
+      provider: "google",
+    });
+
+    expect(await r.text()).toBe(body);
   });
 
   test("valid upstream JSON text is returned without re-serialization", async () => {
