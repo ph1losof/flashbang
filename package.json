@@ -2,7 +2,7 @@
   "name": "flashbang",
   "description": "The sub-1ms local first duck-duck-go style bang redirects",
   "private": true,
-  "version": "1.6.8",
+  "version": "1.6.9",
   "type": "module",
   "packageManager": "bun@1.3.14",
   "scripts": {
