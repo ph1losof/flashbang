@@ -154,6 +154,7 @@ flashbang/
 ├── LICENSE                   # AGPL-3.0 license
 ├── NOTICE                    # Copyright and attribution notice
 ├── README.md                 # User-facing documentation
+├── SECURITY.md               # Vulnerability reporting and support policy
 ├── biome.jsonc               # Formatting and lint configuration
 ├── bun.lock                  # Locked development dependencies
 ├── bunfig.toml               # Bun test configuration
