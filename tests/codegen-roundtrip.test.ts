@@ -5,17 +5,13 @@ import {
   lookupSnapOverride,
 } from "../src/generated/bangs-sparse.js";
 import {
+  BANG_SHARD_COUNT,
+  BANG_SHARD_ROUTER_SIZE,
   bangShardIndex,
   extractBangShardTriggers,
 } from "../src/shared/bang-shards";
 import { hashFNV1a } from "../src/shared/hash";
-import {
-  bangShardUnavailableId,
-  initializeBangData,
-  initializeBangShard,
-  lookupBang,
-  resetBangDataForTests,
-} from "../src/sw/bang-data";
+import { initializeBangData, lookupBang } from "../src/sw/bang-data";
 import { decodeBangCatalog } from "../src/ui/bang-catalog";
 import {
   BANG_BINARY_HEADER_WORDS,
@@ -145,12 +141,23 @@ describe("codegen round-trip", () => {
   });
 
   test("routes every regular bang through its deterministic cold shard", async () => {
-    const shards = generateBinaryShards(bangs);
+    const { router, shards } = generateBinaryShards(bangs);
+    const repeated = generateBinaryShards(bangs);
+    expect(BANG_SHARD_COUNT % 2).toBe(1);
+    expect(router).toHaveLength(BANG_SHARD_ROUTER_SIZE);
+    expect(shards).toHaveLength(BANG_SHARD_COUNT);
+    expect(Array.from(repeated.router)).toEqual(Array.from(router));
+    expect(repeated.shards.map((shard) => Bun.hash(shard))).toEqual(
+      shards.map((shard) => Bun.hash(shard))
+    );
+    const shardSizes = shards.map((shard) => shard.byteLength);
+    expect(
+      Math.max(...shardSizes) /
+        (shardSizes.reduce((a, b) => a + b) / shardSizes.length)
+    ).toBeLessThan(1.15);
     for (let shardId = 0; shardId < shards.length; shardId++) {
       const shard = shards[shardId];
-      resetBangDataForTests();
-      initializeBangShard(
-        shardId,
+      initializeBangData(
         shard.buffer.slice(
           shard.byteOffset,
           shard.byteOffset + shard.byteLength
@@ -158,59 +165,12 @@ describe("codegen round-trip", () => {
       );
       for (const bang of bangs) {
         const hash = hashFNV1a(bang.trigger);
-        if (!(bang.regex || bangShardIndex(hash) !== shardId)) {
+        if (!(bang.regex || bangShardIndex(hash, router) !== shardId)) {
           expect(lookupBang(bang.trigger, hash)).not.toBeNull();
         }
       }
     }
     initializeBangData(await Bun.file("src/generated/bangs.bin").arrayBuffer());
-  });
-
-  test("reports an exact missing shard and isolates loaded shards", async () => {
-    const shards = generateBinaryShards(bangs);
-    const first = bangs.find((bang) => !bang.regex)!;
-    const firstHash = hashFNV1a(first.trigger);
-    const firstShard = bangShardIndex(firstHash);
-    const other = bangs.find(
-      (bang) =>
-        !bang.regex && bangShardIndex(hashFNV1a(bang.trigger)) !== firstShard
-    )!;
-    const otherHash = hashFNV1a(other.trigger);
-
-    resetBangDataForTests();
-    try {
-      let missing: unknown;
-      try {
-        lookupBang(first.trigger, firstHash);
-      } catch (error) {
-        missing = error;
-      }
-      expect(bangShardUnavailableId(missing)).toBe(firstShard);
-
-      const shard = shards[firstShard];
-      initializeBangShard(
-        firstShard,
-        shard.buffer.slice(
-          shard.byteOffset,
-          shard.byteOffset + shard.byteLength
-        ) as ArrayBuffer
-      );
-      expect(lookupBang(first.trigger, firstHash)).not.toBeNull();
-
-      let otherMissing: unknown;
-      try {
-        lookupBang(other.trigger, otherHash);
-      } catch (error) {
-        otherMissing = error;
-      }
-      expect(bangShardUnavailableId(otherMissing)).toBe(
-        bangShardIndex(otherHash)
-      );
-    } finally {
-      initializeBangData(
-        await Bun.file("src/generated/bangs.bin").arrayBuffer()
-      );
-    }
   });
 
   test("rejects sampled unknown triggers with fingerprint verification", () => {

@@ -1,14 +1,16 @@
-import { BANG_SHARD_COUNT, bangShardIndex } from "../shared/bang-shards";
-
 export type BuiltinUrlParts = readonly [string, string | null];
 
-type BangLookup = (trigger: string, hash: number) => BuiltinUrlParts | null;
+export type BangLookup = (
+  trigger: string,
+  hash: number
+) => BuiltinUrlParts | null;
 
 const MAGIC = 0x31424246;
-const VERSION = 8;
+const VERSION = 9;
 const HEADER_WORDS = 13;
 const HEADER_BYTES = HEADER_WORDS * Uint32Array.BYTES_PER_ELEMENT;
 const MPH_SLOT_MULTIPLIER = 0x85ebca6b;
+const MPH_BUCKET_MULTIPLIER = 0x7feb352d;
 const CHECKPOINT_SHIFT = 4;
 const CHECKPOINT_SIZE = 1 << CHECKPOINT_SHIFT;
 const PREFIX_LENGTH_MASK = 0x1fff;
@@ -24,26 +26,8 @@ const PREFIX_HEADS = [
 ] as const;
 
 let lookup: BangLookup | null = null;
-const shardLookups: Array<BangLookup | null> = Array.from(
-  { length: BANG_SHARD_COUNT },
-  () => null
-);
+let fallbackLookup: BangLookup | null = null;
 const BANG_DATA_UNAVAILABLE = new Error("Binary bang data is not initialized");
-interface BangShardUnavailableError extends Error {
-  readonly shardId: number;
-}
-const BANG_SHARD_UNAVAILABLE = Array.from(
-  { length: BANG_SHARD_COUNT },
-  (_, shardId) =>
-    Object.freeze(
-      Object.assign(
-        new Error(`Binary bang shard ${shardId} is not initialized`),
-        {
-          shardId,
-        }
-      )
-    ) as BangShardUnavailableError
-);
 
 function checkpointCount(length: number): number {
   return Math.ceil(length / CHECKPOINT_SIZE);
@@ -86,7 +70,7 @@ function validateFinalLength(
   }
 }
 
-function decodeBangData(buffer: ArrayBuffer): BangLookup {
+export function decodeBangData(buffer: ArrayBuffer): BangLookup {
   const header = new Uint32Array(buffer, 0, HEADER_WORDS);
   if (header[0] !== MAGIC || header[1] !== VERSION) {
     throw new Error("Unsupported binary bang data");
@@ -223,7 +207,10 @@ function decodeBangData(buffer: ArrayBuffer): BangLookup {
 
   return (_trigger, hash) => {
     const unsignedHash = hash >>> 0;
-    const bucket = unsignedHash & bucketMask;
+    let bucketHash = unsignedHash ^ (unsignedHash >>> 16);
+    bucketHash = Math.imul(bucketHash, MPH_BUCKET_MULTIPLIER);
+    bucketHash ^= bucketHash >>> 15;
+    const bucket = bucketHash & bucketMask;
     const displacement = displacements[bucket];
     const index =
       displacement < 0
@@ -237,37 +224,20 @@ function decodeBangData(buffer: ArrayBuffer): BangLookup {
 
 export function initializeBangData(buffer: ArrayBuffer): void {
   lookup = decodeBangData(buffer);
-  shardLookups.fill(null);
+  fallbackLookup = null;
 }
 
-export function initializeBangShard(
-  shardId: number,
-  buffer: ArrayBuffer
-): void {
-  if (
-    !Number.isInteger(shardId) ||
-    shardId < 0 ||
-    shardId >= BANG_SHARD_COUNT
-  ) {
-    throw new Error(`Invalid binary bang shard: ${shardId}`);
-  }
-  if (lookup) {
-    return;
-  }
-  shardLookups[shardId] = decodeBangData(buffer);
+export function configureBangFallbackLookup(value: BangLookup): void {
+  fallbackLookup = value;
 }
 
 export function isBangDataInitialized(): boolean {
   return lookup !== null;
 }
 
-export function isBangShardInitialized(shardId: number): boolean {
-  return lookup !== null || shardLookups[shardId] !== null;
-}
-
 export function resetBangDataForTests(): void {
   lookup = null;
-  shardLookups.fill(null);
+  fallbackLookup = null;
 }
 
 export function lookupBang(
@@ -277,27 +247,12 @@ export function lookupBang(
   if (lookup) {
     return lookup(trigger, hash);
   }
-  const shardId = bangShardIndex(hash);
-  const shardLookup = shardLookups[shardId];
-  if (!shardLookup) {
-    throw BANG_SHARD_UNAVAILABLE[shardId] ?? BANG_DATA_UNAVAILABLE;
+  if (fallbackLookup) {
+    return fallbackLookup(trigger, hash);
   }
-  return shardLookup(trigger, hash);
-}
-
-export function bangShardUnavailableId(error: unknown): number | null {
-  if (!error || typeof error !== "object") {
-    return null;
-  }
-  const shardId = (error as Partial<BangShardUnavailableError>).shardId;
-  return typeof shardId === "number" &&
-    BANG_SHARD_UNAVAILABLE[shardId] === error
-    ? shardId
-    : null;
+  throw BANG_DATA_UNAVAILABLE;
 }
 
 export function isBangDataUnavailable(error: unknown): boolean {
-  return (
-    error === BANG_DATA_UNAVAILABLE || bangShardUnavailableId(error) !== null
-  );
+  return error === BANG_DATA_UNAVAILABLE;
 }

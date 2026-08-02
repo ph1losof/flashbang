@@ -310,8 +310,8 @@ function terminalIndexFor(trigger: string): number {
   throw new Error(`Missing terminal index for !${trigger}`);
 }
 
-mock.module("./generated/bangs-trie.js", () => TEST_TRIE);
-mock.module("../src/generated/bangs-trie.js", () => TEST_TRIE);
+mock.module("./generated/bangs-trie-loader.js", () => TEST_TRIE);
+mock.module("../src/generated/bangs-trie-loader.js", () => TEST_TRIE);
 
 const {
   parseBangSettingsFromRequestWithCleanup,
@@ -1242,7 +1242,7 @@ describe("provider proxying — via suggest()", () => {
     for (const [trigger, body] of cases) {
       fetchSpy.mockResolvedValueOnce(Response.json(body));
       const response = await suggest(
-        `!${trigger} q`,
+        `!${trigger} qq`,
         defaultSettings,
         undefined,
         false,
@@ -1258,7 +1258,7 @@ describe("provider proxying — via suggest()", () => {
       Response.json(["q", Array.from({ length: 1000 }, (_, i) => `v${i}`)])
     );
     const bounded = await suggest(
-      "!yt q",
+      "!yt qq",
       defaultSettings,
       undefined,
       false,
@@ -1298,6 +1298,20 @@ describe("provider proxying — via suggest()", () => {
         "!gh reactjs/react.dev",
       ])
     );
+  });
+
+  test("site-specific forwarding suppresses one-code-point queries", async () => {
+    for (const query of ["!gh r", "!gh 🐙"]) {
+      const response = await suggest(
+        query,
+        { ...defaultSettings, provider: "google" },
+        undefined,
+        false,
+        true
+      );
+      expect(await response.json()).toEqual([query, []]);
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   test("site-specific forwarding falls back to the selected provider", async () => {

@@ -77,7 +77,8 @@
           return response.arrayBuffer();
         });
 
-      const bangShardAssets = "__BANG_SHARD_ASSETS_JSON__";
+      const bangShardRouter = "__BANG_SHARD_ROUTER_JSON__";
+      const bangShardVersion = "__BANG_SHARD_VERSION__";
       const loadColdBangData = (value) => {
         if (privateQuery !== null) {
           return null;
@@ -105,8 +106,8 @@
         for (let i = 0; i < trigger.length; i++) {
           hash = Math.imul(hash ^ trigger.charCodeAt(i), 16777619);
         }
-        const asset =
-          bangShardAssets[(hash >>> 8) & (bangShardAssets.length - 1)];
+        const shard = bangShardRouter[(hash >>> 8) & 255];
+        const asset = `/bangs-s${shard.toString(36)}-${bangShardVersion}.bin`;
         return fetch(asset).then((response) => {
           if (!response.ok) {
             throw new Error(`Failed to load bang shard: ${response.status}`);

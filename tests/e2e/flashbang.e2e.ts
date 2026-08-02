@@ -1628,6 +1628,110 @@ test("first installation falls through to advanced redirect machinery", async ({
   }
 });
 
+test("fresh fallback uses canonical syntax without loading the full catalog", async ({
+  browser,
+}) => {
+  const context = await browser.newContext();
+  try {
+    const page = await context.newPage();
+    await page.addInitScript(disableServiceWorkers);
+    await mockGoogleSearchRoute(page);
+    await context.route("https://www.npmjs.com/**", (route) =>
+      route.fulfill({ body: "npm", contentType: "text/plain", status: 200 })
+    );
+    await context.route("https://developer.mozilla.org/**", (route) =>
+      route.fulfill({ body: "mdn", contentType: "text/plain", status: 200 })
+    );
+    const catalogRequests: string[] = [];
+    context.on("request", (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (
+        pathname.startsWith("/bangs-") &&
+        !pathname.startsWith("/bangs-meta-")
+      ) {
+        catalogRequests.push(pathname);
+      }
+    });
+
+    await page.goto("/health", { waitUntil: "domcontentloaded" });
+    await navigateAndWaitForRedirect(
+      page,
+      "/?q=cats%20%21npm",
+      /npmjs\.com\/search\?q=cats/
+    );
+    await navigateAndWaitForRedirect(
+      page,
+      "/?q=mdn%21%20array",
+      /developer\.mozilla\.org\/en-US\/search\?q=array/
+    );
+    await navigateAndWaitForRedirect(
+      page,
+      "/?q=%40mdn%20array",
+      /google\.com\/search\?/
+    );
+    expect(new URL(page.url()).searchParams.get("q")).toBe(
+      "array site:developer.mozilla.org"
+    );
+    await navigateAndWaitForRedirect(
+      page,
+      "/?q=%21zzzb%20hello",
+      /google\.com\/search\?/
+    );
+    expect(new URL(page.url()).searchParams.get("q")).toBe("!zzzb hello");
+    await navigateAndWaitForRedirect(
+      page,
+      "/?q=plain%20query",
+      /google\.com\/search\?/
+    );
+    expect(new URL(page.url()).searchParams.get("q")).toBe("plain query");
+
+    expect(catalogRequests.some((path) => path.startsWith("/bangs-s"))).toBe(
+      true
+    );
+    expect(catalogRequests.some((path) => !path.startsWith("/bangs-s"))).toBe(
+      false
+    );
+  } finally {
+    await context.close();
+  }
+});
+
+test("fresh snap-chain shards start concurrently", async ({ browser }) => {
+  const context = await browser.newContext();
+  let releaseShards: () => void = () => undefined;
+  const shardGate = new Promise<void>((resolve) => {
+    releaseShards = resolve;
+  });
+  try {
+    const page = await context.newPage();
+    await page.addInitScript(disableServiceWorkers);
+    await mockGoogleSearchRoute(page);
+    const shardRequests = new Set<string>();
+    await context.route("**/bangs-s*.bin", async (route) => {
+      shardRequests.add(new URL(route.request().url()).pathname);
+      await shardGate;
+      await route.continue();
+    });
+
+    await page.goto("/health", { waitUntil: "domcontentloaded" });
+    const navigation = navigateAndWaitForRedirect(
+      page,
+      "/?q=%40mdn%2Cnpm%2Cpython%20array",
+      /google\.com\/search\?/
+    );
+    await expect.poll(() => shardRequests.size).toBe(3);
+    releaseShards();
+    await navigation;
+    const query = new URL(page.url()).searchParams.get("q") ?? "";
+    expect(query).toContain("site:developer.mozilla.org");
+    expect(query).toContain("site:npmjs.com");
+    expect(query).toContain("site:docs.python.org");
+  } finally {
+    releaseShards();
+    await context.close();
+  }
+});
+
 test("first hot redirect does not wait for the full bang catalog", async ({
   browser,
   browserName,

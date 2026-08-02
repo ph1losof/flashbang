@@ -400,6 +400,11 @@ function siteSpecificCompletions(shape: number, payload: unknown): string[] {
   return completions;
 }
 
+function hasMultipleCodePoints(value: string): boolean {
+  const first = value.codePointAt(0);
+  return first !== undefined && value.length > (first > 0xffff ? 2 : 1);
+}
+
 export function parsePartialBang(
   q: string,
   bangPrefix: TriggerPrefix = DEFAULT_BANG_PREFIX,
@@ -790,6 +795,9 @@ export async function suggest(
     if (bangTerminal >= 0) {
       encodedQuery = encodeURIComponent(queryValue);
       siteUrl = resolveSiteSuggestionUrl(bangTerminal, encodedQuery);
+      if (siteUrl && !hasMultipleCodePoints(queryValue)) {
+        return empty(query);
+      }
     }
   }
 

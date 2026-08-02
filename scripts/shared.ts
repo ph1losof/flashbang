@@ -1,7 +1,10 @@
 import { basename } from "node:path";
 import { minify } from "@minify-html/node";
 import { build as buildCSS } from "@unocss/cli";
-import { BANG_SHARD_COUNT } from "../src/shared/bang-shards";
+import {
+  BANG_SHARD_COUNT,
+  BANG_SHARD_ROUTER_SIZE,
+} from "../src/shared/bang-shards";
 import { SEED_CACHE_NAME } from "../src/shared/seed-cache";
 
 const CUSTOM_SUGGEST_OPTION_MARKER = "<!-- custom-suggest-provider-option -->";
@@ -9,7 +12,8 @@ const CUSTOM_SUGGEST_OPTION = '<option value="custom">Custom</option>';
 const BANG_DATA_ASSET_MARKER = "__BANG_DATA_ASSET__";
 const FALLBACK_ASSET_MARKER = "__FALLBACK_ASSET__";
 const COLD_FALLBACK_ASSET_MARKER = "__COLD_FALLBACK_ASSET__";
-const BANG_SHARD_ASSETS_MARKER = '"__BANG_SHARD_ASSETS_JSON__"';
+const BANG_SHARD_ROUTER_MARKER = '"__BANG_SHARD_ROUTER_JSON__"';
+const BANG_SHARD_VERSION_MARKER = "__BANG_SHARD_VERSION__";
 const HOT_BANG_TRIGGERS_MARKER = '"__HOT_BANG_TRIGGERS_JSON__"';
 const SEED_CACHE_NAME_MARKER = "__SEED_CACHE_NAME__";
 export const DIST_DIR = process.env.DIST_DIR || "dist";
@@ -54,14 +58,29 @@ export function configureColdFallbackAsset(
   return html.replaceAll(COLD_FALLBACK_ASSET_MARKER, assetPath);
 }
 
-export function configureBangShardAssets(
+export function configureBangShardLayout(
   html: string,
-  assetPaths: readonly string[]
+  router: ArrayLike<number>,
+  version: string
 ): string {
-  if (assetPaths.length !== BANG_SHARD_COUNT) {
-    throw new Error(`Expected ${BANG_SHARD_COUNT} bang shard assets`);
+  if (router.length !== BANG_SHARD_ROUTER_SIZE) {
+    throw new Error(`Expected ${BANG_SHARD_ROUTER_SIZE} bang shard routes`);
   }
-  return html.replaceAll(BANG_SHARD_ASSETS_MARKER, JSON.stringify(assetPaths));
+  const routes = Array.from(router);
+  if (
+    routes.some(
+      (shard) =>
+        !Number.isInteger(shard) || shard < 0 || shard >= BANG_SHARD_COUNT
+    )
+  ) {
+    throw new Error("Invalid bang shard route");
+  }
+  if (!/^[a-z0-9_-]+$/i.test(version)) {
+    throw new Error("Invalid bang shard version");
+  }
+  return html
+    .replaceAll(BANG_SHARD_ROUTER_MARKER, JSON.stringify(routes))
+    .replaceAll(BANG_SHARD_VERSION_MARKER, version);
 }
 
 export function configureHotBangTriggers(
@@ -83,12 +102,13 @@ function configureRedirectAssets(
   bangDataAsset: string,
   fallbackAsset: string,
   coldFallbackAsset: string,
-  bangShardAssets: readonly string[],
+  bangShardRouter: ArrayLike<number>,
+  bangShardVersion: string,
   hotBangTriggers: readonly string[]
 ): string {
   return configureSeedCacheName(
     configureHotBangTriggers(
-      configureBangShardAssets(
+      configureBangShardLayout(
         configureColdFallbackAsset(
           configureFallbackAsset(
             configureBangDataAsset(html, bangDataAsset),
@@ -96,7 +116,8 @@ function configureRedirectAssets(
           ),
           coldFallbackAsset
         ),
-        bangShardAssets
+        bangShardRouter,
+        bangShardVersion
       ),
       hotBangTriggers
     )
@@ -108,10 +129,8 @@ export async function bundleUI(
   bangMetaAsset = "/bangs-meta.bin",
   fallbackNaming = "fallback-[hash].[ext]",
   bangDataAsset = "/bangs.bin",
-  bangShardAssets: readonly string[] = Array.from(
-    { length: BANG_SHARD_COUNT },
-    () => bangDataAsset
-  )
+  bangShardRouter: ArrayLike<number> = new Uint8Array(BANG_SHARD_ROUTER_SIZE),
+  bangShardVersion = "dev"
 ) {
   const [appBuild, benchBuild, fallbackBuild, coldFallbackBuild] =
     await Promise.all([
@@ -157,7 +176,8 @@ export async function bundleUI(
         target: "browser",
         format: "esm",
         define: {
-          __BANG_SHARD_ASSETS__: JSON.stringify(bangShardAssets),
+          __BANG_SHARD_ROUTER__: JSON.stringify(Array.from(bangShardRouter)),
+          __BANG_SHARD_VERSION__: JSON.stringify(bangShardVersion),
         },
       }),
     ]);
@@ -207,10 +227,8 @@ export async function buildHTMLAssets(
   bangDataAsset = "/bangs.bin",
   fallbackAsset = "/fallback.js",
   coldFallbackAsset = "/cold-fallback.js",
-  bangShardAssets: readonly string[] = Array.from(
-    { length: BANG_SHARD_COUNT },
-    () => bangDataAsset
-  )
+  bangShardRouter: ArrayLike<number> = new Uint8Array(BANG_SHARD_ROUTER_SIZE),
+  bangShardVersion = "dev"
 ): Promise<void> {
   const { HOT_TRIGGERS } = await import("../src/generated/bangs-hot.js");
   const inlineCSS = (src: string) =>
@@ -224,7 +242,8 @@ export async function buildHTMLAssets(
     bangDataAsset,
     fallbackAsset,
     coldFallbackAsset,
-    bangShardAssets,
+    bangShardRouter,
+    bangShardVersion,
     HOT_TRIGGERS
   );
   await Bun.write(
@@ -259,10 +278,8 @@ export async function assembleUIAssets(
   bangDataAsset = "/bangs.bin",
   fallbackAsset = "/fallback.js",
   coldFallbackAsset = "/cold-fallback.js",
-  bangShardAssets: readonly string[] = Array.from(
-    { length: BANG_SHARD_COUNT },
-    () => bangDataAsset
-  )
+  bangShardRouter: ArrayLike<number> = new Uint8Array(BANG_SHARD_ROUTER_SIZE),
+  bangShardVersion = "dev"
 ): Promise<void> {
   const css = await Bun.file(`${DIST_DIR}/styles.css`).text();
   await buildHTMLAssets(
@@ -271,7 +288,8 @@ export async function assembleUIAssets(
     bangDataAsset,
     fallbackAsset,
     coldFallbackAsset,
-    bangShardAssets
+    bangShardRouter,
+    bangShardVersion
   );
   await copyStaticAssets();
 }

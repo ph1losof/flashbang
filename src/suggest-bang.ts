@@ -28,7 +28,7 @@ import {
   TERM_S_CP,
   TERM_S_ID,
   TERM_S_LEN,
-} from "./generated/bangs-trie.js";
+} from "./generated/bangs-trie-loader.js";
 import {
   FRECENCY_BOOST_CAP,
   FRECENCY_BOOST_MULTIPLIER,
