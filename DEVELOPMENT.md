@@ -14,6 +14,7 @@ bun install        # install dependencies
 bun run check      # format + lint check (fails on issues)
 bun run fix        # auto-fix format + lint issues
 bun run codegen    # fetch DDG/Kagi sources, merge, and generate bang artifacts
+bun run resolve:suggestions # refresh the committed site-specific autocomplete endpoint map
 bun run build      # bundle, minify + pre-compress with Brotli (auto-runs codegen --from-merged if generated bang files are missing)
 bun run dev        # bundle + dev server with file watching & live reload (auto-runs codegen if needed)
 bun run start      # serve pre-built dist/ (run `bun run build` first)
@@ -55,12 +56,14 @@ flashbang/
 │   ├── dev.ts                # Dev server with file watching, rebuild & live reload
 │   ├── inline-script-hash.ts # Shared inline-script CSP hash extraction
 │   ├── profile.ts            # Profiling script
+│   ├── resolve-suggestions.ts # Refresh per-site autocomplete endpoints
 │   ├── shared.ts             # Shared HTML and static-asset build helpers
 │   ├── start.ts              # Production server (serves pre-built dist/)
 │   └── summarize-bang-update.ts # Daily bang-update change summary generator
 ├── data/
 │   ├── bangs.json            # Merged bang data (committed, updated by daily automation)
-│   └── custom-bangs.json     # Custom bang definitions
+│   ├── custom-bangs.json     # Custom bang definitions
+│   └── suggest-sites.json # Committed domain-level autocomplete capabilities
 ├── src/
 │   ├── suggest.ts            # Bang/snap suggestions, search suggest proxy & cookie parsing
 │   ├── suggest-bang.ts        # Bang/snap suggestion matching and scoring
@@ -69,6 +72,7 @@ flashbang/
 │   │   ├── handlers.ts       # Production server request handlers
 │   │   └── headers.ts        # CSP and security headers (shared across all targets)
 │   ├── shared/
+│   │   ├── bang-shards.ts      # Deterministic binary bang shard selection
 │   │   ├── capture-template.ts # Capture template compilation and regex safety
 │   │   ├── chars.ts           # Character classification helpers
 │   │   ├── constants.ts       # Shared constants
@@ -79,6 +83,7 @@ flashbang/
 │   │   ├── idb.ts             # Shared IndexedDB open helper
 │   │   ├── raw-query.ts       # Raw query string parsing
 │   │   ├── raw-url.ts         # Raw URL pathname and origin parsing
+│   │   ├── seed-cache.ts       # First-page cache handoff name
 │   │   ├── snap-chain.ts      # Snap-chain limits and partial-segment parsing
 │   │   ├── snap-target.ts     # Alternate snap target validation and compilation
 │   │   ├── suggest-cookie.ts  # Unified suggestion cookie codec
@@ -94,6 +99,9 @@ flashbang/
 │   │   └── *.d.ts             # TypeScript declarations for each generated .js file
 │   ├── sw/
 │   │   ├── bang-data.ts       # Binary bang decoder and regular lookup
+│   │   ├── default-redirect-settings.ts # I/O-free default redirect settings
+│   │   ├── redirect-core.ts    # Shared allocation-free redirect resolver
+│   │   ├── redirect-prefix.ts  # Shared prefix parsing and URL assembly
 │   │   ├── redirect-settings.ts # Redirect settings loading and compilation
 │   │   ├── redirect.ts        # Bang/snap parsing & redirect logic (zero-copy raw + decoded paths)
 │   │   ├── idb.ts             # IndexedDB access, settings cache & in-memory frecency
@@ -103,6 +111,7 @@ flashbang/
 │   └── ui/
 │       ├── index.html         # Initial registration and fallback HTML template
 │       ├── app.ts             # Initialization & orchestration
+│       ├── cold-fallback.ts   # Sharded first-profile redirect fallback
 │       ├── fallback.ts        # Main-thread redirects for private mode or unavailable Service Workers
 │       ├── bang-catalog.ts    # Shared normalized bang metadata and bounded search
 │       ├── bang-meta.ts       # Packed metadata validation and cursor decoder
@@ -226,12 +235,12 @@ bunx playwright install
    - `bangs.bin` — packed regular bang lookup data for the Service Worker
    - `bangs-sparse.js` — sparse capture and snap override lookups for the Service Worker
    - `bangs-meta.bin` — packed trigger/name/domain catalog for the UI
-   - `bangs-trie.js` — radix trie for prefix-matched bang suggestions
+   - `bangs-trie.js` — radix trie for prefix-matched bang suggestions plus compact per-site autocomplete capability tags
    - plus matching `*.d.ts` declaration files for all generated modules
 
 The `--from-merged` flag skips steps 1–2 and generates directly from the committed `data/bangs.json`. This is what CI builds use — no network fetch needed. The generated directory is gitignored; `data/bangs.json` is the committed build input.
 
-The generated data is split by consumer. The Service Worker loads the regular lookup binary plus sparse executable capture/snap lookups, the UI fetches metadata only when its catalog is first needed, and the suggestion endpoint uses the generated radix trie.
+The generated data is split by consumer. The Service Worker loads the regular lookup binary plus sparse executable capture/snap lookups, the UI fetches metadata only when its catalog is first needed, and the suggestion endpoint uses the generated radix trie. `data/suggest-sites.json` is a committed, reproducible domain registry: `bun run resolve:suggestions` refreshes curated services and probes likely wiki domains with a bounded worker pool. Codegen assigns every alias from its canonical domain, represents MediaWiki with a two-value capability tag, and pre-splits the small curated endpoint table so request handling does no template scan.
 
 `bangs.bin` stores regular records directly in deterministic CHD-style minimal-perfect-hash slot order. Codegen derives the table from each trigger's FNV-1a hash, rejects known-key hash collisions, and emits 16- or 32-bit bucket displacements. Runtime lookup computes one slot without probing, verifies the selected trigger so unknown keys cannot produce false matches, and lazily materializes and caches URL tuples.
 
@@ -266,7 +275,7 @@ On **self-hosted** (Docker/Railway via `start.ts`), the Bun server sets headers 
 4. **Generate CSS** — UnoCSS scans `src/ui/**/*.ts`, `src/ui/home/index.html`, and `src/ui/bench/index.html`, emitting atomic utility classes
 5. **Inline & minify HTML** — CSS is inlined into `<style>`, HTML is minified with `@minify-html/node`
 6. **Generate static-host headers** — Writes `dist/_headers` with shared security headers, per-page inline-script hashes, the stricter Service Worker CSP, and the OpenSearch content type
-7. **Pre-compress** — Eligible static assets, including both bang binaries, are compressed with Brotli (max quality) and written as `.br` files alongside the originals. The production server serves these automatically when the client supports it, falling back to uncompressed
+7. **Pre-compress** — Eligible static assets, including both bang binaries, are compressed with Brotli (max quality) and written as `.br` files alongside the originals. The production server serves these automatically when the client supports it, falling back to uncompressed. Cloudflare Pages builds (`CF_PAGES=1`) instead promote the redirect catalog's Brotli bytes to its canonical content-hashed path and declare `Content-Encoding: br` plus `no-transform` in `_headers`; this prevents the platform from replacing the max-quality artifact with a larger dynamic encoding. Other static and self-hosted builds retain the ordinary identity file and `.br` sidecar.
 
 If generated bang artifacts are missing, both `bun run build` and `bun run profile` automatically run `bun run codegen --from-merged` first.
 

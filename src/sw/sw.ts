@@ -2,6 +2,7 @@ declare const self: ServiceWorkerGlobalScope;
 declare const cookieStore: CookieStore;
 
 import { COOKIE_MAX_AGE_S } from "../shared/constants";
+import { SEED_CACHE_NAME } from "../shared/seed-cache";
 import {
   encodeSuggestCookieValue,
   parseSuggestCookieValue,
@@ -299,6 +300,13 @@ async function loadBangData(): Promise<void> {
   const cache = await caches.open(CACHE_NAME);
   let response = await cache.match(request);
   if (!response) {
+    const seedCache = await caches.open(SEED_CACHE_NAME);
+    response = await seedCache.match(request);
+    if (response) {
+      await caches.delete(SEED_CACHE_NAME);
+    }
+  }
+  if (!response) {
     for (const cacheName of await caches.keys()) {
       if (cacheName === CACHE_NAME || !isManagedCache(cacheName)) {
         continue;
@@ -546,12 +554,14 @@ export function handleInstall(e: ExtendableEvent): void {
 
 export function handleActivate(e: ExtendableEvent): void {
   e.waitUntil(
-    self.clients.claim().then(() =>
-      queueHotBootMutation(async () => {
+    self.clients.claim().then(async () => {
+      await queueHotBootMutation(async () => {
         await disableHotBoot();
         await publishHotBoot();
-      }).catch(swallowError)
-    )
+      }).catch(swallowError);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await ensureBangData().catch(swallowError);
+    })
   );
 }
 

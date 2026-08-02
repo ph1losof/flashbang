@@ -7,7 +7,7 @@ import {
   pageHeaders,
   SW_CSP,
 } from "../src/server/headers";
-import { ensureGeneratedBangData } from "./codegen";
+import { ensureGeneratedBangData, generateBinaryShards } from "./codegen";
 import { extractInlineScriptHashes } from "./inline-script-hash";
 import {
   assembleUIAssets,
@@ -167,6 +167,18 @@ export async function main(): Promise<void> {
     .slice(0, 12);
   const bangDataAsset = `/bangs-${bangDataHash}.bin`;
   await Bun.write(`${DIST_DIR}${bangDataAsset}`, bangDataBytes);
+  const bangShardBytes = generateBinaryShards(
+    await Bun.file("data/bangs.json").json()
+  );
+  const bangShardAssets = bangShardBytes.map((bytes, shard) => {
+    const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 12);
+    return `/bangs-s${shard.toString(16)}-${hash}.bin`;
+  });
+  await Promise.all(
+    bangShardBytes.map((bytes, shard) =>
+      Bun.write(`${DIST_DIR}${bangShardAssets[shard]}`, bytes)
+    )
+  );
   const bangMetaBytes = await Bun.file("src/generated/bangs-meta.bin").bytes();
   const bangMetaHash = createHash("sha256")
     .update(bangMetaBytes)
@@ -176,15 +188,17 @@ export async function main(): Promise<void> {
   await Bun.write(`${DIST_DIR}${bangMetaAsset}`, bangMetaBytes);
 
   console.log("=== Bundle app + bench (to discover chunks) ===");
-  const { appOutputs, fallbackAsset } = await bundleUI(
+  const { appOutputs, fallbackAsset, coldFallbackAsset } = await bundleUI(
     allowUnsafeCustomSuggestUrls,
     bangMetaAsset,
     "fallback-[hash].[ext]",
-    bangDataAsset
+    bangDataAsset,
+    bangShardAssets
   );
   const requiredAppAssets = [
     ...requiredAppAssetPaths(appOutputs),
     bangMetaAsset,
+    coldFallbackAsset,
   ].sort();
 
   if (requiredAppAssets.length) {
@@ -198,7 +212,8 @@ export async function main(): Promise<void> {
   await assembleUIAssets(
     allowUnsafeCustomSuggestUrls,
     bangDataAsset,
-    fallbackAsset
+    fallbackAsset,
+    coldFallbackAsset
   );
   await rm(`${DIST_DIR}/styles.css`);
 

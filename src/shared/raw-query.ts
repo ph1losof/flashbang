@@ -156,10 +156,11 @@ export function readSuggestQueryParams(
   sp: string | null,
   bp: string | null,
   np: string | null,
+  siteSpecificForward: boolean,
 ] {
   const qPos = rawUrl.indexOf("?");
   if (qPos === -1) {
-    return [null, null, null, null];
+    return [null, null, null, null, false];
   }
   const hPos = rawUrl.indexOf("#", qPos + 1);
   const end = hPos === -1 ? rawUrl.length : hPos;
@@ -167,6 +168,7 @@ export function readSuggestQueryParams(
   let sp: string | null = null;
   let bp: string | null = null;
   let np: string | null = null;
+  let siteSpecificForward: boolean | null = null;
   let i = qPos + 1;
 
   while (i < end) {
@@ -189,6 +191,11 @@ export function readSuggestQueryParams(
       } else if (first === 110) {
         slot = 3;
       }
+    } else if (
+      keyLength === 21 &&
+      rawUrl.startsWith("site_specific_forward", i)
+    ) {
+      slot = 4;
     }
 
     let current: string | null = null;
@@ -200,8 +207,22 @@ export function readSuggestQueryParams(
       current = bp;
     } else if (slot === 3) {
       current = np;
+    } else if (slot === 4 && siteSpecificForward !== null) {
+      current = "";
     }
     if (slot !== -1 && current === null) {
+      if (slot === 4) {
+        if (eq === -1 || eq >= amp) {
+          siteSpecificForward = false;
+        } else if (eq + 2 === amp && rawUrl.charCodeAt(eq + 1) === 49) {
+          siteSpecificForward = true;
+        } else {
+          siteSpecificForward =
+            decodeQueryComponent(rawUrl.substring(eq + 1, amp)) === "1";
+        }
+        i = amp + 1;
+        continue;
+      }
       const value =
         eq === -1 || eq > amp
           ? ""
@@ -219,5 +240,5 @@ export function readSuggestQueryParams(
     i = amp + 1;
   }
 
-  return [q, sp, bp, np];
+  return [q, sp, bp, np, siteSpecificForward === true];
 }

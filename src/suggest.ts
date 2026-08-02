@@ -1,8 +1,10 @@
 import { CH_CR, CH_FF, CH_NL, CH_SPACE, CH_TAB, CH_VTAB } from "./shared/chars";
 import {
   JSON_HEADERS,
+  SITE_SUGGESTION_SHAPE,
   SUGGEST_TRIGGER_PROVIDERS,
   SUGGEST_URLS,
+  TOP_K,
 } from "./shared/constants";
 import { readQueryParam } from "./shared/raw-query";
 import { parsePartialSnapChain } from "./shared/snap-chain";
@@ -20,9 +22,11 @@ import {
   type TriggerPrefix,
 } from "./shared/trigger-prefix";
 import {
-  addBangSuggestionMeta,
+  addBangSuggestionMetaForTerminal,
   bangSuggestions,
-  findBangSuggestionMeta,
+  findBangSuggestionTerminal,
+  resolveSiteSuggestionUrl,
+  siteSuggestionShape,
 } from "./suggest-bang";
 
 const JSON_HEADERS_INIT = { headers: JSON_HEADERS };
@@ -240,20 +244,20 @@ function restoreTriggers(
   return result;
 }
 
-function providerBangMeta(
+function providerBangTerminal(
   providerQuery: ProviderQuery,
   settings: SuggestSettings
-): ReturnType<typeof findBangSuggestionMeta> {
+): number {
   const value = providerQuery.bangTrigger ?? providerQuery.snapTrigger;
   if (!value) {
-    return null;
+    return -1;
   }
   const comma = value.indexOf(",");
   const trigger = (comma < 0 ? value : value.substring(0, comma)).toLowerCase();
   if (settings.custom.length > 0 && settings.custom.includes(trigger)) {
-    return null;
+    return -1;
   }
-  return findBangSuggestionMeta(trigger);
+  return trigger ? findBangSuggestionTerminal(trigger) : -1;
 }
 
 function fillTemplate(url: string, encodedQuery: string): string {
@@ -299,6 +303,101 @@ function isSuggestionPayload(value: unknown): value is unknown[] {
     return false;
   }
   return value.length < 5 || isSuggestionExtra(value[4]);
+}
+
+function siteSpecificCompletions(shape: number, payload: unknown): string[] {
+  const completions: string[] = [];
+  switch (shape) {
+    case SITE_SUGGESTION_SHAPE.opensearch: {
+      const values = Array.isArray(payload) ? payload[1] : undefined;
+      if (Array.isArray(values)) {
+        for (let i = 0; i < values.length && completions.length < TOP_K; i++) {
+          if (typeof values[i] === "string") {
+            completions.push(values[i]);
+          }
+        }
+      }
+      break;
+    }
+    case SITE_SUGGESTION_SHAPE.amazon: {
+      const values = (payload as { suggestions?: unknown } | null)?.suggestions;
+      if (Array.isArray(values)) {
+        for (let i = 0; i < values.length && completions.length < TOP_K; i++) {
+          const item = values[i];
+          const value =
+            typeof item === "object" && item !== null
+              ? (item as { value?: unknown }).value
+              : undefined;
+          if (typeof value === "string") {
+            completions.push(value);
+          }
+        }
+      }
+      break;
+    }
+    case SITE_SUGGESTION_SHAPE.npms:
+      if (Array.isArray(payload)) {
+        for (let i = 0; i < payload.length && completions.length < TOP_K; i++) {
+          const item = payload[i];
+          const value =
+            typeof item === "object" && item !== null
+              ? (item as { package?: { name?: unknown } }).package?.name
+              : undefined;
+          if (typeof value === "string") {
+            completions.push(value);
+          }
+        }
+      }
+      break;
+    case SITE_SUGGESTION_SHAPE.reddit: {
+      const values = (
+        payload as {
+          data?: { children?: Array<{ data?: { display_name?: unknown } }> };
+        } | null
+      )?.data?.children;
+      if (values) {
+        for (let i = 0; i < values.length && completions.length < TOP_K; i++) {
+          const value = values[i].data?.display_name;
+          if (typeof value === "string") {
+            completions.push(value);
+          }
+        }
+      }
+      break;
+    }
+    case SITE_SUGGESTION_SHAPE.crates: {
+      const values = (payload as { crates?: Array<{ name?: unknown }> } | null)
+        ?.crates;
+      if (values) {
+        for (let i = 0; i < values.length && completions.length < TOP_K; i++) {
+          const value = values[i].name;
+          if (typeof value === "string") {
+            completions.push(value);
+          }
+        }
+      }
+      break;
+    }
+    case SITE_SUGGESTION_SHAPE.algolia: {
+      const result = payload as {
+        hits?: Array<{ full_name?: unknown; title?: unknown }>;
+        items?: Array<{ full_name?: unknown; title?: unknown }>;
+      } | null;
+      const values = result?.hits ?? result?.items;
+      if (values) {
+        for (let i = 0; i < values.length && completions.length < TOP_K; i++) {
+          const item = values[i];
+          const value =
+            typeof item.title === "string" ? item.title : item.full_name;
+          if (typeof value === "string") {
+            completions.push(value);
+          }
+        }
+      }
+      break;
+    }
+  }
+  return completions;
 }
 
 export function parsePartialBang(
@@ -642,7 +741,8 @@ export async function suggest(
   query: string,
   settings: SuggestSettings,
   bangOverride?: PartialBang | null,
-  allowUnsafeCustomUrls = false
+  allowUnsafeCustomUrls = false,
+  siteSpecificForward = false
 ): Promise<Response> {
   const bang =
     bangOverride === undefined
@@ -668,8 +768,7 @@ export async function suggest(
   } else {
     endpoint = resolveEndpoint(provider, trigger);
   }
-
-  if (!endpoint) {
+  if (!(siteSpecificForward || endpoint)) {
     return empty(query);
   }
 
@@ -683,15 +782,41 @@ export async function suggest(
     return empty(query);
   }
 
+  let bangTerminal = -1;
+  let encodedQuery: string | null = null;
+  let siteUrl: string | null = null;
+  if (siteSpecificForward && providerQuery?.bangTrigger) {
+    bangTerminal = providerBangTerminal(providerQuery, settings);
+    if (bangTerminal >= 0) {
+      encodedQuery = encodeURIComponent(queryValue);
+      siteUrl = resolveSiteSuggestionUrl(bangTerminal, encodedQuery);
+    }
+  }
+
+  if (!(siteUrl || endpoint)) {
+    return empty(query);
+  }
+
   try {
-    const res = await fetch(
-      fillTemplate(endpoint, encodeURIComponent(queryValue))
-    );
+    encodedQuery ??= encodeURIComponent(queryValue);
+    const requestUrl = siteUrl ?? fillTemplate(endpoint!, encodedQuery);
+    const res = siteUrl
+      ? await fetch(requestUrl, {
+          headers: { "User-Agent": "flashbang-suggest/1.0" },
+          signal: AbortSignal.timeout(2500),
+        })
+      : await fetch(requestUrl);
     if (!res.ok) {
       return empty(query);
     }
     const body = await res.text();
-    const payload: unknown = JSON.parse(body);
+    const parsed: unknown = JSON.parse(body);
+    const payload: unknown = siteUrl
+      ? [
+          queryValue,
+          siteSpecificCompletions(siteSuggestionShape(bangTerminal), parsed),
+        ]
+      : parsed;
     if (!isSuggestionPayload(payload)) {
       return empty(query);
     }
@@ -705,9 +830,15 @@ export async function suggest(
         payload[4] = payload[3];
         payload[3] = [];
       }
-      const bangMeta = providerBangMeta(providerQuery, settings);
-      if (bangMeta) {
-        addBangSuggestionMeta(payload, completions.length, bangMeta);
+      if (bangTerminal < 0) {
+        bangTerminal = providerBangTerminal(providerQuery, settings);
+      }
+      if (bangTerminal >= 0) {
+        addBangSuggestionMetaForTerminal(
+          payload,
+          completions.length,
+          bangTerminal
+        );
       }
       return new Response(JSON.stringify(payload), JSON_HEADERS_INIT);
     }

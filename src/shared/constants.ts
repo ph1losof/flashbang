@@ -1,4 +1,14 @@
 export const TOP_K = 8;
+
+export const SITE_SUGGESTION_SHAPE = {
+  opensearch: 0,
+  amazon: 1,
+  npms: 2,
+  reddit: 3,
+  crates: 4,
+  algolia: 5,
+} as const;
+export type SiteSuggestionShape = keyof typeof SITE_SUGGESTION_SHAPE;
 export const TOP_FRECENCY_ENTRIES = 8;
 export const MAX_FRECENCY_ENTRIES = 64;
 export const FRECENCY_BOOST_MULTIPLIER = 10;

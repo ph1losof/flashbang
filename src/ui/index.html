@@ -26,12 +26,112 @@
       const query =
         privateQuery ||
         (hasQuery && new URLSearchParams(location.search).get("q"));
-      const workerRegistrationPromise =
-        "serviceWorker" in navigator &&
-        query &&
-        !navigator.serviceWorker.controller
-          ? navigator.serviceWorker.register("/sw.js").catch(() => null)
-          : null;
+      let workerRegistrationPromise = null;
+      const registerWorker = () => {
+        if (
+          !("serviceWorker" in navigator) ||
+          navigator.serviceWorker.controller
+        ) {
+          return null;
+        }
+        workerRegistrationPromise ||= navigator.serviceWorker
+          .register("/sw.js")
+          .catch(() => null);
+        return workerRegistrationPromise;
+      };
+
+      const hotBangTriggers = new Set("__HOT_BANG_TRIGGERS_JSON__");
+      const shouldPrefetchBangData = (value) => {
+        let normalized = value;
+        if (privateQuery !== null) {
+          try {
+            normalized = decodeURIComponent(value.replaceAll("+", " "));
+          } catch {
+            return false;
+          }
+        }
+        const tokens = normalized.trim().toLowerCase().split(/\s+/);
+        const markers = "!@$:;~";
+        for (const token of [tokens[0], tokens.at(-1)]) {
+          if (!token) {
+            continue;
+          }
+          let trigger = null;
+          if (markers.includes(token[0])) {
+            trigger = token.substring(1);
+          } else if (markers.includes(token.at(-1))) {
+            trigger = token.substring(0, token.length - 1);
+          }
+          if (trigger && !hotBangTriggers.has(trigger)) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+      const loadBangData = () =>
+        fetch("__BANG_DATA_ASSET__").then((response) => {
+          if (!response.ok) {
+            throw new Error(`Failed to load bang data: ${response.status}`);
+          }
+          return response.arrayBuffer();
+        });
+
+      const seedWorker = async (data, settings, registrationPromise) => {
+        const registration = await registrationPromise;
+        const worker =
+          registration?.installing ||
+          registration?.waiting ||
+          registration?.active;
+        if (worker) {
+          try {
+            worker.postMessage(
+              {
+                type: "seed-runtime",
+                asset: "__BANG_DATA_ASSET__",
+                bangData: data,
+                redirectSettings: settings,
+              },
+              [data]
+            );
+          } catch {
+            // Handoff must never prevent the resolved navigation.
+          }
+        }
+      };
+
+      const showFallbackError = () => {
+        document.body.textContent =
+          "Flashbang could not resolve this query. Reload the page or enable Service Workers.";
+      };
+
+      const runRichFallback = (
+        needsCatalog,
+        prefetchedData,
+        registrationPromise
+      ) =>
+        import("__FALLBACK_ASSET__")
+          .then(async ({ resolveFallback, resolveHotFallback }) => {
+            if (!needsCatalog) {
+              const hot = await resolveHotFallback(
+                query,
+                privateQuery !== null
+              );
+              if (hot) {
+                location.replace(hot.url);
+                return;
+              }
+            }
+            const data = await (prefetchedData || loadBangData());
+            const { settings, url } = await resolveFallback(
+              query,
+              data,
+              privateQuery !== null
+            );
+            await seedWorker(data, settings, registrationPromise);
+            location.replace(url);
+          })
+          .catch(showFallbackError);
 
       let fallbackStarted = false;
       const fallback = () => {
@@ -43,49 +143,26 @@
           location.replace("/home");
           return;
         }
-        Promise.all([
-          fetch("__BANG_DATA_ASSET__").then((response) => {
-            if (!response.ok) {
-              throw new Error(`Failed to load bang data: ${response.status}`);
-            }
-            return response.arrayBuffer();
-          }),
-          import("__FALLBACK_ASSET__"),
-        ])
-          .then(async ([data, { resolveFallback }]) => {
-            const { settings, url } = await resolveFallback(
+        const registrationPromise = registerWorker();
+        const needsCatalog = shouldPrefetchBangData(query);
+        if (!needsCatalog) {
+          runRichFallback(false, null, registrationPromise);
+          return;
+        }
+        import("__COLD_FALLBACK_ASSET__")
+          .then(async ({ resolveColdFallback }) => {
+            const result = await resolveColdFallback(
               query,
-              data,
+              undefined,
               privateQuery !== null
             );
-            const registration = workerRegistrationPromise
-              ? await workerRegistrationPromise
-              : null;
-            const worker =
-              registration?.installing ||
-              registration?.waiting ||
-              registration?.active;
-            if (worker) {
-              try {
-                worker.postMessage(
-                  {
-                    type: "seed-runtime",
-                    asset: "__BANG_DATA_ASSET__",
-                    bangData: data,
-                    redirectSettings: settings,
-                  },
-                  [data]
-                );
-              } catch {
-                // Handoff must never prevent the resolved navigation.
-              }
+            if (!result) {
+              runRichFallback(true, loadBangData(), registrationPromise);
+              return;
             }
-            location.replace(url);
+            location.replace(result.url);
           })
-          .catch(() => {
-            document.body.textContent =
-              "Flashbang could not resolve this query. Reload the page or enable Service Workers.";
-          });
+          .catch(showFallbackError);
       };
 
       if (
@@ -106,7 +183,7 @@
       } else if (query) {
         fallback();
       } else if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("/sw.js").catch(fallback);
+        registerWorker()?.catch(fallback);
         Promise.all([
           fetch("/opensearch.xml").catch(() => {
             // Pre-warm only; registration can continue without it.

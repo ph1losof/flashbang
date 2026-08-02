@@ -1,6 +1,6 @@
 import { DB_VERSION } from "./constants";
 
-const DB_NAME = "flashbang";
+export const DB_NAME = "flashbang";
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 

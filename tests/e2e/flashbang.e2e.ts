@@ -1604,7 +1604,31 @@ test("first installation redirects before a controller exists", async ({
   }
 });
 
-test("first fallback seeds the worker for the next offline redirect", async ({
+test("first installation falls through to advanced redirect machinery", async ({
+  browser,
+}) => {
+  const context = await browser.newContext();
+  try {
+    const page = await context.newPage();
+    await context.route("https://translate.kagi.com/**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "text/plain",
+        body: "translate",
+      })
+    );
+    await page.goto("/health", { waitUntil: "domcontentloaded" });
+    await navigateAndWaitForRedirect(
+      page,
+      "/?q=%21ktr%20japanese%20https%3A%2F%2Fexample.com",
+      /translate\.kagi\.com\/japanese\/https%3A%2F%2Fexample\.com/
+    );
+  } finally {
+    await context.close();
+  }
+});
+
+test("first hot redirect does not wait for the full bang catalog", async ({
   browser,
   browserName,
 }) => {
@@ -1625,14 +1649,44 @@ test("first fallback seeds the worker for the next offline redirect", async ({
     });
 
     await page.goto("/health", { waitUntil: "domcontentloaded" });
+    await navigateAndWaitForRedirect(page, "/?q=%21g%20hello", GOOGLE_REDIRECT);
+    expect(bangDataRequests).toHaveLength(0);
+  } finally {
+    await context.close();
+  }
+});
+
+test("first fallback seeds the worker for the next offline redirect", async ({
+  browser,
+  browserName,
+}) => {
+  skipWebKitServiceWorker(browserName);
+  const context = await browser.newContext();
+  try {
+    const page = await context.newPage();
+    await context.route("https://github.com/**", (route) =>
+      route.fulfill({ status: 200, contentType: "text/plain", body: "github" })
+    );
+    const bangDataRequests: string[] = [];
+    context.on("request", (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (
+        pathname === "/bangs.bin" ||
+        (pathname.startsWith("/bangs-") && !pathname.startsWith("/bangs-meta-"))
+      ) {
+        bangDataRequests.push(pathname);
+      }
+    });
+
+    await page.goto("/health", { waitUntil: "domcontentloaded" });
     const probe = await context.newPage();
     await mockGoogleSearchRoute(probe);
     await probe.goto("/health", { waitUntil: "domcontentloaded" });
 
     await navigateAndWaitForRedirect(
       page,
-      "/?q=%21g%20first",
-      /google\.com\/search\?q=first/
+      "/?q=%21github%20first",
+      /github\.com\/search\?q=first/
     );
 
     await probe.evaluate(async () => {
@@ -1674,8 +1728,7 @@ test("first fallback seeds the worker for the next offline redirect", async ({
                 const pathname = new URL(url).pathname;
                 return (
                   pathname === "/bangs.bin" ||
-                  (pathname.startsWith("/bangs-") &&
-                    !pathname.startsWith("/bangs-meta-"))
+                  /^\/bangs-[a-f0-9]{12}\.bin$/.test(pathname)
                 );
               })
             ) {
@@ -1686,15 +1739,19 @@ test("first fallback seeds the worker for the next offline redirect", async ({
         })
       )
       .toBe(true);
-    expect(bangDataRequests).toHaveLength(1);
+    expect(
+      bangDataRequests.some((pathname) =>
+        /^\/bangs-s[0-9a-f]-[a-f0-9]{12}\.bin$/.test(pathname)
+      )
+    ).toBe(true);
 
     const origin = new URL(probe.url()).origin;
     await context.route(`${origin}/**`, (route) => route.abort());
     try {
       await navigateAndWaitForRedirect(
         probe,
-        "/?q=%21g%20second",
-        /google\.com\/search\?q=second/
+        "/?q=%21github%20second",
+        /github\.com\/search\?q=second/
       );
     } finally {
       await context.unroute(`${origin}/**`);

@@ -114,6 +114,37 @@ describe("handleSuggestRequest", () => {
     expect(calledUrl.startsWith("https://duckduckgo.com")).toBe(true);
   });
 
+  test("enables site-specific forwarding only with its URL flag", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      Response.json({ items: [{ full_name: "facebook/react" }] })
+    );
+
+    const response = await handleSuggestRequest(
+      requestWithCookie(
+        "http://localhost/suggest?q=%21gh%20react&sp=google&site_specific_forward=1"
+      )
+    );
+
+    expect(String(fetchSpy.mock.calls[0][0])).toBe(
+      "https://api.github.com/search/repositories?q=react&per_page=8"
+    );
+    expect((await response.json())[1]).toEqual(["!gh facebook/react"]);
+  });
+
+  test("does not site-forward a built-in trigger overridden by a custom bang", async () => {
+    fetchSpy.mockResolvedValueOnce(Response.json(["react", ["react docs"]]));
+
+    const response = await handleSuggestRequest(
+      requestWithCookie(
+        "http://localhost/suggest?q=%21gh%20react&sp=google&site_specific_forward=1",
+        `suggest=${encodeSuggestCookieValue("google", "g", "", ["gh"], null)}`
+      )
+    );
+
+    expect(String(fetchSpy.mock.calls[0][0])).toContain("google.com/complete");
+    expect((await response.json())[1]).toEqual(["!gh react docs"]);
+  });
+
   test("cleans malformed suggest context and returns fallback payload", async () => {
     fetchSpy.mockResolvedValue(new Response("[]", { headers: JSON_HEADERS }));
 

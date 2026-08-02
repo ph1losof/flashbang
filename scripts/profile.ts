@@ -6,15 +6,6 @@ import { compileCaptureUrl } from "../src/shared/capture-template";
 import { readPathname } from "../src/shared/raw-url";
 import { compileSnapTarget } from "../src/shared/snap-target";
 import { TRIGGER_PREFIXES } from "../src/shared/trigger-prefix";
-import {
-  EDGE_CHILD_INDEX,
-  EDGE_STRIDE,
-  NODE_EDGE_COUNT,
-  NODE_EDGE_START,
-  NODE_MAX_RELEVANCE,
-  NODE_STRIDE,
-  NODE_TERMINAL_INDEX,
-} from "../src/suggest-bang";
 import type { RedirectSettings } from "../src/sw/redirect";
 import { decodeBangCatalog } from "../src/ui/bang-catalog";
 import { ensureGeneratedBangData, GENERATED_BANG_DATA_FILES } from "./codegen";
@@ -466,7 +457,16 @@ initializeBangData(binaryBuffer);
 
 const [
   { BANG_COUNT },
-  { EDGES, NODES, ROOT, TERM_K_BLOB, TERM_K_OFF },
+  {
+    EDGE_CHILDREN,
+    NODE_EDGE_COUNTS,
+    NODE_EDGE_STARTS,
+    NODE_MAX_RELEVANCE,
+    NODE_TERMINALS,
+    ROOT,
+    TERM_K_BLOB,
+    TERM_K_LEN,
+  },
   { handleSuggestRequest },
   {
     bangSuggestions,
@@ -489,10 +489,14 @@ const [
 ]);
 const metaBuffer = await Bun.file(metaPath).arrayBuffer();
 const metaCatalog = decodeBangCatalog(metaBuffer);
+const termKOffsets = new Int32Array(TERM_K_LEN.length + 1);
+for (let i = 0; i < TERM_K_LEN.length; i++) {
+  termKOffsets[i + 1] = termKOffsets[i] + TERM_K_LEN[i];
+}
 
 function terminalIndexFor(trigger: string): number {
-  for (let i = 0; i < TERM_K_OFF.length - 1; i++) {
-    if (TERM_K_BLOB.slice(TERM_K_OFF[i], TERM_K_OFF[i + 1]) === trigger) {
+  for (let i = 0; i < TERM_K_LEN.length; i++) {
+    if (TERM_K_BLOB.slice(termKOffsets[i], termKOffsets[i + 1]) === trigger) {
       return i;
     }
   }
@@ -500,13 +504,11 @@ function terminalIndexFor(trigger: string): number {
 }
 
 function countTerminals(node: number): number {
-  const nodeOff = node * NODE_STRIDE;
-  let c = NODES[nodeOff + NODE_TERMINAL_INDEX] >= 0 ? 1 : 0;
-  const edgeStart = NODES[nodeOff + NODE_EDGE_START];
-  const edgeCount = NODES[nodeOff + NODE_EDGE_COUNT];
+  let c = NODE_TERMINALS[node] === 0 ? 0 : 1;
+  const edgeStart = NODE_EDGE_STARTS[node];
+  const edgeCount = NODE_EDGE_COUNTS[node];
   for (let i = 0; i < edgeCount; i++) {
-    const edgeOff = (edgeStart + i) * EDGE_STRIDE;
-    c += countTerminals(EDGES[edgeOff + EDGE_CHILD_INDEX]);
+    c += countTerminals(EDGE_CHILDREN[edgeStart + i]);
   }
   return c;
 }
@@ -553,12 +555,12 @@ function trieStats(root: number): {
   edges: number;
   maxDepth: number;
 } {
-  const nodeCount = Math.floor(NODES.length / NODE_STRIDE);
+  const nodeCount = NODE_TERMINALS.length;
   let terminals = 0;
   let maxDepth = 0;
 
   for (let i = 0; i < nodeCount; i++) {
-    if (NODES[i * NODE_STRIDE + NODE_TERMINAL_INDEX] >= 0) {
+    if (NODE_TERMINALS[i] !== 0) {
       terminals++;
     }
   }
@@ -567,12 +569,10 @@ function trieStats(root: number): {
     if (depth > maxDepth) {
       maxDepth = depth;
     }
-    const nodeOff = node * NODE_STRIDE;
-    const edgeStart = NODES[nodeOff + NODE_EDGE_START];
-    const edgeCount = NODES[nodeOff + NODE_EDGE_COUNT];
+    const edgeStart = NODE_EDGE_STARTS[node];
+    const edgeCount = NODE_EDGE_COUNTS[node];
     for (let i = 0; i < edgeCount; i++) {
-      const edgeOff = (edgeStart + i) * EDGE_STRIDE;
-      walkDepth(EDGES[edgeOff + EDGE_CHILD_INDEX], depth + 1);
+      walkDepth(EDGE_CHILDREN[edgeStart + i], depth + 1);
     }
   }
 
@@ -581,7 +581,7 @@ function trieStats(root: number): {
   return {
     nodes: nodeCount,
     terminals,
-    edges: Math.floor(EDGES.length / EDGE_STRIDE),
+    edges: EDGE_CHILDREN.length,
     maxDepth,
   };
 }
@@ -592,10 +592,8 @@ console.log(`  Nodes:     ${ts.nodes.toLocaleString()}`);
 console.log(`  Terminals: ${ts.terminals.toLocaleString()}`);
 console.log(`  Edges:     ${ts.edges.toLocaleString()}`);
 console.log(`  Max depth: ${ts.maxDepth}`);
-console.log(`  Root children: ${NODES[ROOT * NODE_STRIDE + NODE_EDGE_COUNT]}`);
-console.log(
-  `  Max relevance: ${NODES[ROOT * NODE_STRIDE + NODE_MAX_RELEVANCE]}`
-);
+console.log(`  Root children: ${NODE_EDGE_COUNTS[ROOT]}`);
+console.log(`  Max relevance: ${NODE_MAX_RELEVANCE[ROOT]}`);
 
 separator("3. BANG LOOKUP PERFORMANCE");
 

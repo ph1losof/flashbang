@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { generateBinaryShards } from "../scripts/codegen";
 import {
   lookupAdvancedBang,
   lookupSnapOverride,
 } from "../src/generated/bangs-sparse.js";
+import { bangShardIndex } from "../src/shared/bang-shards";
 import { hashFNV1a } from "../src/shared/hash";
 import { initializeBangData, lookupBang } from "../src/sw/bang-data";
 import { decodeBangCatalog } from "../src/ui/bang-catalog";
@@ -13,9 +15,8 @@ import {
   BANG_META_MAGIC,
   BANG_META_VERSION,
   bangBinaryCheckpointOffset,
+  bangBinaryFingerprints,
   bangBinaryNumericEnd,
-  bangBinaryTriggerLengths,
-  bangBinaryTriggerLocalOffsets,
 } from "./helpers/bang-binary";
 import { loadTestBangData } from "./helpers/bang-data";
 
@@ -25,6 +26,7 @@ const bangs: Array<{
   domain: string;
   name: string;
   regex?: string;
+  relevance: number;
   trigger: string;
   url: string;
 }> = await Bun.file("data/bangs.json").json();
@@ -100,24 +102,8 @@ describe("codegen round-trip", () => {
 
     expect(header[10]).toBe(bangBinaryNumericEnd(header));
 
-    const triggerLengths = bangBinaryTriggerLengths(binary, header);
-    const triggerLocalOffsets = bangBinaryTriggerLocalOffsets(
-      binary,
-      header,
-      triggerLengths
-    );
-    const triggerLengthMask = header[4] === 1 ? 0x7f : 0x7fff;
-    let expectedLocalOffset = 0;
-    for (let i = 0; i < triggerLengths.length; i += 2) {
-      if (i % 16 === 0) {
-        expectedLocalOffset = 0;
-      }
-      expect(triggerLocalOffsets[i >> 1]).toBe(expectedLocalOffset);
-      expectedLocalOffset += triggerLengths[i] & triggerLengthMask;
-      if (i + 1 < triggerLengths.length) {
-        expectedLocalOffset += triggerLengths[i + 1] & triggerLengthMask;
-      }
-    }
+    expect(header[4]).toBe(Uint16Array.BYTES_PER_ELEMENT);
+    expect(bangBinaryFingerprints(binary, header)).toHaveLength(header[2]);
   });
 
   test("resolves every regular bang through the perfect hash", () => {
@@ -135,7 +121,27 @@ describe("codegen round-trip", () => {
     }
   });
 
-  test("rejects unknown triggers after perfect-hash indexing", () => {
+  test("routes every regular bang through its deterministic cold shard", async () => {
+    const shards = generateBinaryShards(bangs);
+    for (let shardId = 0; shardId < shards.length; shardId++) {
+      const shard = shards[shardId];
+      initializeBangData(
+        shard.buffer.slice(
+          shard.byteOffset,
+          shard.byteOffset + shard.byteLength
+        ) as ArrayBuffer
+      );
+      for (const bang of bangs) {
+        const hash = hashFNV1a(bang.trigger);
+        if (!(bang.regex || bangShardIndex(hash) !== shardId)) {
+          expect(lookupBang(bang.trigger, hash)).not.toBeNull();
+        }
+      }
+    }
+    initializeBangData(await Bun.file("src/generated/bangs.bin").arrayBuffer());
+  });
+
+  test("rejects sampled unknown triggers with fingerprint verification", () => {
     for (let i = 0; i < bangs.length; i += 100) {
       const trigger = `${bangs[i].trigger}~missing`;
       expect(lookupBang(trigger, hashFNV1a(trigger))).toBeNull();
@@ -203,8 +209,8 @@ describe("codegen round-trip", () => {
       [2, 0, "Invalid binary bang entry count"],
       [3, 0, "Invalid binary bang MPHF bucket count"],
       [3, 3, "Invalid binary bang MPHF bucket count"],
-      [4, 0, "Invalid binary bang trigger length width"],
-      [4, 3, "Invalid binary bang trigger length width"],
+      [4, 0, "Invalid binary bang fingerprint width"],
+      [4, 3, "Invalid binary bang fingerprint width"],
       [12, 0, "Invalid binary bang MPHF displacement width"],
       [12, 3, "Invalid binary bang MPHF displacement width"],
     ] as const) {
@@ -235,12 +241,12 @@ describe("codegen round-trip", () => {
     const invalidCheckpoint = binary.slice(0);
     const checkpointHeader = new Uint32Array(invalidCheckpoint, 0, 13);
     const checkpointOffset = bangBinaryCheckpointOffset(checkpointHeader);
-    const triggerCheckpoints = new Uint32Array(
+    const prefixCheckpoints = new Uint32Array(
       invalidCheckpoint,
       checkpointOffset,
-      Math.ceil(checkpointHeader[2] / 16)
+      Math.ceil(checkpointHeader[5] / 16)
     );
-    triggerCheckpoints[triggerCheckpoints.length - 1]++;
+    prefixCheckpoints[prefixCheckpoints.length - 1]++;
     expect(() => initializeBangData(invalidCheckpoint)).toThrow(
       "Invalid binary bang string lengths"
     );

@@ -45,7 +45,7 @@ export function handleSuggestRequest(
   environment: SuggestEnvironment = runtimeEnvironment()
 ): Promise<Response> {
   const rawUrl = request.url;
-  const [q, sp, bp, np] = readSuggestQueryParams(rawUrl);
+  const [q, sp, bp, np, siteSpecificForward] = readSuggestQueryParams(rawUrl);
   if (!q) {
     return Promise.resolve(
       new Response(MISSING_Q, {
@@ -86,13 +86,20 @@ export function handleSuggestRequest(
       coreSettings.snapPrefix === DEFAULT_SNAP_PREFIX
         ? defaultBang
         : parsePartialBang(q, coreSettings.bangPrefix, coreSettings.snapPrefix);
-    ({ settings, rewrittenSuggestCookie } = bang
-      ? parseBangSettingsFromRequestWithCleanup(request, coreSettings)
-      : { settings: coreSettings, rewrittenSuggestCookie: null });
+    ({ settings, rewrittenSuggestCookie } =
+      bang || siteSpecificForward
+        ? parseBangSettingsFromRequestWithCleanup(request, coreSettings)
+        : { settings: coreSettings, rewrittenSuggestCookie: null });
   }
   const allowUnsafeCustomUrls =
     environment.ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS === "true";
-  const response = suggest(q, settings, bang, allowUnsafeCustomUrls);
+  const response = suggest(
+    q,
+    settings,
+    bang,
+    allowUnsafeCustomUrls,
+    siteSpecificForward
+  );
   if (!rewrittenSuggestCookie) {
     return response;
   }

@@ -1,7 +1,7 @@
 export type BuiltinUrlParts = readonly [string, string | null];
 
 const MAGIC = 0x31424246;
-const VERSION = 7;
+const VERSION = 8;
 const HEADER_WORDS = 13;
 const HEADER_BYTES = HEADER_WORDS * Uint32Array.BYTES_PER_ELEMENT;
 const MPH_SLOT_MULTIPLIER = 0x85ebca6b;
@@ -64,21 +64,6 @@ function validateFinalLength(
   }
 }
 
-function matchesTrigger(
-  raw: string,
-  rawStart: number,
-  bytes: Uint8Array,
-  byteStart: number,
-  length: number
-): boolean {
-  for (let i = 0; i < length; i++) {
-    if (raw.charCodeAt(rawStart + i) !== bytes[byteStart + i]) {
-      return false;
-    }
-  }
-  return true;
-}
-
 export function initializeBangData(buffer: ArrayBuffer): void {
   const header = new Uint32Array(buffer, 0, HEADER_WORDS);
   if (header[0] !== MAGIC || header[1] !== VERSION) {
@@ -90,8 +75,7 @@ export function initializeBangData(buffer: ArrayBuffer): void {
 
   const entryCount = header[2];
   const bucketCount = header[3];
-  const triggerLengthWidth = header[4];
-  const triggerLengthMask = triggerLengthWidth === 1 ? 0x7f : 0x7fff;
+  const fingerprintWidth = header[4];
   const prefixCount = header[5];
   const suffixCount = header[6];
   const displacementWidth = header[12];
@@ -101,8 +85,8 @@ export function initializeBangData(buffer: ArrayBuffer): void {
   if (bucketCount === 0 || (bucketCount & (bucketCount - 1)) !== 0) {
     throw new Error("Invalid binary bang MPHF bucket count");
   }
-  if (triggerLengthWidth !== 1 && triggerLengthWidth !== 2) {
-    throw new Error("Invalid binary bang trigger length width");
+  if (fingerprintWidth !== Uint16Array.BYTES_PER_ELEMENT) {
+    throw new Error("Invalid binary bang fingerprint width");
   }
   if (displacementWidth !== 2 && displacementWidth !== 4) {
     throw new Error("Invalid binary bang MPHF displacement width");
@@ -119,17 +103,8 @@ export function initializeBangData(buffer: ArrayBuffer): void {
       throw new Error("Invalid binary bang MPHF displacement");
     }
   }
-  const triggerLengths =
-    triggerLengthWidth === 1
-      ? new Uint8Array(buffer, offset, entryCount)
-      : new Uint16Array(buffer, offset, entryCount);
-  offset += triggerLengths.byteLength;
-  const triggerLocalOffsets = new Uint8Array(
-    buffer,
-    offset,
-    Math.ceil(entryCount / 2)
-  );
-  offset += triggerLocalOffsets.byteLength;
+  const fingerprints = new Uint16Array(buffer, offset, entryCount);
+  offset += fingerprints.byteLength;
   offset = (offset + 1) & ~1;
   const prefixLengths = new Uint16Array(buffer, offset, prefixCount);
   offset += prefixLengths.byteLength;
@@ -141,12 +116,6 @@ export function initializeBangData(buffer: ArrayBuffer): void {
   offset += suffixIds.byteLength;
   offset = (offset + 3) & ~3;
 
-  const triggerCheckpoints = new Uint32Array(
-    buffer,
-    offset,
-    checkpointCount(entryCount)
-  );
-  offset += triggerCheckpoints.byteLength;
   const prefixCheckpoints = new Uint32Array(
     buffer,
     offset,
@@ -164,18 +133,13 @@ export function initializeBangData(buffer: ArrayBuffer): void {
   }
 
   const decoder = new TextDecoder();
-  const triggerBlob = new Uint8Array(buffer, offset, header[7]);
-  offset += header[7];
+  if (header[7] !== 0) {
+    throw new Error("Invalid binary bang fingerprint layout");
+  }
   const prefixBlob = new Uint8Array(buffer, offset, header[8]);
   offset += header[8];
   const suffixBlob = new Uint8Array(buffer, offset, header[9]);
 
-  validateFinalLength(
-    triggerLengths,
-    triggerCheckpoints,
-    triggerBlob.length,
-    triggerLengthMask
-  );
   validateFinalLength(
     prefixLengths,
     prefixCheckpoints,
@@ -235,7 +199,7 @@ export function initializeBangData(buffer: ArrayBuffer): void {
     return value;
   }
 
-  lookup = (trigger, hash) => {
+  lookup = (_trigger, hash) => {
     const unsignedHash = hash >>> 0;
     const bucket = unsignedHash & bucketMask;
     const displacement = displacements[bucket];
@@ -245,27 +209,7 @@ export function initializeBangData(buffer: ArrayBuffer): void {
         : (Math.imul(unsignedHash ^ (displacement + 1), MPH_SLOT_MULTIPLIER) >>>
             0) %
           entryCount;
-    const triggerInfo = triggerLengths[index];
-    const triggerLength = triggerInfo & triggerLengthMask;
-    const isAscii = triggerInfo === triggerLength;
-    if (isAscii && triggerLength !== trigger.length) {
-      return null;
-    }
-    let triggerStart =
-      triggerCheckpoints[index >> CHECKPOINT_SHIFT] +
-      triggerLocalOffsets[index >> 1];
-    if ((index & 1) !== 0) {
-      triggerStart += triggerLengths[index - 1] & triggerLengthMask;
-    }
-    return (
-      isAscii
-        ? matchesTrigger(trigger, 0, triggerBlob, triggerStart, triggerLength)
-        : decoder.decode(
-            triggerBlob.subarray(triggerStart, triggerStart + triggerLength)
-          ) === trigger
-    )
-      ? tuple(index)
-      : null;
+    return fingerprints[index] === unsignedHash >>> 16 ? tuple(index) : null;
   };
 }
 

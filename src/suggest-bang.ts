@@ -1,22 +1,39 @@
 import {
-  EDGES,
+  EDGE_CHILDREN,
+  EDGE_LABEL_LENGTHS,
+  EDGE_LABEL_STARTS,
+  ENDPOINT_P_BLOB,
+  ENDPOINT_P_CP,
+  ENDPOINT_P_LEN,
+  ENDPOINT_S_BLOB,
+  ENDPOINT_S_CP,
+  ENDPOINT_S_LEN,
+  ENDPOINT_SHAPE,
   LABELS,
-  NODES,
+  NODE_EDGE_COUNTS,
+  NODE_EDGE_STARTS,
+  NODE_MAX_RELEVANCE,
+  NODE_TERMINALS,
   ROOT,
   TERM_D_BLOB,
+  TERM_D_CP,
   TERM_D_ID,
-  TERM_D_OFF,
+  TERM_D_LEN,
+  TERM_E_KIND,
   TERM_K_BLOB,
-  TERM_K_OFF,
+  TERM_K_CP,
+  TERM_K_LEN,
   TERM_R,
   TERM_S_BLOB,
+  TERM_S_CP,
   TERM_S_ID,
-  TERM_S_OFF,
+  TERM_S_LEN,
 } from "./generated/bangs-trie.js";
 import {
   FRECENCY_BOOST_CAP,
   FRECENCY_BOOST_MULTIPLIER,
   JSON_HEADERS,
+  SITE_SUGGESTION_SHAPE,
   TOP_K,
 } from "./shared/constants";
 
@@ -29,17 +46,6 @@ interface Candidate {
 const JSON_HEADERS_INIT = { headers: JSON_HEADERS };
 const EMPTY_CANDIDATES: Candidate[] = [];
 
-export const NODE_EDGE_START = 0;
-export const NODE_EDGE_COUNT = 1;
-export const NODE_TERMINAL_INDEX = 2;
-export const NODE_MAX_RELEVANCE = 3;
-export const NODE_STRIDE = 4;
-
-export const EDGE_LABEL_START = 0;
-export const EDGE_LABEL_LENGTH = 1;
-export const EDGE_CHILD_INDEX = 2;
-export const EDGE_STRIDE = 3;
-
 const TERM_K_CACHE = new Array<string | undefined>(TERM_R.length);
 const EMPTY_DETAIL: Record<string, string> = {};
 export interface BangSuggestionMeta {
@@ -47,13 +53,24 @@ export interface BangSuggestionMeta {
   label: string;
   url: string;
 }
+
 const TERM_META_CACHE = new Array<BangSuggestionMeta | undefined>(
   TERM_R.length
 );
+const DOMAIN_CACHE = new Array<string | undefined>(TERM_D_LEN.length);
+const ENDPOINT_PREFIX_CACHE = new Array<string | undefined>(
+  ENDPOINT_SHAPE.length
+);
+const ENDPOINT_SUFFIX_CACHE = new Array<string | undefined>(
+  ENDPOINT_SHAPE.length
+);
+type PackedLengths = Uint8Array | Uint16Array | Uint32Array;
+const PACKED_STRING_CHECKPOINT_SHIFT = 5;
 
 function readPackedStringCached(
   blob: string,
-  offsets: Int32Array,
+  lengths: PackedLengths,
+  checkpoints: PackedLengths,
   cache: (string | undefined)[],
   index: number
 ): string {
@@ -61,13 +78,51 @@ function readPackedStringCached(
   if (cached !== undefined) {
     return cached;
   }
-  const value = blob.slice(offsets[index], offsets[index + 1]);
+  const block = index >> PACKED_STRING_CHECKPOINT_SHIFT;
+  let start = checkpoints[block];
+  const blockStart = block << PACKED_STRING_CHECKPOINT_SHIFT;
+  for (let i = blockStart; i < index; i++) {
+    start += lengths[i];
+  }
+  const value = blob.slice(start, start + lengths[index]);
   cache[index] = value;
   return value;
 }
 
+function readPackedString(
+  blob: string,
+  lengths: PackedLengths,
+  checkpoints: PackedLengths,
+  index: number
+): string {
+  const block = index >> PACKED_STRING_CHECKPOINT_SHIFT;
+  let start = checkpoints[block];
+  const blockStart = block << PACKED_STRING_CHECKPOINT_SHIFT;
+  for (let i = blockStart; i < index; i++) {
+    start += lengths[i];
+  }
+  return blob.slice(start, start + lengths[index]);
+}
+
 function readTerminalTrigger(index: number): string {
-  return readPackedStringCached(TERM_K_BLOB, TERM_K_OFF, TERM_K_CACHE, index);
+  return readPackedStringCached(
+    TERM_K_BLOB,
+    TERM_K_LEN,
+    TERM_K_CP,
+    TERM_K_CACHE,
+    index
+  );
+}
+
+function readTerminalDomain(index: number): string {
+  const domainId = TERM_D_ID[index];
+  return readPackedStringCached(
+    TERM_D_BLOB,
+    TERM_D_LEN,
+    TERM_D_CP,
+    DOMAIN_CACHE,
+    domainId
+  );
 }
 
 function readTerminalMeta(index: number): BangSuggestionMeta {
@@ -75,13 +130,9 @@ function readTerminalMeta(index: number): BangSuggestionMeta {
   if (cached !== undefined) {
     return cached;
   }
-  const domainId = TERM_D_ID[index];
   const nameId = TERM_S_ID[index];
-  const domain = TERM_D_BLOB.slice(
-    TERM_D_OFF[domainId],
-    TERM_D_OFF[domainId + 1]
-  );
-  const name = TERM_S_BLOB.slice(TERM_S_OFF[nameId], TERM_S_OFF[nameId + 1]);
+  const domain = readTerminalDomain(index);
+  const name = readPackedString(TERM_S_BLOB, TERM_S_LEN, TERM_S_CP, nameId);
   const label = `${name} \u2014 ${domain}`;
   const url = `https://${domain}`;
   const meta = {
@@ -93,22 +144,19 @@ function readTerminalMeta(index: number): BangSuggestionMeta {
   return meta;
 }
 
-export function findBangSuggestionMeta(
-  trigger: string
-): BangSuggestionMeta | null {
+function findTerminalIndex(trigger: string): number {
   let node = ROOT;
   let pos = 0;
 
   while (pos < trigger.length) {
-    const nodeOff = node * NODE_STRIDE;
-    const edgeStart = NODES[nodeOff + NODE_EDGE_START];
-    const edgeCount = NODES[nodeOff + NODE_EDGE_COUNT];
+    const edgeStart = NODE_EDGE_STARTS[node];
+    const edgeCount = NODE_EDGE_COUNTS[node];
     let child = -1;
 
     for (let i = 0; i < edgeCount; i++) {
-      const edgeOff = (edgeStart + i) * EDGE_STRIDE;
-      const labelStart = EDGES[edgeOff + EDGE_LABEL_START];
-      const labelLength = EDGES[edgeOff + EDGE_LABEL_LENGTH];
+      const edge = edgeStart + i;
+      const labelStart = EDGE_LABEL_STARTS[edge];
+      const labelLength = EDGE_LABEL_LENGTHS[edge];
       if (
         LABELS.charCodeAt(labelStart) !== trigger.charCodeAt(pos) ||
         pos + labelLength > trigger.length
@@ -124,21 +172,79 @@ export function findBangSuggestionMeta(
         match++;
       }
       if (match !== labelLength) {
-        return null;
+        return -1;
       }
-      child = EDGES[edgeOff + EDGE_CHILD_INDEX];
+      child = EDGE_CHILDREN[edge];
       pos += labelLength;
       break;
     }
 
     if (child < 0) {
-      return null;
+      return -1;
     }
     node = child;
   }
 
-  const terminalIndex = NODES[node * NODE_STRIDE + NODE_TERMINAL_INDEX];
+  return NODE_TERMINALS[node] - 1;
+}
+
+export function findBangSuggestionMeta(
+  trigger: string
+): BangSuggestionMeta | null {
+  const terminalIndex = findTerminalIndex(trigger);
   return terminalIndex < 0 ? null : readTerminalMeta(terminalIndex);
+}
+
+export function findBangSuggestionTerminal(trigger: string): number {
+  return findTerminalIndex(trigger);
+}
+
+export function resolveSiteSuggestionUrl(
+  terminalIndex: number,
+  encodedQuery: string
+): string | null {
+  const kind = TERM_E_KIND[terminalIndex];
+  if (kind === 0) {
+    return null;
+  }
+  if (kind < 3) {
+    const path = kind === 1 ? "/" : "/w/";
+    return `https://${readTerminalDomain(terminalIndex)}${path}api.php?action=opensearch&search=${encodedQuery}&format=json&limit=8`;
+  }
+
+  const index = kind - 3;
+  const prefix = readPackedStringCached(
+    ENDPOINT_P_BLOB,
+    ENDPOINT_P_LEN,
+    ENDPOINT_P_CP,
+    ENDPOINT_PREFIX_CACHE,
+    index
+  );
+  const suffix = readPackedStringCached(
+    ENDPOINT_S_BLOB,
+    ENDPOINT_S_LEN,
+    ENDPOINT_S_CP,
+    ENDPOINT_SUFFIX_CACHE,
+    index
+  );
+  return prefix + encodedQuery + suffix;
+}
+
+export function siteSuggestionShape(terminalIndex: number): number {
+  const kind = TERM_E_KIND[terminalIndex];
+  return kind < 3 ? SITE_SUGGESTION_SHAPE.opensearch : ENDPOINT_SHAPE[kind - 3];
+}
+
+export function addBangSuggestionMetaForTerminal(
+  payload: unknown[],
+  completionCount: number,
+  terminalIndex: number
+): void {
+  addBangSuggestionMeta(
+    payload,
+    completionCount,
+    readTerminalMeta(terminalIndex)
+  );
 }
 
 function writeBangSuggestionMeta(
@@ -219,15 +325,14 @@ function walkPrefix(partial: string): [number, string] | null {
 
   while (pos < partial.length) {
     let found = false;
-    const nodeOff = node * NODE_STRIDE;
-    const edgeStart = NODES[nodeOff + NODE_EDGE_START];
-    const edgeCount = NODES[nodeOff + NODE_EDGE_COUNT];
+    const edgeStart = NODE_EDGE_STARTS[node];
+    const edgeCount = NODE_EDGE_COUNTS[node];
 
     for (let i = 0; i < edgeCount; i++) {
-      const edgeOff = (edgeStart + i) * EDGE_STRIDE;
-      const edgeLabelStart = EDGES[edgeOff + EDGE_LABEL_START];
-      const edgeLabelLen = EDGES[edgeOff + EDGE_LABEL_LENGTH];
-      const child = EDGES[edgeOff + EDGE_CHILD_INDEX];
+      const edge = edgeStart + i;
+      const edgeLabelStart = EDGE_LABEL_STARTS[edge];
+      const edgeLabelLen = EDGE_LABEL_LENGTHS[edge];
+      const child = EDGE_CHILDREN[edge];
       const limit = Math.min(partial.length - pos, edgeLabelLen);
       let match = 0;
       while (
@@ -321,8 +426,7 @@ function topK(
 
   while (stackLen > 0) {
     const node = dfsStack[--stackLen];
-    const nodeOff = node * NODE_STRIDE;
-    const terminalIndex = NODES[nodeOff + NODE_TERMINAL_INDEX];
+    const terminalIndex = NODE_TERMINALS[node] - 1;
 
     if (terminalIndex >= 0) {
       let trigger: string | undefined;
@@ -368,13 +472,12 @@ function topK(
       }
     }
 
-    const edgeStart = NODES[nodeOff + NODE_EDGE_START];
-    const edgeCount = NODES[nodeOff + NODE_EDGE_COUNT];
+    const edgeStart = NODE_EDGE_STARTS[node];
+    const edgeCount = NODE_EDGE_COUNTS[node];
 
     for (let i = edgeCount - 1; i >= 0; i--) {
-      const edgeOff = (edgeStart + i) * EDGE_STRIDE;
-      const child = EDGES[edgeOff + EDGE_CHILD_INDEX];
-      const childMaxRelevance = NODES[child * NODE_STRIDE + NODE_MAX_RELEVANCE];
+      const child = EDGE_CHILDREN[edgeStart + i];
+      const childMaxRelevance = NODE_MAX_RELEVANCE[child];
       if (resultLen >= TOP_K && childMaxRelevance + boostCap <= threshold) {
         break;
       }

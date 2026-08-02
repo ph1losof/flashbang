@@ -15,6 +15,7 @@ import { idbWrap, openDB } from "../shared/idb";
 import { compileSnapTarget, type SnapTargetParts } from "../shared/snap-target";
 import { resolveTriggerPrefixes } from "../shared/trigger-prefix";
 import { lookupBang } from "./bang-data";
+import { defaultRedirectSettings as createDefaultRedirectSettings } from "./default-redirect-settings";
 import {
   type CustomUrlParts,
   compileTriggerSyntax,
@@ -22,6 +23,10 @@ import {
   type TriggerSyntax,
   type UrlParts,
 } from "./redirect";
+
+export function defaultRedirectSettings(): RedirectSettings {
+  return createDefaultRedirectSettings();
+}
 
 const SNAPSHOT_VERSION = 2;
 
@@ -69,14 +74,6 @@ function attachSnapTarget(
   snap: SnapTargetParts | null
 ): CustomUrlParts {
   return snap ? ([...entry, snap] as CustomUrlParts) : entry;
-}
-
-export function defaultRedirectSettings(): RedirectSettings {
-  return {
-    defaultUrl: splitUrl(DEFAULT_URL),
-    custom: Object.create(null),
-    luckyUrl: splitUrl(DEFAULT_LUCKY_URL),
-  };
 }
 
 function isUrlParts(value: unknown): value is UrlParts {
@@ -167,6 +164,10 @@ function compileRedirectSettingsSnapshot(
         : null,
     ...(syntax ? { syntax } : {}),
   };
+}
+
+export function defaultRedirectSettingsSnapshot(): RedirectSettingsSnapshot {
+  return compileRedirectSettingsSnapshot([], []);
 }
 
 export function materializeRedirectSettings(

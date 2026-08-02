@@ -14,6 +14,8 @@ import { type BuildNode, buildRadixTrie } from "../src/shared/trie";
 import { installManagedFetchSpy, requestWithCookie } from "./helpers/http";
 
 interface TestBang {
+  e?: { shape: number; url: string };
+  mw?: "/" | "/w/";
   k: string;
   s: string;
   d: string;
@@ -21,18 +23,39 @@ interface TestBang {
 }
 
 interface FlatTrieFixture {
-  EDGES: Int32Array;
+  ENDPOINT_SHAPE: Uint8Array;
+  ENDPOINT_P_BLOB: string;
+  ENDPOINT_P_CP: Uint32Array;
+  ENDPOINT_P_LEN: Uint32Array;
+  ENDPOINT_P_OFF: Int32Array;
+  ENDPOINT_S_BLOB: string;
+  ENDPOINT_S_CP: Uint32Array;
+  ENDPOINT_S_LEN: Uint32Array;
+  ENDPOINT_S_OFF: Int32Array;
+  EDGE_CHILDREN: Uint32Array;
+  EDGE_LABEL_LENGTHS: Uint32Array;
+  EDGE_LABEL_STARTS: Uint32Array;
   LABELS: string;
-  NODES: Int32Array;
+  NODE_EDGE_COUNTS: Uint32Array;
+  NODE_EDGE_STARTS: Uint32Array;
+  NODE_MAX_RELEVANCE: Uint32Array;
+  NODE_TERMINALS: Uint32Array;
   ROOT: number;
   TERM_D_BLOB: string;
+  TERM_D_CP: Uint32Array;
   TERM_D_ID: Uint8Array;
+  TERM_D_LEN: Uint32Array;
   TERM_D_OFF: Int32Array;
+  TERM_E_KIND: Uint8Array;
   TERM_K_BLOB: string;
+  TERM_K_CP: Uint32Array;
+  TERM_K_LEN: Uint32Array;
   TERM_K_OFF: Int32Array;
-  TERM_R: Int32Array;
+  TERM_R: Uint32Array;
   TERM_S_BLOB: string;
+  TERM_S_CP: Uint32Array;
   TERM_S_ID: Uint8Array;
+  TERM_S_LEN: Uint32Array;
   TERM_S_OFF: Int32Array;
 }
 
@@ -58,7 +81,11 @@ function buildTestTrie(bangs: TestBang[]): FlatTrieFixture {
   const termK: string[] = [];
   const termS: string[] = [];
   const termD: string[] = [];
+  const termE: number[] = [];
   const termR: number[] = [];
+  const endpointPrefixes: string[] = [];
+  const endpointSuffixes: string[] = [];
+  const endpointShapes: number[] = [];
 
   function allocNode(): number {
     const idx = nodes.length / NODE_STRIDE;
@@ -92,6 +119,17 @@ function buildTestTrie(bangs: TestBang[]): FlatTrieFixture {
       termK.push(t.k);
       termS.push(t.s);
       termD.push(t.d);
+      if (t.e) {
+        const placeholder = t.e.url.indexOf("{}");
+        endpointPrefixes.push(t.e.url.substring(0, placeholder));
+        endpointSuffixes.push(t.e.url.substring(placeholder + 2));
+        endpointShapes.push(t.e.shape);
+        termE.push(endpointPrefixes.length + 2);
+      } else if (t.mw) {
+        termE.push(t.mw === "/" ? 1 : 2);
+      } else {
+        termE.push(0);
+      }
       termR.push(t.r);
     }
 
@@ -110,6 +148,7 @@ function buildTestTrie(bangs: TestBang[]): FlatTrieFixture {
 
   function packStrings(items: string[]): {
     blob: string;
+    checkpoints: Uint32Array;
     offsets: Int32Array;
   } {
     const offsets = new Int32Array(items.length + 1);
@@ -118,41 +157,142 @@ function buildTestTrie(bangs: TestBang[]): FlatTrieFixture {
       cursor += items[i].length;
       offsets[i + 1] = cursor;
     }
-    return { blob: items.join(""), offsets };
+    const checkpoints = Uint32Array.from(
+      { length: Math.ceil(items.length / 32) },
+      (_, index) => offsets[index * 32]
+    );
+    return { blob: items.join(""), checkpoints, offsets };
+  }
+
+  function packedLengths(offsets: Int32Array): Uint32Array {
+    return Uint32Array.from(
+      { length: offsets.length - 1 },
+      (_, index) => offsets[index + 1] - offsets[index]
+    );
   }
 
   const packedK = packStrings(termK);
   const packedS = packStrings(termS);
   const packedD = packStrings(termD);
+  const packedEndpointPrefixes = packStrings(endpointPrefixes);
+  const packedEndpointSuffixes = packStrings(endpointSuffixes);
+  const nodeCount = nodes.length / NODE_STRIDE;
+  const edgeCount = edges.length / EDGE_STRIDE;
+  const nodeEdgeStarts = new Uint32Array(nodeCount);
+  const nodeEdgeCounts = new Uint32Array(nodeCount);
+  const nodeTerminals = new Uint32Array(nodeCount);
+  const nodeMaxRelevance = new Uint32Array(nodeCount);
+  const edgeLabelStarts = new Uint32Array(edgeCount);
+  const edgeLabelLengths = new Uint32Array(edgeCount);
+  const edgeChildren = new Uint32Array(edgeCount);
+  for (let i = 0; i < nodeCount; i++) {
+    const offset = i * NODE_STRIDE;
+    nodeEdgeStarts[i] = nodes[offset + NODE_EDGE_START];
+    nodeEdgeCounts[i] = nodes[offset + NODE_EDGE_COUNT];
+    nodeTerminals[i] = nodes[offset + NODE_TERMINAL_INDEX] + 1;
+    nodeMaxRelevance[i] = nodes[offset + NODE_MAX_RELEVANCE];
+  }
+  for (let i = 0; i < edgeCount; i++) {
+    const offset = i * EDGE_STRIDE;
+    edgeLabelStarts[i] = edges[offset];
+    edgeLabelLengths[i] = edges[offset + 1];
+    edgeChildren[i] = edges[offset + EDGE_CHILD_INDEX];
+  }
 
   return {
+    ENDPOINT_SHAPE: Uint8Array.from(endpointShapes),
+    ENDPOINT_P_BLOB: packedEndpointPrefixes.blob,
+    ENDPOINT_P_CP: packedEndpointPrefixes.checkpoints,
+    ENDPOINT_P_LEN: packedLengths(packedEndpointPrefixes.offsets),
+    ENDPOINT_P_OFF: packedEndpointPrefixes.offsets,
+    ENDPOINT_S_BLOB: packedEndpointSuffixes.blob,
+    ENDPOINT_S_CP: packedEndpointSuffixes.checkpoints,
+    ENDPOINT_S_LEN: packedLengths(packedEndpointSuffixes.offsets),
+    ENDPOINT_S_OFF: packedEndpointSuffixes.offsets,
     LABELS: labels,
-    NODES: Int32Array.from(nodes),
-    EDGES: Int32Array.from(edges),
+    EDGE_CHILDREN: edgeChildren,
+    EDGE_LABEL_LENGTHS: edgeLabelLengths,
+    EDGE_LABEL_STARTS: edgeLabelStarts,
+    NODE_EDGE_COUNTS: nodeEdgeCounts,
+    NODE_EDGE_STARTS: nodeEdgeStarts,
+    NODE_MAX_RELEVANCE: nodeMaxRelevance,
+    NODE_TERMINALS: nodeTerminals,
     TERM_K_BLOB: packedK.blob,
+    TERM_K_CP: packedK.checkpoints,
+    TERM_K_LEN: packedLengths(packedK.offsets),
     TERM_K_OFF: packedK.offsets,
     TERM_S_BLOB: packedS.blob,
+    TERM_S_CP: packedS.checkpoints,
+    TERM_S_LEN: packedLengths(packedS.offsets),
     TERM_S_ID: Uint8Array.from(termS, (_, index) => index),
     TERM_S_OFF: packedS.offsets,
     TERM_D_BLOB: packedD.blob,
+    TERM_D_CP: packedD.checkpoints,
+    TERM_D_LEN: packedLengths(packedD.offsets),
     TERM_D_ID: Uint8Array.from(termD, (_, index) => index),
     TERM_D_OFF: packedD.offsets,
-    TERM_R: Int32Array.from(termR),
+    TERM_E_KIND: Uint8Array.from(termE),
+    TERM_R: Uint32Array.from(termR),
     ROOT: rootIdx,
   };
 }
 
 const TEST_BANGS: TestBang[] = [
-  { k: "b", s: "Bing", d: "www.bing.com", r: 300 },
-  { k: "brave", s: "Brave", d: "search.brave.com", r: 200 },
-  { k: "ddg", s: "DuckDuckGo", d: "duckduckgo.com", r: 800 },
-  { k: "g", s: "Google", d: "www.google.com", r: 1000 },
-  { k: "gh", s: "GitHub", d: "github.com", r: 500 },
+  {
+    k: "b",
+    s: "Bing",
+    d: "www.bing.com",
+    r: 300,
+    e: { shape: 1, url: "https://shape.test/amazon?q={}" },
+  },
+  {
+    k: "brave",
+    s: "Brave",
+    d: "search.brave.com",
+    r: 200,
+    e: { shape: 2, url: "https://shape.test/npms?q={}" },
+  },
+  {
+    k: "ddg",
+    s: "DuckDuckGo",
+    d: "duckduckgo.com",
+    r: 800,
+    e: { shape: 3, url: "https://shape.test/reddit?q={}" },
+  },
+  {
+    k: "g",
+    s: "Google",
+    d: "www.google.com",
+    r: 1000,
+    e: { shape: 4, url: "https://shape.test/crates?q={}" },
+  },
+  {
+    k: "gh",
+    s: "GitHub",
+    d: "github.com",
+    r: 500,
+    e: {
+      shape: 5,
+      url: "https://api.github.com/search/repositories?q={}&per_page=8",
+    },
+  },
   { k: "ghi", s: "GitHub Issues", d: "github.com", r: 100 },
   { k: "ghp", s: "GitHub PRs", d: "github.com", r: 50 },
   { k: "mdn", s: "MDN", d: "developer.mozilla.org", r: 400 },
-  { k: "w", s: "Wikipedia", d: "en.wikipedia.org", r: 900 },
-  { k: "yt", s: "YouTube", d: "www.youtube.com", r: 700 },
+  {
+    k: "w",
+    s: "Wikipedia",
+    d: "en.wikipedia.org",
+    r: 900,
+    mw: "/w/",
+  },
+  {
+    k: "yt",
+    s: "YouTube",
+    d: "www.youtube.com",
+    r: 700,
+    e: { shape: 0, url: "https://shape.test/opensearch?q={}" },
+  },
 ];
 
 const TEST_TRIE = buildTestTrie(TEST_BANGS);
@@ -182,8 +322,14 @@ const {
   parseSettingsFromRawUrlWithCleanup,
   suggest,
 } = await import("../src/suggest");
-const { profileTopKCount, profileWalkPrefix, responseFromCandidates } =
-  await import("../src/suggest-bang");
+const {
+  findBangSuggestionTerminal,
+  profileTopKCount,
+  profileWalkPrefix,
+  resolveSiteSuggestionUrl,
+  responseFromCandidates,
+  siteSuggestionShape,
+} = await import("../src/suggest-bang");
 
 const fetchSpy = installManagedFetchSpy();
 
@@ -422,6 +568,21 @@ describe("suggest parser edge cases", () => {
 });
 
 describe("suggest trie edge cases", () => {
+  test("resolves compact curated and MediaWiki endpoint kinds", () => {
+    const github = findBangSuggestionTerminal("gh");
+    const wikipedia = findBangSuggestionTerminal("w");
+    expect(github).toBeGreaterThanOrEqual(0);
+    expect(wikipedia).toBeGreaterThanOrEqual(0);
+    expect(resolveSiteSuggestionUrl(github, "react%20native")).toBe(
+      "https://api.github.com/search/repositories?q=react%20native&per_page=8"
+    );
+    expect(siteSuggestionShape(github)).toBe(5);
+    expect(resolveSiteSuggestionUrl(wikipedia, "rust")).toBe(
+      "https://en.wikipedia.org/w/api.php?action=opensearch&search=rust&format=json&limit=8"
+    );
+    expect(siteSuggestionShape(wikipedia)).toBe(0);
+  });
+
   test("profiles prefix walks and rejects a partial compressed-edge mismatch", () => {
     expect(profileWalkPrefix("brx")).toBeNull();
     const root = profileWalkPrefix("");
@@ -805,15 +966,28 @@ describe("readSuggestQueryParams", () => {
       readSuggestQueryParams(
         "http://localhost/suggest?np=~&q=%24gh&x=1&bp=%24&sp=ddg"
       )
-    ).toEqual(["$gh", "ddg", "$", "~"]);
+    ).toEqual(["$gh", "ddg", "$", "~", false]);
   });
 
   test("returns first values and preserves missing overrides", () => {
     expect(
       readSuggestQueryParams(
-        "http://localhost/suggest?q=first&q=second&sp=ddg&sp=bing"
+        "http://localhost/suggest?q=first&q=second&sp=ddg&sp=bing&site_specific_forward=1"
       )
-    ).toEqual(["first", "ddg", null, null]);
+    ).toEqual(["first", "ddg", null, null, true]);
+  });
+
+  test("keeps first-value semantics and decodes the opt-in flag", () => {
+    expect(
+      readSuggestQueryParams(
+        "http://localhost/suggest?q=x&site_specific_forward=0&site_specific_forward=1"
+      )[4]
+    ).toBe(false);
+    expect(
+      readSuggestQueryParams(
+        "http://localhost/suggest?q=x&site_specific_forward=%31"
+      )[4]
+    ).toBe(true);
   });
 });
 
@@ -1041,6 +1215,108 @@ describe("frecency boosts", () => {
 });
 
 describe("provider proxying — via suggest()", () => {
+  test("normalizes every site response shape with bounded output", async () => {
+    const cases: Array<[string, unknown]> = [
+      ["yt", ["q", ["one", null, "two"]]],
+      ["b", { suggestions: [{ value: "one" }, {}, { value: "two" }] }],
+      [
+        "brave",
+        [{ package: { name: "one" } }, {}, { package: { name: "two" } }],
+      ],
+      [
+        "ddg",
+        {
+          data: {
+            children: [
+              { data: { display_name: "one" } },
+              { data: {} },
+              { data: { display_name: "two" } },
+            ],
+          },
+        },
+      ],
+      ["g", { crates: [{ name: "one" }, {}, { name: "two" }] }],
+      ["gh", { items: [{ full_name: "one" }, {}, { title: "two" }] }],
+    ];
+
+    for (const [trigger, body] of cases) {
+      fetchSpy.mockResolvedValueOnce(Response.json(body));
+      const response = await suggest(
+        `!${trigger} q`,
+        defaultSettings,
+        undefined,
+        false,
+        true
+      );
+      expect((await response.json())[1]).toEqual([
+        `!${trigger} one`,
+        `!${trigger} two`,
+      ]);
+    }
+
+    fetchSpy.mockResolvedValueOnce(
+      Response.json(["q", Array.from({ length: 1000 }, (_, i) => `v${i}`)])
+    );
+    const bounded = await suggest(
+      "!yt q",
+      defaultSettings,
+      undefined,
+      false,
+      true
+    );
+    expect((await bounded.json())[1]).toHaveLength(TOP_K);
+  });
+
+  test("site-specific forwarding uses the completed bang's provider", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      Response.json({
+        items: [
+          { full_name: "facebook/react" },
+          { full_name: "reactjs/react.dev" },
+        ],
+      })
+    );
+
+    const r = await suggest(
+      "!gh react",
+      { ...defaultSettings, provider: "google" },
+      undefined,
+      false,
+      true
+    );
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://api.github.com/search/repositories?q=react&per_page=8",
+      {
+        headers: { "User-Agent": "flashbang-suggest/1.0" },
+        signal: expect.any(AbortSignal),
+      }
+    );
+    expect(await r.json()).toEqual(
+      githubRichResponse("!gh react", [
+        "!gh facebook/react",
+        "!gh reactjs/react.dev",
+      ])
+    );
+  });
+
+  test("site-specific forwarding falls back to the selected provider", async () => {
+    fetchSpy.mockResolvedValueOnce(Response.json(["api", ["api reference"]]));
+
+    const r = await suggest(
+      "!mdn api",
+      { ...defaultSettings, provider: "google" },
+      undefined,
+      false,
+      true
+    );
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://www.google.com/complete/search?client=firefox&channel=fen&q=api"
+    );
+    expect((await r.json())[1]).toEqual(["!mdn api reference"]);
+  });
+
   test("provider=google → fetches google suggest URL", async () => {
     fetchSpy.mockResolvedValueOnce(Response.json(["cats", ["cats and dogs"]]));
     const r = await suggest("cats", {

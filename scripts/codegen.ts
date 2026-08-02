@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import { mkdir, rm } from "node:fs/promises";
 import { $ } from "bun";
+import { BANG_SHARD_COUNT, bangShardIndex } from "../src/shared/bang-shards";
 import {
   CAPTURE_ENCODE_PERCENT,
   CAPTURE_ENCODE_PLUS,
@@ -9,6 +10,10 @@ import {
   validateCaptureBang,
   validateSimpleBangUrl,
 } from "../src/shared/capture-template";
+import {
+  SITE_SUGGESTION_SHAPE,
+  type SiteSuggestionShape,
+} from "../src/shared/constants";
 import { hashFNV1a } from "../src/shared/hash";
 import {
   compileSnapTarget,
@@ -25,6 +30,16 @@ interface Bang {
   snap?: string;
   trigger: string;
   url: string;
+}
+
+export interface CuratedSuggestionSite {
+  shape: SiteSuggestionShape;
+  url: string;
+}
+
+export interface SuggestionSiteRegistry {
+  curated: Readonly<Record<string, CuratedSuggestionSite>>;
+  mediawiki: Readonly<Record<string, "/" | "/w/">>;
 }
 
 interface RawDdgEntry {
@@ -60,16 +75,17 @@ const DDG_BANGS_PATH = `${DATA_DIR}/ddg.json`;
 const KAGI_BANGS_PATH = `${DATA_DIR}/kagi.json`;
 const CUSTOM_BANGS_PATH = `${DATA_DIR}/custom-bangs.json`;
 const MERGED_BANGS_PATH = `${DATA_DIR}/bangs.json`;
+const SUGGEST_SITES_PATH = `${DATA_DIR}/suggest-sites.json`;
 const GENERATED_OUT_DIR = "src/generated";
 const HOT_BANG_LIMIT = 24;
 const BANG_BINARY_MAGIC = 0x31424246;
-const BANG_BINARY_VERSION = 7;
+const BANG_BINARY_VERSION = 8;
 
 const DDG_SOURCE_URL = "https://duckduckgo.com/bang.js";
 const KAGI_SOURCE_URL =
   "https://raw.githubusercontent.com/kagisearch/bangs/main/data/bangs.json";
 
-async function generatedBangBinaryIsCurrent(): Promise<boolean> {
+async function generatedBangDataIsCurrent(): Promise<boolean> {
   const header = await Bun.file(GENERATED_BANG_DATA_FILES[0])
     .slice(0, 8)
     .arrayBuffer();
@@ -77,7 +93,14 @@ async function generatedBangBinaryIsCurrent(): Promise<boolean> {
     return false;
   }
   const words = new Uint32Array(header);
-  return words[0] === BANG_BINARY_MAGIC && words[1] === BANG_BINARY_VERSION;
+  if (words[0] !== BANG_BINARY_MAGIC || words[1] !== BANG_BINARY_VERSION) {
+    return false;
+  }
+  const trie = Bun.file("src/generated/bangs-trie.js");
+  const tail = await trie
+    .slice(Math.max(0, trie.size - 2048), trie.size)
+    .text();
+  return tail.includes("export const TRIE_SCHEMA=3;");
 }
 
 export async function ensureGeneratedBangData(
@@ -90,14 +113,14 @@ export async function ensureGeneratedBangData(
     }
   }
 
-  if (missing.length === 0 && (await generatedBangBinaryIsCurrent())) {
+  if (missing.length === 0 && (await generatedBangDataIsCurrent())) {
     return;
   }
 
   const mode = fromMerged ? " --from-merged" : "";
   const reason = missing.length
     ? `missing (${missing.join(", ")})`
-    : "uses an outdated binary format";
+    : "uses an outdated generated-data schema";
   console.warn(`Generated bang data ${reason}. Running codegen${mode}...`);
 
   if (fromMerged) {
@@ -113,8 +136,8 @@ export async function ensureGeneratedBangData(
       );
     }
   }
-  if (!(await generatedBangBinaryIsCurrent())) {
-    throw new Error("Generated bang binary format is outdated");
+  if (!(await generatedBangDataIsCurrent())) {
+    throw new Error("Generated bang data schema is outdated");
   }
 }
 
@@ -547,30 +570,6 @@ function buildCheckpoints(
   return checkpoints;
 }
 
-function buildPairLocalOffsets(
-  lengths: Uint8Array | Uint16Array,
-  lengthMask = 0xffff
-): Uint8Array {
-  const offsets = new Uint8Array(Math.ceil(lengths.length / 2));
-  let position = 0;
-  for (let i = 0; i < lengths.length; i += 2) {
-    if (i % BANG_CHECKPOINT_SIZE === 0) {
-      position = 0;
-    }
-    if (position > 0xff) {
-      throw new Error(
-        `Binary bang trigger checkpoint block requires offset <= 255, got ${position}`
-      );
-    }
-    offsets[i >> 1] = position;
-    position += lengths[i] & lengthMask;
-    if (i + 1 < lengths.length) {
-      position += lengths[i + 1] & lengthMask;
-    }
-  }
-  return offsets;
-}
-
 interface PackedBangData {
   entryCount: number;
   prefixIds: number[];
@@ -693,29 +692,12 @@ export function generateBinary(bangs: readonly Bang[]): Uint8Array {
     mph.slotToEntry,
     (entry) => packed.suffixIdsPlusOne[entry]
   );
-  const triggerBlob = packBlob(triggers);
   const encoder = new TextEncoder();
-  const triggerBytes = encoder.encode(triggerBlob.blob);
   const suffixBytes = encoder.encode(packed.suffixBlob.blob);
-  const triggerByteLengths = triggers.map(
-    (trigger) => encoder.encode(trigger).byteLength
+  const fingerprints = Uint16Array.from(
+    triggers,
+    (trigger) => hashFNV1a(trigger) >>> 16
   );
-  const triggerMaxLength = Math.max(...triggerByteLengths);
-  if (triggerMaxLength > 0x7fff) {
-    throw new Error(
-      `Binary bang format requires encoded trigger length <= 32767, got ${triggerMaxLength}`
-    );
-  }
-  const triggerLengthWidth = triggerMaxLength <= 0x7f ? 1 : 2;
-  const nonAsciiFlag = triggerLengthWidth === 1 ? 0x80 : 0x8000;
-  const triggerLengths =
-    triggerLengthWidth === 1
-      ? Uint8Array.from(triggerByteLengths, (length, index) =>
-          length === triggers[index].length ? length : length | nonAsciiFlag
-        )
-      : Uint16Array.from(triggerByteLengths, (length, index) =>
-          length === triggers[index].length ? length : length | nonAsciiFlag
-        );
   // URL blobs stay byte-backed in the worker and are decoded one entry at a time.
   const prefixPayloads = new Array<string>(packed.uniquePrefixes.length);
   const prefixLengths = Uint16Array.from(
@@ -757,23 +739,13 @@ export function generateBinary(bangs: readonly Bang[]): Uint8Array {
   });
   const prefixIds = Uint16Array.from(reorderedPrefixIds);
   const suffixIds = Uint16Array.from(reorderedSuffixIds);
-  const triggerLengthMask = triggerLengthWidth === 1 ? 0x7f : 0x7fff;
-  const triggerCheckpoints = buildCheckpoints(
-    triggerLengths,
-    triggerLengthMask
-  );
-  const triggerLocalOffsets = buildPairLocalOffsets(
-    triggerLengths,
-    triggerLengthMask
-  );
   const prefixCheckpoints = buildCheckpoints(prefixLengths, PREFIX_LENGTH_MASK);
   const suffixCheckpoints = buildCheckpoints(suffixLengths);
 
   const headerWords = 13;
   const headerBytes = headerWords * Uint32Array.BYTES_PER_ELEMENT;
   let numericEnd = headerBytes + mph.displacements.byteLength;
-  numericEnd += triggerLengths.byteLength;
-  numericEnd += triggerLocalOffsets.byteLength;
+  numericEnd += fingerprints.byteLength;
   numericEnd = align2(numericEnd);
   numericEnd +=
     prefixLengths.byteLength +
@@ -781,25 +753,19 @@ export function generateBinary(bangs: readonly Bang[]): Uint8Array {
     prefixIds.byteLength +
     suffixIds.byteLength;
   numericEnd = align4(numericEnd);
-  numericEnd +=
-    triggerCheckpoints.byteLength +
-    prefixCheckpoints.byteLength +
-    suffixCheckpoints.byteLength;
+  numericEnd += prefixCheckpoints.byteLength + suffixCheckpoints.byteLength;
   const totalBytes =
-    numericEnd +
-    triggerBytes.byteLength +
-    prefixBytes.byteLength +
-    suffixBytes.byteLength;
+    numericEnd + prefixBytes.byteLength + suffixBytes.byteLength;
   const output = new Uint8Array(new ArrayBuffer(totalBytes));
   new Uint32Array(output.buffer, 0, headerWords).set([
     BANG_BINARY_MAGIC,
     BANG_BINARY_VERSION,
     packed.entryCount,
     mph.displacements.length,
-    triggerLengths.BYTES_PER_ELEMENT,
+    fingerprints.BYTES_PER_ELEMENT,
     packed.uniquePrefixes.length,
     packed.uniqueSuffixes.length,
-    triggerBytes.byteLength,
+    0,
     prefixBytes.byteLength,
     suffixBytes.byteLength,
     numericEnd,
@@ -809,23 +775,29 @@ export function generateBinary(bangs: readonly Bang[]): Uint8Array {
 
   let offset = headerBytes;
   offset = copyTypedArray(output, offset, mph.displacements);
-  offset = copyTypedArray(output, offset, triggerLengths);
-  offset = copyTypedArray(output, offset, triggerLocalOffsets);
+  offset = copyTypedArray(output, offset, fingerprints);
   offset = align2(offset);
   offset = copyTypedArray(output, offset, prefixLengths);
   offset = copyTypedArray(output, offset, suffixLengths);
   offset = copyTypedArray(output, offset, prefixIds);
   offset = copyTypedArray(output, offset, suffixIds);
   offset = align4(offset);
-  offset = copyTypedArray(output, offset, triggerCheckpoints);
   offset = copyTypedArray(output, offset, prefixCheckpoints);
   offset = copyTypedArray(output, offset, suffixCheckpoints);
-  output.set(triggerBytes, offset);
-  offset += triggerBytes.byteLength;
   output.set(prefixBytes, offset);
   offset += prefixBytes.byteLength;
   output.set(suffixBytes, offset);
   return output;
+}
+
+export function generateBinaryShards(bangs: readonly Bang[]): Uint8Array[] {
+  const shards = Array.from({ length: BANG_SHARD_COUNT }, () => [] as Bang[]);
+  for (const bang of bangs) {
+    if (!bang.regex) {
+      shards[bangShardIndex(hashFNV1a(bang.trigger))].push(bang);
+    }
+  }
+  return shards.map(generateBinary);
 }
 
 export function renderAdvancedLookup(bangs: readonly Bang[]): string {
@@ -1042,9 +1014,13 @@ interface FlatTrieData {
   labels: string;
   nodes: number[];
   termD: string[];
+  termE: number[];
   termK: string[];
   termR: number[];
   termS: string[];
+  endpointPrefixes: string[];
+  endpointShapes: number[];
+  endpointSuffixes: string[];
 }
 
 interface PackedStringData {
@@ -1069,6 +1045,12 @@ interface PackedUnsignedData {
 
 const TRIE_RUNTIME_HELPERS_SOURCE = `
 function _b64bytes(s: string): Uint8Array {
+  const typedArray = Uint8Array as typeof Uint8Array & {
+    fromBase64?: (value: string) => Uint8Array;
+  };
+  if (typedArray.fromBase64) {
+    return typedArray.fromBase64(s);
+  }
   if (typeof atob === "function") {
     const bin = atob(s);
     const len = bin.length;
@@ -1109,23 +1091,55 @@ function _u32(b: Uint8Array, offset: number, length: number): Uint32Array {
   return new Uint32Array(copy.buffer);
 }
 
-function _offsets(lengths: Uint8Array | Uint16Array | Uint32Array): Int32Array {
-  const out = new Int32Array(lengths.length + 1);
-  for (let i = 0; i < lengths.length; i++) {
-    out[i + 1] = out[i] + lengths[i];
-  }
-  return out;
-}
 `;
 
-function flattenTrie(root: TrieNode): FlatTrieData {
+function flattenTrie(
+  root: TrieNode,
+  suggestionSites: SuggestionSiteRegistry
+): FlatTrieData {
   const nodes: number[] = [];
   const edges: number[] = [];
   let labels = "";
   const termK: string[] = [];
   const termS: string[] = [];
   const termD: string[] = [];
+  const termE: number[] = [];
   const termR: number[] = [];
+  const endpointPrefixes: string[] = [];
+  const endpointSuffixes: string[] = [];
+  const endpointShapes: number[] = [];
+  const curatedKinds = new Map<string, number>();
+
+  for (const domain of Object.keys(suggestionSites.curated).sort()) {
+    const endpoint = suggestionSites.curated[domain];
+    const [prefix, suffix] = splitTemplate(endpoint.url);
+    if (suffix === null) {
+      throw new Error(`Suggestion endpoint for ${domain} has no placeholder`);
+    }
+    const shapeId = SITE_SUGGESTION_SHAPE[endpoint.shape];
+    if (shapeId === undefined) {
+      throw new Error(
+        `Unknown suggestion response shape for ${domain}: ${endpoint.shape}`
+      );
+    }
+    const id = endpointPrefixes.length;
+    curatedKinds.set(domain, id + 3);
+    endpointPrefixes.push(prefix);
+    endpointSuffixes.push(suffix);
+    endpointShapes.push(shapeId);
+  }
+
+  function endpointKind(domain: string): number {
+    const curated = curatedKinds.get(domain);
+    if (curated !== undefined) {
+      return curated;
+    }
+    const mediawikiPath = suggestionSites.mediawiki[domain];
+    if (mediawikiPath === "/") {
+      return 1;
+    }
+    return mediawikiPath === "/w/" ? 2 : 0;
+  }
 
   function allocNode(): number {
     const idx = nodes.length / NODE_STRIDE;
@@ -1161,6 +1175,7 @@ function flattenTrie(root: TrieNode): FlatTrieData {
       termK.push(t.trigger);
       termS.push(t.name);
       termD.push(t.domain);
+      termE.push(endpointKind(t.domain));
       termR.push(t.relevance);
     }
 
@@ -1178,7 +1193,19 @@ function flattenTrie(root: TrieNode): FlatTrieData {
     throw new Error(`Unexpected root index ${rootIdx} (expected 0)`);
   }
 
-  return { labels, nodes, edges, termK, termS, termD, termR };
+  return {
+    labels,
+    nodes,
+    edges,
+    termK,
+    termS,
+    termD,
+    termE,
+    termR,
+    endpointPrefixes,
+    endpointShapes,
+    endpointSuffixes,
+  };
 }
 
 function packStrings(items: string[]): PackedStringData {
@@ -1187,6 +1214,20 @@ function packStrings(items: string[]): PackedStringData {
     lengths[i] = items[i].length;
   }
   return { blob: items.join(""), lengths };
+}
+
+const PACKED_STRING_CHECKPOINT_SHIFT = 5;
+
+function buildPackedStringCheckpoints(lengths: readonly number[]): number[] {
+  const checkpoints: number[] = [];
+  let offset = 0;
+  for (let i = 0; i < lengths.length; i++) {
+    if ((i & ((1 << PACKED_STRING_CHECKPOINT_SHIFT) - 1)) === 0) {
+      checkpoints.push(offset);
+    }
+    offset += lengths[i];
+  }
+  return checkpoints;
 }
 
 function packStringDictionary(items: string[]): PackedStringDictionary {
@@ -1277,6 +1318,8 @@ function generateTrie(data: FlatTrieData, trieRuntimeHelpers: string): string {
   const termK = packStrings(data.termK);
   const termS = packStringDictionary(data.termS);
   const termD = packStringDictionary(data.termD);
+  const endpointPrefixes = packStrings(data.endpointPrefixes);
+  const endpointSuffixes = packStrings(data.endpointSuffixes);
   const nodeCount = data.nodes.length / NODE_STRIDE;
   const edgeCount = data.edges.length / EDGE_STRIDE;
   const nodeEdgeStarts = new Array<number>(nodeCount);
@@ -1311,10 +1354,19 @@ function generateTrie(data: FlatTrieData, trieRuntimeHelpers: string): string {
     edgeChildren,
     data.termR,
     termK.lengths,
+    buildPackedStringCheckpoints(termK.lengths),
     termS.lengths,
+    buildPackedStringCheckpoints(termS.lengths),
     termS.ids,
     termD.lengths,
+    buildPackedStringCheckpoints(termD.lengths),
     termD.ids,
+    data.termE,
+    endpointPrefixes.lengths,
+    buildPackedStringCheckpoints(endpointPrefixes.lengths),
+    endpointSuffixes.lengths,
+    buildPackedStringCheckpoints(endpointSuffixes.lengths),
+    data.endpointShapes,
   ]);
   const views = packed.sections.map(
     (section, index) =>
@@ -1325,21 +1377,36 @@ function generateTrie(data: FlatTrieData, trieRuntimeHelpers: string): string {
     trieRuntimeHelpers +
     `const _B=_b64bytes('${packed.base64}');` +
     views.join("") +
-    `export const NODES=new Int32Array(${data.nodes.length});` +
-    `for(let i=0;i<${nodeCount};i++){const o=i*${NODE_STRIDE};NODES[o]=_V0[i];NODES[o+1]=_V1[i];NODES[o+2]=_V2[i]-1;NODES[o+3]=_V3[i]}` +
-    `export const EDGES=new Int32Array(${data.edges.length});` +
-    `for(let i=0;i<${edgeCount};i++){const o=i*${EDGE_STRIDE};EDGES[o]=_V4[i];EDGES[o+1]=_V5[i];EDGES[o+2]=_V6[i]}` +
-    "export const TERM_R=Int32Array.from(_V7);" +
+    "export const NODE_EDGE_STARTS=_V0;" +
+    "export const NODE_EDGE_COUNTS=_V1;" +
+    "export const NODE_TERMINALS=_V2;" +
+    "export const NODE_MAX_RELEVANCE=_V3;" +
+    "export const EDGE_LABEL_STARTS=_V4;" +
+    "export const EDGE_LABEL_LENGTHS=_V5;" +
+    "export const EDGE_CHILDREN=_V6;" +
+    "export const TERM_R=_V7;" +
     `export const LABELS='${jsEscape(data.labels)}';` +
     `export const TERM_K_BLOB='${jsEscape(termK.blob)}';` +
-    "export const TERM_K_OFF=_offsets(_V8);" +
+    "export const TERM_K_LEN=_V8;" +
+    "export const TERM_K_CP=_V9;" +
     `export const TERM_S_BLOB='${jsEscape(termS.blob)}';` +
-    "export const TERM_S_OFF=_offsets(_V9);" +
-    "export const TERM_S_ID=_V10;" +
+    "export const TERM_S_LEN=_V10;" +
+    "export const TERM_S_CP=_V11;" +
+    "export const TERM_S_ID=_V12;" +
     `export const TERM_D_BLOB='${jsEscape(termD.blob)}';` +
-    "export const TERM_D_OFF=_offsets(_V11);" +
-    "export const TERM_D_ID=_V12;" +
-    "export const ROOT=0;"
+    "export const TERM_D_LEN=_V13;" +
+    "export const TERM_D_CP=_V14;" +
+    "export const TERM_D_ID=_V15;" +
+    "export const TERM_E_KIND=_V16;" +
+    `export const ENDPOINT_P_BLOB='${jsEscape(endpointPrefixes.blob)}';` +
+    "export const ENDPOINT_P_LEN=_V17;" +
+    "export const ENDPOINT_P_CP=_V18;" +
+    `export const ENDPOINT_S_BLOB='${jsEscape(endpointSuffixes.blob)}';` +
+    "export const ENDPOINT_S_LEN=_V19;" +
+    "export const ENDPOINT_S_CP=_V20;" +
+    "export const ENDPOINT_SHAPE=_V21;" +
+    "export const ROOT=0;" +
+    "export const TRIE_SCHEMA=3;"
   );
 }
 
@@ -1509,13 +1576,16 @@ function generateHotBangs(bangs: readonly Bang[]): string {
   );
 }
 
-export function buildGeneratedArtifacts(bangs: Bang[]): GeneratedArtifacts {
+export function buildGeneratedArtifacts(
+  bangs: Bang[],
+  suggestionSites: SuggestionSiteRegistry = { curated: {}, mediawiki: {} }
+): GeneratedArtifacts {
   const trieRoot = buildRadixTrie(
     bangs,
     (b) => b.trigger,
     (b) => b.relevance
   );
-  const trieData = flattenTrie(trieRoot);
+  const trieData = flattenTrie(trieRoot, suggestionSites);
   const trieRuntimeHelpers = buildMinifiedTrieRuntimeHelpers();
   return {
     binary: generateBinary(bangs),
@@ -1572,18 +1642,35 @@ async function writeGeneratedDeclarations(outDir: string): Promise<void> {
       `${outDir}/bangs-trie.d.ts`,
       [
         "export declare const LABELS: string;",
-        "export declare const NODES: Int32Array;",
-        "export declare const EDGES: Int32Array;",
-        "export declare const TERM_R: Int32Array;",
+        "export declare const NODE_EDGE_STARTS: Uint8Array | Uint16Array | Uint32Array;",
+        "export declare const NODE_EDGE_COUNTS: Uint8Array | Uint16Array | Uint32Array;",
+        "export declare const NODE_TERMINALS: Uint8Array | Uint16Array | Uint32Array;",
+        "export declare const NODE_MAX_RELEVANCE: Uint8Array | Uint16Array | Uint32Array;",
+        "export declare const EDGE_LABEL_STARTS: Uint8Array | Uint16Array | Uint32Array;",
+        "export declare const EDGE_LABEL_LENGTHS: Uint8Array | Uint16Array | Uint32Array;",
+        "export declare const EDGE_CHILDREN: Uint8Array | Uint16Array | Uint32Array;",
+        "export declare const TERM_R: Uint8Array | Uint16Array | Uint32Array;",
         "export declare const TERM_K_BLOB: string;",
-        "export declare const TERM_K_OFF: Int32Array;",
+        "export declare const TERM_K_LEN: Uint8Array | Uint16Array | Uint32Array;",
+        "export declare const TERM_K_CP: Uint8Array | Uint16Array | Uint32Array;",
         "export declare const TERM_S_BLOB: string;",
-        "export declare const TERM_S_OFF: Int32Array;",
+        "export declare const TERM_S_LEN: Uint8Array | Uint16Array | Uint32Array;",
+        "export declare const TERM_S_CP: Uint8Array | Uint16Array | Uint32Array;",
         "export declare const TERM_S_ID: Uint8Array | Uint16Array | Uint32Array;",
         "export declare const TERM_D_BLOB: string;",
-        "export declare const TERM_D_OFF: Int32Array;",
+        "export declare const TERM_D_LEN: Uint8Array | Uint16Array | Uint32Array;",
+        "export declare const TERM_D_CP: Uint8Array | Uint16Array | Uint32Array;",
         "export declare const TERM_D_ID: Uint8Array | Uint16Array | Uint32Array;",
+        "export declare const TERM_E_KIND: Uint8Array | Uint16Array | Uint32Array;",
+        "export declare const ENDPOINT_P_BLOB: string;",
+        "export declare const ENDPOINT_P_LEN: Uint8Array | Uint16Array | Uint32Array;",
+        "export declare const ENDPOINT_P_CP: Uint8Array | Uint16Array | Uint32Array;",
+        "export declare const ENDPOINT_S_BLOB: string;",
+        "export declare const ENDPOINT_S_LEN: Uint8Array | Uint16Array | Uint32Array;",
+        "export declare const ENDPOINT_S_CP: Uint8Array | Uint16Array | Uint32Array;",
+        "export declare const ENDPOINT_SHAPE: Uint8Array | Uint16Array | Uint32Array;",
         "export declare const ROOT: number;",
+        "export declare const TRIE_SCHEMA: 3;",
         "",
       ].join("\n")
     ),
@@ -1592,10 +1679,28 @@ async function writeGeneratedDeclarations(outDir: string): Promise<void> {
 
 export async function runCodegen(options: CodegenOptions = {}): Promise<void> {
   const bangs = await loadBangs(options);
+  const suggestionSites: SuggestionSiteRegistry =
+    await Bun.file(SUGGEST_SITES_PATH).json();
+  for (const [domain, suggestionSite] of Object.entries(
+    suggestionSites.curated
+  )) {
+    const error = validateSimpleBangUrl(suggestionSite.url);
+    if (error) {
+      throw new Error(`Invalid suggestion endpoint for ${domain}: ${error}`);
+    }
+  }
+  for (const [domain, path] of Object.entries(suggestionSites.mediawiki)) {
+    if (path !== "/" && path !== "/w/") {
+      throw new Error(`Invalid MediaWiki API path for ${domain}: ${path}`);
+    }
+    if (suggestionSites.curated[domain]) {
+      throw new Error(`Duplicate suggestion capability for ${domain}`);
+    }
+  }
 
   console.log("=== Generate ===");
   await mkdir(GENERATED_OUT_DIR, { recursive: true });
-  const artifacts = buildGeneratedArtifacts(bangs);
+  const artifacts = buildGeneratedArtifacts(bangs, suggestionSites);
   await writeGeneratedArtifacts(GENERATED_OUT_DIR, artifacts);
   await writeGeneratedDeclarations(GENERATED_OUT_DIR);
   console.log(`Generated ${bangs.length} bangs in ${GENERATED_OUT_DIR}/`);

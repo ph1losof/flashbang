@@ -12,6 +12,7 @@ import {
   parseKagi,
   validateBangs,
 } from "../scripts/codegen";
+import { resolveSuggestionSites } from "../scripts/resolve-suggestions";
 import {
   BANG_BINARY_MAGIC,
   BANG_BINARY_VERSION,
@@ -206,13 +207,71 @@ describe("codegen artifact generators", () => {
     );
     expect(artifacts.sparseJs).toContain("lookupAdvancedBang");
     expect(artifacts.sparseJs).toContain("lookupSnapOverride");
-    expect(artifacts.trieJs).toContain("export const NODES");
+    expect(artifacts.trieJs).toContain("export const NODE_EDGE_STARTS");
   });
 
   test("keeps binary and metadata generation deterministic", () => {
     expect(generateBinary(sampleBangs)).toEqual(generateBinary(sampleBangs));
     expect(generateMeta(sampleBangs)).toEqual(generateMeta(sampleBangs));
     expect(generateSparse(sampleBangs)).toBe(generateSparse(sampleBangs));
+  });
+
+  test("packs site-specific suggestion endpoints into trie terminals", () => {
+    const artifacts = buildGeneratedArtifacts(sampleBangs, {
+      curated: {
+        "google.com": {
+          shape: "opensearch",
+          url: "https://example.com/suggest?q={}",
+        },
+      },
+      mediawiki: {},
+    });
+
+    expect(artifacts.trieJs).toContain("export const TERM_E_KIND");
+    expect(artifacts.trieJs).toContain("export const ENDPOINT_SHAPE");
+    expect(artifacts.trieJs).toContain("https://example.com/suggest?q=");
+  });
+});
+
+describe("site suggestion discovery", () => {
+  test("probes unique candidate domains and assigns capabilities by domain", async () => {
+    const probed: string[] = [];
+    const registry = await resolveSuggestionSites(
+      [
+        {
+          trigger: "docs",
+          name: "Docs Wiki",
+          domain: "docs.example.wiki",
+          url: "https://docs.example.wiki/wiki/{}",
+        },
+        {
+          trigger: "dw",
+          name: "Docs alias",
+          domain: "docs.example.wiki",
+          url: "https://docs.example.wiki/wiki/{}",
+        },
+        {
+          trigger: "gh",
+          name: "GitHub",
+          domain: "github.com",
+          url: "https://github.com/search?q={}",
+        },
+        {
+          trigger: "plain",
+          name: "Plain",
+          domain: "example.com",
+          url: "https://example.com/search?q={}",
+        },
+      ],
+      (domain) => {
+        probed.push(domain);
+        return Promise.resolve("/w/" as const);
+      }
+    );
+
+    expect(probed).toEqual(["docs.example.wiki"]);
+    expect(registry.mediawiki).toEqual({ "docs.example.wiki": "/w/" });
+    expect(registry.curated["github.com"]?.shape).toBe("algolia");
   });
 });
 describe("validateBangs", () => {

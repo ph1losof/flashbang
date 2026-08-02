@@ -12,8 +12,11 @@ import {
 import {
   bundleUI,
   configureBangDataAsset,
+  configureColdFallbackAsset,
   configureCustomSuggestOption,
   configureFallbackAsset,
+  configureHotBangTriggers,
+  configureSeedCacheName,
   customSuggestUrlsEnabled,
 } from "../scripts/shared";
 
@@ -168,6 +171,13 @@ describe("build cache version", () => {
         buildOutput({
           outputs: [{ kind: "entry-point", path: "dist/fallback-abcdef12.js" }],
         })
+      )
+      .mockResolvedValueOnce(
+        buildOutput({
+          outputs: [
+            { kind: "entry-point", path: "dist/cold-fallback-12345678.js" },
+          ],
+        })
       );
     try {
       const result = await bundleUI(
@@ -177,12 +187,13 @@ describe("build cache version", () => {
         "/bangs-a.bin"
       );
       expect(result.fallbackAsset).toBe("/fallback-abcdef12.js");
-      expect(result.appOutputs).toHaveLength(1);
+      expect(result.coldFallbackAsset).toBe("/cold-fallback-12345678.js");
+      expect(result.appOutputs).toHaveLength(2);
       expect(result.appOutputs[0]).toMatchObject({
         kind: "chunk",
         path: "dist/chunk-12345678.js",
       });
-      expect(buildSpy).toHaveBeenCalledTimes(3);
+      expect(buildSpy).toHaveBeenCalledTimes(4);
     } finally {
       buildSpy.mockRestore();
     }
@@ -221,6 +232,11 @@ describe("build cache version", () => {
         await Bun.write(path, "console.log('fallback')");
         return buildOutput({ outputs: [{ kind: "entry-point", path }] });
       }
+      if (entry === "src/ui/cold-fallback.ts") {
+        const path = `${outdir}/${String(naming).replace("[hash]", "12345678").replace("[ext]", "js")}`;
+        await Bun.write(path, "console.log('cold fallback')");
+        return buildOutput({ outputs: [{ kind: "entry-point", path }] });
+      }
       if (entry === "src/sw/sw.ts") {
         const path = `${outdir}/${naming}`;
         await Bun.write(
@@ -239,7 +255,7 @@ describe("build cache version", () => {
     const logSpy = spyOn(console, "log").mockImplementation(() => undefined);
     try {
       await buildProductionAssets();
-      expect(buildSpy).toHaveBeenCalledTimes(6);
+      expect(buildSpy).toHaveBeenCalledTimes(7);
       expect(await Bun.file("dist/_headers").text()).toContain("/sw.js");
       expect([...new Bun.Glob("*.br").scanSync("dist")].length).toBeGreaterThan(
         0
@@ -328,5 +344,29 @@ describe("bang data asset injection", () => {
         "/fallback-0123456789ab.js"
       )
     ).toBe('<script src="/fallback-0123456789ab.js"></script>');
+  });
+
+  test("replaces the generated cold fallback path marker", () => {
+    expect(
+      configureColdFallbackAsset(
+        '<script src="__COLD_FALLBACK_ASSET__"></script>',
+        "/cold-fallback-0123456789ab.js"
+      )
+    ).toBe('<script src="/cold-fallback-0123456789ab.js"></script>');
+  });
+
+  test("replaces the generated hot-trigger marker", () => {
+    expect(
+      configureHotBangTriggers('const hot="__HOT_BANG_TRIGGERS_JSON__"', [
+        "g",
+        "gh",
+      ])
+    ).toBe('const hot=["g","gh"]');
+  });
+
+  test("replaces the seed cache marker", () => {
+    expect(
+      configureSeedCacheName('caches.open("__SEED_CACHE_NAME__")', "seed-v1")
+    ).toBe('caches.open("seed-v1")');
   });
 });
