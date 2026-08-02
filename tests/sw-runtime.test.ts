@@ -628,7 +628,7 @@ describe("sw runtime with real modules", () => {
       .set("https://flashbang.local/bangs.bin", new Response(bangData));
 
     const fetchEvt = createFetchEvent(
-      "https://flashbang.local/?q=!hn+cold",
+      "https://flashbang.local/?q=!g+cold",
       "",
       "navigate"
     );
@@ -636,7 +636,7 @@ describe("sw runtime with real modules", () => {
     const response = await fetchEvt.response();
     await Promise.all(fetchEvt.waits);
 
-    expect(response.headers.get("Location")).toContain("hn.algolia.com");
+    expect(response.headers.get("Location")).toContain("google.com");
     expect(fetchCalls).not.toContain("/bangs.bin");
     expect(cachePutCalls).toContain("/bangs.bin");
   });

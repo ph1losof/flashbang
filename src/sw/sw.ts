@@ -1,25 +1,16 @@
 declare const self: ServiceWorkerGlobalScope;
 declare const cookieStore: CookieStore;
 
-import {
-  BANG_SHARD_COUNT,
-  bangShardIndex,
-  extractBangShardTriggers,
-} from "../shared/bang-shards";
 import { COOKIE_MAX_AGE_S } from "../shared/constants";
-import { hashFNV1a } from "../shared/hash";
 import { SEED_CACHE_NAME } from "../shared/seed-cache";
 import {
   encodeSuggestCookieValue,
   parseSuggestCookieValue,
 } from "../shared/suggest-cookie";
 import {
-  bangShardUnavailableId,
   initializeBangData,
-  initializeBangShard,
   isBangDataInitialized,
   isBangDataUnavailable,
-  isBangShardInitialized,
 } from "./bang-data";
 import {
   createHotBootState,
@@ -58,7 +49,6 @@ import {
 
 declare const __CACHE_VERSION__: string;
 declare const __BANG_DATA_ASSET__: string;
-declare const __BANG_SHARD_ASSETS__: readonly string[];
 declare const __FALLBACK_ASSET__: string;
 declare const __REQUIRED_APP_ASSETS__: string[];
 declare const __IS_DEV__: boolean;
@@ -74,10 +64,6 @@ const BANG_DATA_ASSET =
   typeof __BANG_DATA_ASSET__ === "undefined"
     ? "/bangs.bin"
     : __BANG_DATA_ASSET__;
-const BANG_SHARD_ASSETS =
-  typeof __BANG_SHARD_ASSETS__ === "undefined"
-    ? Array.from({ length: BANG_SHARD_COUNT }, () => BANG_DATA_ASSET)
-    : __BANG_SHARD_ASSETS__;
 const BASE_APP_ASSETS = [
   "/home",
   "/app.js",
@@ -99,10 +85,6 @@ function appAssets(): string[] {
 const PRECACHE_CONCURRENCY = 4;
 let deferredPrecachePromise: Promise<void> | null = null;
 let bangDataPromise: Promise<void> | null = null;
-const bangShardPromises: Array<Promise<void> | null> = Array.from(
-  { length: BANG_SHARD_COUNT },
-  () => null
-);
 let runtimeWarmPromise: Promise<void> | null = null;
 const BENCHMARK_SETTINGS: RedirectSettings = {
   custom: Object.assign(Object.create(null), {
@@ -182,34 +164,11 @@ function readCurrentRedirectSettings(
       seedRedirectSettings(record.settings);
       return record.settings;
     }
-    const preparedSettings =
-      prepared ?? prepareRedirectSettings(BANG_DATA_ASSET);
-    if (bangDataReady) {
-      return readRedirectSettings(
-        preparedSettings,
-        BANG_DATA_ASSET,
-        bangDataReady
-      );
-    }
-    return preparedSettings.then(async (value) => {
-      const compact = materializeCompactBaseSettings(
-        value.snapshot,
-        value.settings
-      );
-      if (compact) {
-        compact.custom = value.snapshot.custom;
-        seedRedirectSettings(compact);
-        return compact;
-      }
-      await ensureBangShard(
-        bangShardIndex(hashFNV1a(value.snapshot.defaultBang))
-      );
-      return readRedirectSettings(
-        Promise.resolve(value),
-        BANG_DATA_ASSET,
-        RESOLVED_PROMISE
-      );
-    });
+    return readRedirectSettings(
+      prepared,
+      BANG_DATA_ASSET,
+      bangDataReady ?? ensureBangData()
+    );
   });
 }
 
@@ -381,81 +340,6 @@ function ensureBangData(): Promise<void> {
     });
   }
   return bangDataPromise;
-}
-
-async function loadBangShard(shardId: number): Promise<void> {
-  const asset = BANG_SHARD_ASSETS[shardId];
-  if (!asset) {
-    throw new Error(`Missing bang shard asset: ${shardId}`);
-  }
-  const request = new Request(asset);
-  const cache = await caches.open(CACHE_NAME);
-  let response = await cache.match(request);
-  if (!response) {
-    for (const cacheName of await caches.keys()) {
-      if (cacheName === CACHE_NAME || !isManagedCache(cacheName)) {
-        continue;
-      }
-      response = await (await caches.open(cacheName)).match(request);
-      if (response) {
-        break;
-      }
-    }
-    if (!response) {
-      response = await fetch(request);
-      if (!response.ok) {
-        throw new Error(
-          `Failed to load ${asset}: ${response.status} ${response.statusText}`
-        );
-      }
-    }
-    await cache.put(request, response.clone());
-  }
-  initializeBangShard(shardId, await response.arrayBuffer());
-}
-
-function ensureBangShard(shardId: number): Promise<void> {
-  if (isBangShardInitialized(shardId)) {
-    return RESOLVED_PROMISE;
-  }
-  let promise = bangShardPromises[shardId];
-  if (!promise) {
-    promise = loadBangShard(shardId).catch((error) => {
-      bangShardPromises[shardId] = null;
-      throw error;
-    });
-    bangShardPromises[shardId] = promise;
-  }
-  return promise;
-}
-
-function ensureQueryBangShards(
-  rawQuery: string,
-  settings: RedirectSettings,
-  missingShardId: number,
-  raw = true
-): Promise<void> {
-  let query = rawQuery;
-  if (raw) {
-    try {
-      query = decodeURIComponent(rawQuery.replaceAll("+", " "));
-    } catch {
-      return ensureBangShard(missingShardId);
-    }
-  }
-  const bangMarker = String.fromCharCode((settings.syntax?.[0] ?? 33) & 0xff);
-  const snapMarker = String.fromCharCode((settings.syntax?.[1] ?? 64) & 0xff);
-  const shardIds = new Set<number>([missingShardId]);
-  for (const trigger of extractBangShardTriggers(
-    query,
-    bangMarker,
-    snapMarker
-  )) {
-    if (!(settings.custom[trigger] || lookupGeneratedHotBang(trigger))) {
-      shardIds.add(bangShardIndex(hashFNV1a(trigger)));
-    }
-  }
-  return Promise.all([...shardIds].map(ensureBangShard)).then(() => undefined);
 }
 
 function seedRuntime(
@@ -828,18 +712,15 @@ export function handleMessage(e: ExtendableMessageEvent): void {
     messageQuery = e.data.query;
   }
   if (e.data?.type === "redirect" && messageQuery) {
-    const publish = (url: string) => {
+    const resolve = (s: RedirectSettings) => {
+      const url = hasRawQuery
+        ? redirectRawUrl(messageQuery, s)
+        : redirectUrl(messageQuery, s);
       if (e.ports[0]) {
         e.ports[0].postMessage(url);
       } else {
         (e.source as Client)?.postMessage(hasRawQuery ? url : { url });
       }
-    };
-    const resolve = (s: RedirectSettings) => {
-      const url = hasRawQuery
-        ? redirectRawUrl(messageQuery, s)
-        : redirectUrl(messageQuery, s);
-      publish(url);
     };
     const cached = getCachedSettings();
     if (isBangDataInitialized()) {
@@ -849,32 +730,21 @@ export function handleMessage(e: ExtendableMessageEvent): void {
         e.waitUntil(readCurrentRedirectSettings().then(resolve));
       }
     } else {
+      const bangDataReady = ensureBangData();
       e.waitUntil(
-        readCurrentRedirectSettings().then(async (settings) => {
-          for (let attempt = 0; attempt <= BANG_SHARD_COUNT; attempt++) {
+        readCurrentRedirectSettings(undefined, bangDataReady).then(
+          async (settings) => {
             try {
-              const url = hasRawQuery
-                ? redirectRawUrl(messageQuery, settings, lookupGeneratedHotBang)
-                : redirectUrl(messageQuery, settings, lookupGeneratedHotBang);
-              publish(url);
-              return;
+              resolve(settings);
             } catch (error) {
-              const shardId = bangShardUnavailableId(error);
-              if (shardId === null) {
+              if (!isBangDataUnavailable(error)) {
                 throw error;
               }
-              await ensureQueryBangShards(
-                messageQuery,
-                settings,
-                shardId,
-                hasRawQuery
-              );
+              await bangDataReady;
+              resolve(settings);
             }
           }
-          throw new Error(
-            "Bang shard resolution exceeded the catalog shard count"
-          );
-        })
+        )
       );
     }
   }
@@ -923,30 +793,6 @@ function respondToCompactHotBang(
   return response;
 }
 
-async function respondToRedirectWithShards(
-  e: FetchEvent,
-  rawQuery: string,
-  settings: RedirectSettings,
-  hotBangLookup?: HotBangLookup | null
-): Promise<Response> {
-  for (let attempt = 0; attempt <= BANG_SHARD_COUNT; attempt++) {
-    try {
-      return respondToRedirect(e, rawQuery, settings, hotBangLookup);
-    } catch (error) {
-      const shardId = bangShardUnavailableId(error);
-      if (shardId !== null) {
-        await ensureQueryBangShards(rawQuery, settings, shardId);
-        continue;
-      }
-      if (!isBangDataUnavailable(error)) {
-        throw error;
-      }
-      await ensureBangData();
-    }
-  }
-  throw new Error("Bang shard resolution exceeded the catalog shard count");
-}
-
 function responseForQuery(
   e: FetchEvent,
   rawQuery: string
@@ -960,8 +806,7 @@ function responseForQuery(
       respondToRedirect(e, rawQuery, settings)
     );
   }
-  return hotBootPromise.then(async (hotBoot) => {
-    let queryDataReady: Promise<void> = RESOLVED_PROMISE;
+  return hotBootPromise.then((hotBoot) => {
     if (e.request.mode === "navigate") {
       const settings = hotBoot?.settings;
       try {
@@ -983,37 +828,44 @@ function responseForQuery(
         if (!(isBangDataUnavailable(error) || isHotBangLookupBlocked(error))) {
           throw error;
         }
-        const shardId = bangShardUnavailableId(error);
-        if (shardId !== null) {
-          const candidateSettings = settings ?? hotBoot?.compactSettings;
-          queryDataReady = candidateSettings
-            ? ensureQueryBangShards(rawQuery, candidateSettings, shardId)
-            : ensureBangShard(shardId);
-        }
       }
     }
-    let settingsPromise: Promise<RedirectSettings>;
-    if (hotBootUpdateTokens.size > 0) {
-      const bangDataReady = invalidateCache().then(ensureBangData);
-      e.waitUntil(bangDataReady.catch(swallowError));
-      settingsPromise = readCurrentRedirectSettings(undefined, bangDataReady);
-    } else {
-      e.waitUntil(queryDataReady.catch(swallowError));
-      settingsPromise = readCurrentRedirectSettings();
-    }
-    const [settings] = await Promise.all([settingsPromise, queryDataReady]);
-    if (hotBootSettingsNeedPublish(currentHotBoot)) {
-      e.waitUntil(
-        queueHotBootMutation(() =>
-          publishHotBoot(isBangDataInitialized())
-        ).catch(swallowError)
-      );
-    }
-    return respondToRedirectWithShards(
-      e,
-      rawQuery,
-      settings,
-      hotBoot?.hotBangLookup ?? lookupGeneratedHotBang
+    const bangDataReady =
+      hotBootUpdateTokens.size > 0
+        ? invalidateCache().then(ensureBangData)
+        : ensureBangData();
+    e.waitUntil(bangDataReady.catch(swallowError));
+    return readCurrentRedirectSettings(undefined, bangDataReady).then(
+      async (settings) => {
+        if (hotBootSettingsNeedPublish(currentHotBoot)) {
+          e.waitUntil(
+            bangDataReady
+              .then(() => queueHotBootMutation(() => publishHotBoot(true)))
+              .catch(swallowError)
+          );
+        }
+        try {
+          return respondToRedirect(
+            e,
+            rawQuery,
+            settings,
+            hotBoot?.hotBangLookup ?? lookupGeneratedHotBang
+          );
+        } catch (error) {
+          if (
+            !(isBangDataUnavailable(error) || isHotBangLookupBlocked(error))
+          ) {
+            throw error;
+          }
+          await bangDataReady;
+          return respondToRedirect(
+            e,
+            rawQuery,
+            settings,
+            hotBoot?.hotBangLookup ?? lookupGeneratedHotBang
+          );
+        }
+      }
     );
   });
 }
@@ -1219,7 +1071,6 @@ export function registerServiceWorker(): void {
 export function resetSwStateForTests(): void {
   deferredPrecachePromise = null;
   bangDataPromise = null;
-  bangShardPromises.fill(null);
   runtimeWarmPromise = null;
   benchmarkState = null;
   hotBootAvailable = currentNavigationPreload() !== undefined;

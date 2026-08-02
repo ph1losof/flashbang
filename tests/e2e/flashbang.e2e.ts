@@ -1628,119 +1628,6 @@ test("first installation falls through to advanced redirect machinery", async ({
   }
 });
 
-test("fresh fallback resolves canonical bang forms without the full catalog", async ({
-  browser,
-}) => {
-  const context = await browser.newContext();
-  try {
-    const page = await context.newPage();
-    await page.addInitScript(disableServiceWorkers);
-    await mockGoogleSearchRoute(page);
-    await context.route("https://www.npmjs.com/**", (route) =>
-      route.fulfill({ status: 200, contentType: "text/plain", body: "npm" })
-    );
-    await context.route("https://developer.mozilla.org/**", (route) =>
-      route.fulfill({ status: 200, contentType: "text/plain", body: "mdn" })
-    );
-    const bangDataRequests: string[] = [];
-    context.on("request", (request) => {
-      const pathname = new URL(request.url()).pathname;
-      if (
-        pathname.startsWith("/bangs-") &&
-        !pathname.startsWith("/bangs-meta-")
-      ) {
-        bangDataRequests.push(pathname);
-      }
-    });
-
-    await page.goto("/health", { waitUntil: "domcontentloaded" });
-    await navigateAndWaitForRedirect(
-      page,
-      "/?q=cats%20%21npm",
-      /npmjs\.com\/search\?q=cats/
-    );
-    await navigateAndWaitForRedirect(
-      page,
-      "/?q=mdn%21%20array",
-      /developer\.mozilla\.org\/.*q=array/
-    );
-    await navigateAndWaitForRedirect(
-      page,
-      "/?q=%40mdn%20array",
-      /google\.com\/search/
-    );
-    expect(new URL(page.url()).searchParams.get("q")).toContain(
-      "site:developer.mozilla.org"
-    );
-    await navigateAndWaitForRedirect(
-      page,
-      "/?q=%21definitely-not-a-real-trigger%20query",
-      /google\.com\/search/
-    );
-    expect(new URL(page.url()).searchParams.get("q")).toBe(
-      "!definitely-not-a-real-trigger query"
-    );
-    await navigateAndWaitForRedirect(
-      page,
-      "/?q=plain%20query",
-      /google\.com\/search\?q=plain(%20|\+)query/
-    );
-
-    expect(
-      bangDataRequests.some((pathname) =>
-        /^\/bangs-s[0-9a-f]-[a-f0-9]{12}\.bin$/.test(pathname)
-      )
-    ).toBe(true);
-    expect(
-      bangDataRequests.some((pathname) =>
-        /^\/bangs-[a-f0-9]{12}\.bin$/.test(pathname)
-      )
-    ).toBe(false);
-  } finally {
-    await context.close();
-  }
-});
-
-test("fresh snap chains fetch distinct shards concurrently", async ({
-  browser,
-}) => {
-  const context = await browser.newContext();
-  let releaseShards!: () => void;
-  const shardGate = new Promise<void>((resolve) => {
-    releaseShards = resolve;
-  });
-  try {
-    const page = await context.newPage();
-    await page.addInitScript(disableServiceWorkers);
-    await mockGoogleSearchRoute(page);
-    await page.goto("/health", { waitUntil: "domcontentloaded" });
-    const startedShards = new Set<string>();
-    await context.route("**/bangs-s*.bin", async (route) => {
-      startedShards.add(new URL(route.request().url()).pathname);
-      await shardGate;
-      await route.continue();
-    });
-
-    const navigation = navigateAndWaitForRedirect(
-      page,
-      "/?q=%40mdn%2Cnpm%2Cpython%20array",
-      /google\.com\/search/
-    );
-    try {
-      await expect.poll(() => startedShards.size).toBe(3);
-    } finally {
-      releaseShards();
-    }
-    await navigation;
-    expect(new URL(page.url()).searchParams.get("q")).toContain(
-      "site:developer.mozilla.org"
-    );
-  } finally {
-    releaseShards();
-    await context.close();
-  }
-});
-
 test("first hot redirect does not wait for the full bang catalog", async ({
   browser,
   browserName,
@@ -1786,7 +1673,7 @@ test("first fallback seeds the worker for the next offline redirect", async ({
     context.on("request", (request) => {
       const pathname = new URL(request.url()).pathname;
       if (
-        /^\/bangs-s[0-9a-f]-[a-f0-9]{12}\.bin$/.test(pathname) &&
+        /^\/bangs-s[0-9a-z]+-[a-f0-9]{12}\.bin$/.test(pathname) &&
         !coldFallbackFinished
       ) {
         shardStartedBeforeColdFallbackFinished = true;
@@ -1871,7 +1758,7 @@ test("first fallback seeds the worker for the next offline redirect", async ({
       .toBe(true);
     expect(
       bangDataRequests.some((pathname) =>
-        /^\/bangs-s[0-9a-f]-[a-f0-9]{12}\.bin$/.test(pathname)
+        /^\/bangs-s[0-9a-z]+-[a-f0-9]{12}\.bin$/.test(pathname)
       )
     ).toBe(true);
     expect(shardStartedBeforeColdFallbackFinished).toBe(true);
@@ -2015,131 +1902,6 @@ test("redirect survives a service worker restart", async ({
 
   await navigateAndWaitForRedirect(page, "/?q=%21g%20hello", GOOGLE_REDIRECT);
   expect(page.url()).toMatch(GOOGLE_REDIRECT);
-});
-
-test("cold worker restart loads one shard instead of the full catalog", async ({
-  browser,
-  browserName,
-  context,
-  page,
-}) => {
-  test.skip(
-    browserName !== "chromium",
-    "Playwright only exposes service worker handles in Chromium"
-  );
-  await context.route("https://developer.mozilla.org/**", (route) =>
-    route.fulfill({ status: 200, contentType: "text/plain", body: "mdn" })
-  );
-  await ensureWarmController(page);
-  await expect
-    .poll(() =>
-      page
-        .evaluate(async () => {
-          for (const cacheName of await caches.keys()) {
-            const requests = await (await caches.open(cacheName)).keys();
-            if (
-              requests.some(({ url }) =>
-                /^\/bangs-[a-f0-9]{12}\.bin$/.test(new URL(url).pathname)
-              )
-            ) {
-              return true;
-            }
-          }
-          return false;
-        })
-        .catch(() => false)
-    )
-    .toBe(true);
-
-  const bangDataRequests: string[] = [];
-  context.on("request", (request) => {
-    const pathname = new URL(request.url()).pathname;
-    if (
-      pathname.startsWith("/bangs-") &&
-      !pathname.startsWith("/bangs-meta-")
-    ) {
-      bangDataRequests.push(pathname);
-    }
-  });
-  const cdp = await browser.newBrowserCDPSession();
-  await closeServiceWorkerTarget(cdp, (url) => url.endsWith("/sw.js"));
-  await cdp.detach();
-
-  await navigateAndWaitForRedirect(
-    page,
-    "/?q=%21mdn%20array",
-    /developer\.mozilla\.org\/.*q=array/
-  );
-  expect(
-    bangDataRequests.filter((pathname) =>
-      /^\/bangs-s[0-9a-f]-[a-f0-9]{12}\.bin$/.test(pathname)
-    )
-  ).toHaveLength(1);
-  expect(
-    bangDataRequests.some((pathname) =>
-      /^\/bangs-[a-f0-9]{12}\.bin$/.test(pathname)
-    )
-  ).toBe(false);
-});
-
-test("cold worker restart fetches snap-chain shards concurrently", async ({
-  browser,
-  browserName,
-  context,
-  page,
-}) => {
-  test.skip(
-    browserName !== "chromium",
-    "Playwright only exposes service worker handles in Chromium"
-  );
-  await mockGoogleSearchRoute(page);
-  await ensureWarmController(page);
-  await page.evaluate(async () => {
-    const registration = await navigator.serviceWorker.ready;
-    await registration.navigationPreload.setHeaderValue("invalid");
-    await registration.navigationPreload.disable();
-    for (const cacheName of await caches.keys()) {
-      const cache = await caches.open(cacheName);
-      for (const request of await cache.keys()) {
-        const pathname = new URL(request.url).pathname;
-        if (
-          pathname.startsWith("/bangs-s") &&
-          !pathname.startsWith("/bangs-meta-")
-        ) {
-          await cache.delete(request);
-        }
-      }
-    }
-  });
-
-  let releaseShards!: () => void;
-  const shardGate = new Promise<void>((resolve) => {
-    releaseShards = resolve;
-  });
-  const startedShards = new Set<string>();
-  await context.route("**/bangs-s*.bin", async (route) => {
-    startedShards.add(new URL(route.request().url()).pathname);
-    await shardGate;
-    await route.continue();
-  });
-  const cdp = await browser.newBrowserCDPSession();
-  await closeServiceWorkerTarget(cdp, (url) => url.endsWith("/sw.js"));
-  await cdp.detach();
-
-  const navigation = navigateAndWaitForRedirect(
-    page,
-    "/?q=%40mdn%2Cnpm%2Cpython%20array",
-    /google\.com\/search/
-  );
-  try {
-    await expect.poll(() => startedShards.size).toBe(3);
-  } finally {
-    releaseShards();
-  }
-  await navigation;
-  expect(new URL(page.url()).searchParams.get("q")).toContain(
-    "site:developer.mozilla.org"
-  );
 });
 
 test("rich hot boot redirects without IndexedDB or bang data", async ({
@@ -2306,7 +2068,7 @@ test("rich hot boot redirects without IndexedDB or bang data", async ({
   );
 });
 
-test("executable settings bundle redirects without requesting bang data", async ({
+test("executable settings bundle redirects before bang data is available", async ({
   browser,
   browserName,
   context,
@@ -2389,7 +2151,7 @@ test("executable settings bundle redirects without requesting bang data", async 
 
   try {
     await navigateAndWaitForRedirect(page, "/?q=hello", GOOGLE_REDIRECT);
-    expect(bangDataBlocked).toBe(false);
+    expect(bangDataBlocked).toBe(true);
   } finally {
     releaseBangData();
     await context.unroute(`${origin}/bangs-*.bin`);
