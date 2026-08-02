@@ -12,7 +12,11 @@ import {
   parseKagi,
   validateBangs,
 } from "../scripts/codegen";
-import { resolveSuggestionSites } from "../scripts/resolve-suggestions";
+import {
+  nugetAutocompleteUrlFromServiceIndex,
+  resolveSuggestionSites,
+  wikimediaDomainsFromSiteMatrix,
+} from "../scripts/resolve-suggestions";
 import {
   BANG_BINARY_MAGIC,
   BANG_BINARY_VERSION,
@@ -231,6 +235,7 @@ describe("codegen artifact generators", () => {
 
     expect(artifacts.trieLoaderJs).toContain("export const TERM_E_KIND");
     expect(artifacts.trieLoaderJs).toContain("export const ENDPOINT_SHAPE");
+    expect(artifacts.trieLoaderJs).not.toContain("ENDPOINT_POLICY");
     expect(new TextDecoder().decode(artifacts.trieBinary)).toContain(
       "https://example.com/suggest?q="
     );
@@ -279,6 +284,64 @@ describe("site suggestion discovery", () => {
     expect(registry.curated["hn.algolia.com"]?.url).toBe(
       "https://hn.algolia.com/api/v1/search?query={}&hitsPerPage=8&attributesToRetrieve=title"
     );
+    expect(registry.curated["packagist.org"]?.shape).toBe("results");
+    expect(registry.curated["modrinth.com"]?.shape).toBe("algolia");
+    expect(registry.curated["nuget.org"]?.shape).toBe("strings");
+  });
+
+  test("uses SiteMatrix domains without probing and retains transient failures", async () => {
+    const probed: string[] = [];
+    const registry = await resolveSuggestionSites(
+      [
+        {
+          trigger: "w",
+          name: "Wikipedia",
+          domain: "en.wikipedia.org",
+          url: "https://en.wikipedia.org/wiki/{}",
+        },
+        {
+          trigger: "tw",
+          name: "Transient Wiki",
+          domain: "transient.example.wiki",
+          url: "https://transient.example.wiki/wiki/{}",
+        },
+      ],
+      (domain) => {
+        probed.push(domain);
+        return Promise.resolve(null);
+      },
+      {
+        previousMediawiki: { "transient.example.wiki": "/" },
+        wikimediaDomains: new Set(["en.wikipedia.org"]),
+      }
+    );
+
+    expect(probed).toEqual(["transient.example.wiki"]);
+    expect(registry.mediawiki).toEqual({
+      "en.wikipedia.org": "/w/",
+      "transient.example.wiki": "/",
+    });
+  });
+
+  test("parses authoritative provider discovery payloads", () => {
+    expect(
+      wikimediaDomainsFromSiteMatrix({
+        sitematrix: {
+          0: { site: [{ url: "https://en.wikipedia.org" }] },
+          specials: [{ url: "https://commons.wikimedia.org" }],
+        },
+      })
+    ).toEqual(new Set(["en.wikipedia.org", "commons.wikimedia.org"]));
+    expect(
+      nugetAutocompleteUrlFromServiceIndex({
+        resources: [
+          {
+            "@id": "https://search.example.test/autocomplete/",
+            "@type": "SearchAutocompleteService/3.5.0",
+          },
+        ],
+      })
+    ).toBe("https://search.example.test/autocomplete");
   });
 });
 describe("validateBangs", () => {

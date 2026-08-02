@@ -280,6 +280,27 @@ const TEST_BANGS: TestBang[] = [
   { k: "ghp", s: "GitHub PRs", d: "github.com", r: 50 },
   { k: "mdn", s: "MDN", d: "developer.mozilla.org", r: 400 },
   {
+    k: "mvn",
+    s: "Maven",
+    d: "mvnrepository.com",
+    r: 350,
+    e: { shape: 8, url: "https://shape.test/maven?q={}" },
+  },
+  {
+    k: "nu",
+    s: "NuGet",
+    d: "www.nuget.org",
+    r: 350,
+    e: { shape: 6, url: "https://shape.test/strings?q={}" },
+  },
+  {
+    k: "pack",
+    s: "Packagist",
+    d: "packagist.org",
+    r: 350,
+    e: { shape: 7, url: "https://shape.test/results?q={}" },
+  },
+  {
     k: "w",
     s: "Wikipedia",
     d: "en.wikipedia.org",
@@ -1237,6 +1258,14 @@ describe("provider proxying — via suggest()", () => {
       ],
       ["g", { crates: [{ name: "one" }, {}, { name: "two" }] }],
       ["gh", { items: [{ full_name: "one" }, {}, { title: "two" }] }],
+      ["nu", { data: ["one", null, "two"] }],
+      [
+        "pack",
+        {
+          results: [{ name: "one" }, {}, { name: { "en-US": "two" } }],
+        },
+      ],
+      ["mvn", { response: { docs: [{ id: "one" }, {}, { id: "two" }] } }],
     ];
 
     for (const [trigger, body] of cases) {
@@ -1288,7 +1317,10 @@ describe("provider proxying — via suggest()", () => {
     expect(fetchSpy).toHaveBeenCalledWith(
       "https://api.github.com/search/repositories?q=react&per_page=8",
       {
-        headers: { "User-Agent": "flashbang-suggest/1.0" },
+        headers: {
+          "User-Agent":
+            "flashbang-suggest/1.0 (+https://github.com/ph1losof/flashbang)",
+        },
         signal: expect.any(AbortSignal),
       }
     );
@@ -1312,6 +1344,22 @@ describe("provider proxying — via suggest()", () => {
       expect(await response.json()).toEqual([query, []]);
     }
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test("site-specific forwarding rejects oversized provider responses", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      Response.json({
+        items: [{ full_name: "x".repeat(70_000) }],
+      })
+    );
+    const response = await suggest(
+      "!gh react",
+      defaultSettings,
+      undefined,
+      false,
+      true
+    );
+    expect(await response.json()).toEqual(["!gh react", []]);
   });
 
   test("site-specific forwarding falls back to the selected provider", async () => {

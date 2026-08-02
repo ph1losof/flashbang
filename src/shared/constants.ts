@@ -7,8 +7,14 @@ export const SITE_SUGGESTION_SHAPE = {
   reddit: 3,
   crates: 4,
   algolia: 5,
+  strings: 6,
+  results: 7,
+  maven: 8,
 } as const;
 export type SiteSuggestionShape = keyof typeof SITE_SUGGESTION_SHAPE;
+export const SITE_SUGGESTION_MIN_CODE_POINTS = 2;
+export const SITE_SUGGESTION_TIMEOUT_MS = 2500;
+export const SITE_SUGGESTION_MAX_BYTES = 65_536;
 export const TOP_FRECENCY_ENTRIES = 8;
 export const MAX_FRECENCY_ENTRIES = 64;
 export const FRECENCY_BOOST_MULTIPLIER = 10;

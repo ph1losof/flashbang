@@ -1,7 +1,10 @@
 import { CH_CR, CH_FF, CH_NL, CH_SPACE, CH_TAB, CH_VTAB } from "./shared/chars";
 import {
   JSON_HEADERS,
+  SITE_SUGGESTION_MAX_BYTES,
+  SITE_SUGGESTION_MIN_CODE_POINTS,
   SITE_SUGGESTION_SHAPE,
+  SITE_SUGGESTION_TIMEOUT_MS,
   SUGGEST_TRIGGER_PROVIDERS,
   SUGGEST_URLS,
   TOP_K,
@@ -396,13 +399,82 @@ function siteSpecificCompletions(shape: number, payload: unknown): string[] {
       }
       break;
     }
+    case SITE_SUGGESTION_SHAPE.strings: {
+      const values = Array.isArray(payload)
+        ? payload
+        : (payload as { data?: unknown } | null)?.data;
+      if (Array.isArray(values)) {
+        for (let i = 0; i < values.length && completions.length < TOP_K; i++) {
+          if (typeof values[i] === "string") {
+            completions.push(values[i]);
+          }
+        }
+      }
+      break;
+    }
+    case SITE_SUGGESTION_SHAPE.results: {
+      const values = (payload as { results?: unknown } | null)?.results;
+      if (Array.isArray(values)) {
+        for (let i = 0; i < values.length && completions.length < TOP_K; i++) {
+          const item = values[i] as {
+            name?: unknown;
+          } | null;
+          let value = item?.name;
+          if (value && typeof value === "object") {
+            const translations = value as Record<string, unknown>;
+            value = translations["en-US"];
+            if (typeof value !== "string") {
+              for (const locale in translations) {
+                const translation = translations[locale];
+                if (typeof translation === "string") {
+                  value = translation;
+                  break;
+                }
+              }
+            }
+          }
+          if (typeof value === "string") {
+            completions.push(value);
+          }
+        }
+      }
+      break;
+    }
+    case SITE_SUGGESTION_SHAPE.maven: {
+      const values = (
+        payload as { response?: { docs?: Array<{ id?: unknown }> } } | null
+      )?.response?.docs;
+      if (values) {
+        for (let i = 0; i < values.length && completions.length < TOP_K; i++) {
+          const value = values[i].id;
+          if (typeof value === "string") {
+            completions.push(value);
+          }
+        }
+      }
+      break;
+    }
   }
   return completions;
 }
 
-function hasMultipleCodePoints(value: string): boolean {
-  const first = value.codePointAt(0);
-  return first !== undefined && value.length > (first > 0xffff ? 2 : 1);
+function hasMinimumCodePoints(value: string, minimum: number): boolean {
+  let offset = 0;
+  for (let count = 0; count < minimum; count++) {
+    if (offset >= value.length) {
+      return false;
+    }
+    const code = value.charCodeAt(offset++);
+    if (
+      code >= 0xd800 &&
+      code <= 0xdbff &&
+      offset < value.length &&
+      (value.charCodeAt(offset) & 0xfc00) === 0xdc00
+    ) {
+      offset++;
+    }
+  }
+  return true;
 }
 
 export function parsePartialBang(
@@ -795,8 +867,12 @@ export async function suggest(
     if (bangTerminal >= 0) {
       encodedQuery = encodeURIComponent(queryValue);
       siteUrl = resolveSiteSuggestionUrl(bangTerminal, encodedQuery);
-      if (siteUrl && !hasMultipleCodePoints(queryValue)) {
-        return empty(query);
+      if (siteUrl) {
+        if (
+          !hasMinimumCodePoints(queryValue, SITE_SUGGESTION_MIN_CODE_POINTS)
+        ) {
+          return empty(query);
+        }
       }
     }
   }
@@ -810,14 +886,29 @@ export async function suggest(
     const requestUrl = siteUrl ?? fillTemplate(endpoint!, encodedQuery);
     const res = siteUrl
       ? await fetch(requestUrl, {
-          headers: { "User-Agent": "flashbang-suggest/1.0" },
-          signal: AbortSignal.timeout(2500),
+          headers: {
+            "User-Agent":
+              "flashbang-suggest/1.0 (+https://github.com/ph1losof/flashbang)",
+          },
+          signal: AbortSignal.timeout(SITE_SUGGESTION_TIMEOUT_MS),
         })
       : await fetch(requestUrl);
     if (!res.ok) {
       return empty(query);
     }
+    if (siteUrl) {
+      const contentLength = Number(res.headers.get("Content-Length"));
+      if (
+        Number.isFinite(contentLength) &&
+        contentLength > SITE_SUGGESTION_MAX_BYTES
+      ) {
+        return empty(query);
+      }
+    }
     const body = await res.text();
+    if (siteUrl && body.length > SITE_SUGGESTION_MAX_BYTES) {
+      return empty(query);
+    }
     const parsed: unknown = JSON.parse(body);
     const payload: unknown = siteUrl
       ? [
