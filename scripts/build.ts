@@ -20,6 +20,30 @@ import {
 const PRELIMINARY_SW_PATH = `${DIST_DIR}/sw-cache-input.js`;
 const SERVER_DIST_DIR = `${DIST_DIR}-server`;
 
+export function isCloudflarePagesBuild(value = process.env.CF_PAGES): boolean {
+  return value === "1";
+}
+
+export async function promoteBrotliForCloudflarePages(
+  assetPath: string,
+  enabled = isCloudflarePagesBuild()
+): Promise<boolean> {
+  if (!enabled) {
+    return false;
+  }
+  if (!(assetPath.startsWith("/") && !assetPath.includes(".."))) {
+    throw new Error(`Invalid Pages asset path: ${assetPath}`);
+  }
+  const outputPath = `${DIST_DIR}${assetPath}`;
+  const brotliPath = `${outputPath}.br`;
+  if (!(await Bun.file(brotliPath).exists())) {
+    throw new Error(`Missing precompressed Pages asset: ${brotliPath}`);
+  }
+  await Bun.write(outputPath, Bun.file(brotliPath));
+  await rm(brotliPath);
+  return true;
+}
+
 export interface CacheVersionInput {
   bytes: Uint8Array;
   path: string;
@@ -237,6 +261,14 @@ export async function main(): Promise<void> {
   const fallbackShellHeaders = Object.entries(FALLBACK_SHELL_HEADERS).map(
     ([key, value]) => `  ${key}: ${value}`
   );
+  const pagesEncodedBangData = isCloudflarePagesBuild();
+  const bangDataHeaders = pagesEncodedBangData
+    ? [
+        "  Cache-Control: public, max-age=31536000, immutable, no-transform",
+        "  Content-Encoding: br",
+        "  Content-Type: application/octet-stream",
+      ]
+    : ["  Cache-Control: public, max-age=31536000, immutable"];
   await Bun.write(
     `${DIST_DIR}/_headers`,
     [
@@ -264,7 +296,7 @@ export async function main(): Promise<void> {
       `  ${swCspHeader}`,
       "",
       bangDataAsset,
-      "  Cache-Control: public, max-age=31536000, immutable",
+      ...bangDataHeaders,
       "",
       bangMetaAsset,
       "  Cache-Control: public, max-age=31536000, immutable",
@@ -290,6 +322,14 @@ export async function main(): Promise<void> {
       },
     });
     await Bun.write(`${DIST_DIR}/${file}.br`, br);
+  }
+
+  if (
+    await promoteBrotliForCloudflarePages(bangDataAsset, pagesEncodedBangData)
+  ) {
+    console.log(
+      `Embedded Brotli catalog for Cloudflare Pages: ${bangDataAsset}`
+    );
   }
 
   console.log("=== Done ===");

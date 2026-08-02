@@ -4,7 +4,9 @@ import {
   bundleProductionServer,
   bundleServiceWorker,
   createCacheVersion,
+  isCloudflarePagesBuild,
   precacheFileInputs,
+  promoteBrotliForCloudflarePages,
   requiredAppAssetPaths,
 } from "../scripts/build";
 import {
@@ -30,6 +32,34 @@ function buildOutput({
 }
 
 describe("build cache version", () => {
+  test("detects Cloudflare Pages builds exactly", () => {
+    expect(isCloudflarePagesBuild("1")).toBe(true);
+    expect(isCloudflarePagesBuild("true")).toBe(false);
+    expect(isCloudflarePagesBuild("")).toBe(false);
+  });
+
+  test("promotes a precompressed Pages asset only when enabled", async () => {
+    const assetPath = "/pages-encoded-test.bin";
+    const outputPath = `dist${assetPath}`;
+    const brotliPath = `${outputPath}.br`;
+    await Bun.write(outputPath, "identity");
+    await Bun.write(brotliPath, "compressed");
+    try {
+      expect(await promoteBrotliForCloudflarePages(assetPath, false)).toBe(
+        false
+      );
+      expect(await Bun.file(outputPath).text()).toBe("identity");
+      expect(await promoteBrotliForCloudflarePages(assetPath, true)).toBe(true);
+      expect(await Bun.file(outputPath).text()).toBe("compressed");
+      expect(await Bun.file(brotliPath).exists()).toBe(false);
+    } finally {
+      await Bun.file(outputPath).delete();
+      if (await Bun.file(brotliPath).exists()) {
+        await Bun.file(brotliPath).delete();
+      }
+    }
+  });
+
   test("is deterministic regardless of input order", () => {
     const inputs = [
       { path: "/home", bytes: new TextEncoder().encode("home") },
