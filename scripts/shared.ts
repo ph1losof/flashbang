@@ -1,7 +1,6 @@
 import { basename } from "node:path";
 import { minify } from "@minify-html/node";
 import { build as buildCSS } from "@unocss/cli";
-import { HOT_TRIGGERS } from "../src/generated/bangs-hot.js";
 import { BANG_SHARD_COUNT } from "../src/shared/bang-shards";
 import { SEED_CACHE_NAME } from "../src/shared/seed-cache";
 
@@ -56,7 +55,7 @@ export function configureColdFallbackAsset(
 
 export function configureHotBangTriggers(
   html: string,
-  triggers: readonly string[] = HOT_TRIGGERS
+  triggers: readonly string[]
 ): string {
   return html.replaceAll(HOT_BANG_TRIGGERS_MARKER, JSON.stringify(triggers));
 }
@@ -72,7 +71,8 @@ function configureRedirectAssets(
   html: string,
   bangDataAsset: string,
   fallbackAsset: string,
-  coldFallbackAsset: string
+  coldFallbackAsset: string,
+  hotBangTriggers: readonly string[]
 ): string {
   return configureSeedCacheName(
     configureHotBangTriggers(
@@ -82,7 +82,8 @@ function configureRedirectAssets(
           fallbackAsset
         ),
         coldFallbackAsset
-      )
+      ),
+      hotBangTriggers
     )
   );
 }
@@ -192,6 +193,7 @@ export async function buildHTMLAssets(
   fallbackAsset = "/fallback.js",
   coldFallbackAsset = "/cold-fallback.js"
 ): Promise<void> {
+  const { HOT_TRIGGERS } = await import("../src/generated/bangs-hot.js");
   const inlineCSS = (src: string) =>
     src.replace(
       /<link rel="stylesheet" href="\/styles\.css"\s*\/?>/,
@@ -202,7 +204,8 @@ export async function buildHTMLAssets(
     await Bun.file("src/ui/index.html").text(),
     bangDataAsset,
     fallbackAsset,
-    coldFallbackAsset
+    coldFallbackAsset,
+    HOT_TRIGGERS
   );
   await Bun.write(
     `${DIST_DIR}/index.html`,
