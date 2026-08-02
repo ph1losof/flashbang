@@ -138,6 +138,8 @@ export async function bundleProductionServer(): Promise<void> {
     minify: true,
     target: "bun",
     format: "esm",
+    loader: { ".bin": "file" },
+    define: { __BUNDLED_BANG_TRIE__: "true" },
   });
   if (!result.success) {
     throw new AggregateError(result.logs, "Failed to bundle production server");
@@ -167,13 +169,17 @@ export async function main(): Promise<void> {
     .slice(0, 12);
   const bangDataAsset = `/bangs-${bangDataHash}.bin`;
   await Bun.write(`${DIST_DIR}${bangDataAsset}`, bangDataBytes);
-  const bangShardBytes = generateBinaryShards(
-    await Bun.file("data/bangs.json").json()
+  const { router: bangShardRouter, shards: bangShardBytes } =
+    generateBinaryShards(await Bun.file("data/bangs.json").json());
+  const bangShardHash = createHash("sha256").update(bangShardRouter);
+  for (const bytes of bangShardBytes) {
+    bangShardHash.update(`${bytes.byteLength}:`);
+    bangShardHash.update(bytes);
+  }
+  const bangShardVersion = bangShardHash.digest("hex").slice(0, 12);
+  const bangShardAssets = bangShardBytes.map(
+    (_, shard) => `/bangs-s${shard.toString(36)}-${bangShardVersion}.bin`
   );
-  const bangShardAssets = bangShardBytes.map((bytes, shard) => {
-    const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 12);
-    return `/bangs-s${shard.toString(16)}-${hash}.bin`;
-  });
   await Promise.all(
     bangShardBytes.map((bytes, shard) =>
       Bun.write(`${DIST_DIR}${bangShardAssets[shard]}`, bytes)
@@ -193,7 +199,8 @@ export async function main(): Promise<void> {
     bangMetaAsset,
     "fallback-[hash].[ext]",
     bangDataAsset,
-    bangShardAssets
+    bangShardRouter,
+    bangShardVersion
   );
   const requiredAppAssets = [
     ...requiredAppAssetPaths(appOutputs),
@@ -214,7 +221,8 @@ export async function main(): Promise<void> {
     bangDataAsset,
     fallbackAsset,
     coldFallbackAsset,
-    bangShardAssets
+    bangShardRouter,
+    bangShardVersion
   );
   await rm(`${DIST_DIR}/styles.css`);
 

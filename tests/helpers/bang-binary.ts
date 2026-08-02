@@ -1,5 +1,5 @@
 export const BANG_BINARY_MAGIC = 0x31424246;
-export const BANG_BINARY_VERSION = 8;
+export const BANG_BINARY_VERSION = 9;
 export const BANG_BINARY_HEADER_WORDS = 13;
 
 export const BANG_META_MAGIC = 0x314d4246;

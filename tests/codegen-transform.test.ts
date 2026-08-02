@@ -207,7 +207,9 @@ describe("codegen artifact generators", () => {
     );
     expect(artifacts.sparseJs).toContain("lookupAdvancedBang");
     expect(artifacts.sparseJs).toContain("lookupSnapOverride");
-    expect(artifacts.trieJs).toContain("export const NODE_EDGE_STARTS");
+    expect(artifacts.trieLoaderJs).toContain("export const NODE_EDGE_STARTS");
+    expect(artifacts.trieLoaderJs).toContain("./bangs-trie.bin");
+    expect(artifacts.trieBinary.byteLength).toBeGreaterThan(0);
   });
 
   test("keeps binary and metadata generation deterministic", () => {
@@ -227,9 +229,11 @@ describe("codegen artifact generators", () => {
       mediawiki: {},
     });
 
-    expect(artifacts.trieJs).toContain("export const TERM_E_KIND");
-    expect(artifacts.trieJs).toContain("export const ENDPOINT_SHAPE");
-    expect(artifacts.trieJs).toContain("https://example.com/suggest?q=");
+    expect(artifacts.trieLoaderJs).toContain("export const TERM_E_KIND");
+    expect(artifacts.trieLoaderJs).toContain("export const ENDPOINT_SHAPE");
+    expect(new TextDecoder().decode(artifacts.trieBinary)).toContain(
+      "https://example.com/suggest?q="
+    );
   });
 });
 
@@ -272,6 +276,9 @@ describe("site suggestion discovery", () => {
     expect(probed).toEqual(["docs.example.wiki"]);
     expect(registry.mediawiki).toEqual({ "docs.example.wiki": "/w/" });
     expect(registry.curated["github.com"]?.shape).toBe("algolia");
+    expect(registry.curated["hn.algolia.com"]?.url).toBe(
+      "https://hn.algolia.com/api/v1/search?query={}&hitsPerPage=8&attributesToRetrieve=title"
+    );
   });
 });
 describe("validateBangs", () => {

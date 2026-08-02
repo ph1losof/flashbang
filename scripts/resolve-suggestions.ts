@@ -37,7 +37,7 @@ const CURATED: Readonly<Record<string, CuratedSuggestionSite>> = {
   },
   "hn.algolia.com": {
     shape: "algolia",
-    url: "https://hn.algolia.com/api/v1/search?query={}&hitsPerPage=8",
+    url: "https://hn.algolia.com/api/v1/search?query={}&hitsPerPage=8&attributesToRetrieve=title",
   },
   "wikipedia.org": {
     shape: "opensearch",

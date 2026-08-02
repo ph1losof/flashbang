@@ -4,7 +4,11 @@ import {
   lookupAdvancedBang,
   lookupSnapOverride,
 } from "../src/generated/bangs-sparse.js";
-import { bangShardIndex } from "../src/shared/bang-shards";
+import {
+  BANG_SHARD_COUNT,
+  BANG_SHARD_ROUTER_SIZE,
+  bangShardIndex,
+} from "../src/shared/bang-shards";
 import { hashFNV1a } from "../src/shared/hash";
 import { initializeBangData, lookupBang } from "../src/sw/bang-data";
 import { decodeBangCatalog } from "../src/ui/bang-catalog";
@@ -122,7 +126,20 @@ describe("codegen round-trip", () => {
   });
 
   test("routes every regular bang through its deterministic cold shard", async () => {
-    const shards = generateBinaryShards(bangs);
+    const { router, shards } = generateBinaryShards(bangs);
+    const repeated = generateBinaryShards(bangs);
+    expect(BANG_SHARD_COUNT % 2).toBe(1);
+    expect(router).toHaveLength(BANG_SHARD_ROUTER_SIZE);
+    expect(shards).toHaveLength(BANG_SHARD_COUNT);
+    expect(Array.from(repeated.router)).toEqual(Array.from(router));
+    expect(repeated.shards.map((shard) => Bun.hash(shard))).toEqual(
+      shards.map((shard) => Bun.hash(shard))
+    );
+    const shardSizes = shards.map((shard) => shard.byteLength);
+    expect(
+      Math.max(...shardSizes) /
+        (shardSizes.reduce((a, b) => a + b) / shardSizes.length)
+    ).toBeLessThan(1.15);
     for (let shardId = 0; shardId < shards.length; shardId++) {
       const shard = shards[shardId];
       initializeBangData(
@@ -133,7 +150,7 @@ describe("codegen round-trip", () => {
       );
       for (const bang of bangs) {
         const hash = hashFNV1a(bang.trigger);
-        if (!(bang.regex || bangShardIndex(hash) !== shardId)) {
+        if (!(bang.regex || bangShardIndex(hash, router) !== shardId)) {
           expect(lookupBang(bang.trigger, hash)).not.toBeNull();
         }
       }

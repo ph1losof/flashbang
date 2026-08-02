@@ -10,7 +10,8 @@ import type { RedirectSettings } from "../src/sw/redirect";
 import { decodeBangCatalog } from "../src/ui/bang-catalog";
 import { ensureGeneratedBangData, GENERATED_BANG_DATA_FILES } from "./codegen";
 
-const [binaryPath, sparsePath, metaPath, triePath] = GENERATED_BANG_DATA_FILES;
+const [binaryPath, sparsePath, metaPath, trieLoaderPath, , trieBinaryPath] =
+  GENERATED_BANG_DATA_FILES;
 
 interface ProfileOptions {
   quick: boolean;
@@ -455,18 +456,18 @@ const { initializeBangData, lookupBang } = await import("../src/sw/bang-data");
 const binaryBuffer = await Bun.file(binaryPath).arrayBuffer();
 initializeBangData(binaryBuffer);
 
+const {
+  EDGE_CHILDREN,
+  NODE_EDGE_COUNTS,
+  NODE_EDGE_STARTS,
+  NODE_MAX_RELEVANCE,
+  NODE_TERMINALS,
+  ROOT,
+  TERM_K_BLOB,
+  TERM_K_LEN,
+} = await import("../src/generated/bangs-trie-loader.js");
 const [
   { BANG_COUNT },
-  {
-    EDGE_CHILDREN,
-    NODE_EDGE_COUNTS,
-    NODE_EDGE_STARTS,
-    NODE_MAX_RELEVANCE,
-    NODE_TERMINALS,
-    ROOT,
-    TERM_K_BLOB,
-    TERM_K_LEN,
-  },
   { handleSuggestRequest },
   {
     bangSuggestions,
@@ -480,7 +481,6 @@ const [
   { readQueryParam, readTwoQueryParams },
 ] = await Promise.all([
   import("../src/generated/bangs-sparse.js"),
-  import("../src/generated/bangs-trie.js"),
   import("../src/server/handlers"),
   import("../src/suggest-bang"),
   import("../src/suggest"),
@@ -523,7 +523,9 @@ console.log(
 separator("1. DATA SIZE & STRUCTURE ANALYSIS");
 
 const metaBytes = Bun.file(metaPath).size;
-const trieBytes = Bun.file(triePath).size;
+const trieModuleBytes = Bun.file(trieLoaderPath).size;
+const trieDataBytes = Bun.file(trieBinaryPath).size;
+const trieBytes = trieModuleBytes + trieDataBytes;
 const binaryBytes = Bun.file(binaryPath).size;
 const sparseBytes = Bun.file(sparsePath).size;
 const totalGeneratedBytes = binaryBytes + sparseBytes + metaBytes + trieBytes;
@@ -540,7 +542,7 @@ console.log(
 );
 
 console.log(
-  `bangs-trie.js: ${fmtBytesExact(trieBytes)}  (radix trie, used by suggest)`
+  `bangs-trie:    ${fmtBytesExact(trieBytes)}  (${fmtBytesExact(trieModuleBytes)} loader + ${fmtBytesExact(trieDataBytes)} binary data)`
 );
 console.log(`Production generated: ${fmtBytesExact(totalGeneratedBytes)}`);
 console.log(
@@ -1459,7 +1461,7 @@ for (let i = 0; i < COLD_RUNS; i++) {
     runIsolatedNs(
       `
 const t0 = Bun.nanoseconds();
-await import("./src/generated/bangs-trie.js");
+await import("./src/generated/bangs-trie-loader.js");
 console.log(Bun.nanoseconds() - t0);
 `,
       "isolated trie import"
@@ -1469,7 +1471,7 @@ console.log(Bun.nanoseconds() - t0);
 const evalTrieStats = summarizeRuns(evalTrieTimes);
 
 console.log(
-  `\nbangs-trie.js cold import (${fmtBytesExact(trieBytes)}, ${COLD_RUNS} isolated runs):`
+  `\nbangs-trie cold import (${fmtBytesExact(trieBytes)}, ${COLD_RUNS} isolated runs):`
 );
 console.log(`  Median: ${fmt(evalTrieStats.p50)}`);
 console.log(`  p90:    ${fmt(evalTrieStats.p90)}`);

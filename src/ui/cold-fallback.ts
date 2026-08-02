@@ -13,7 +13,8 @@ import {
   trimRawStart,
 } from "../sw/redirect-prefix";
 
-declare const __BANG_SHARD_ASSETS__: readonly string[];
+declare const __BANG_SHARD_ROUTER__: readonly number[];
+declare const __BANG_SHARD_VERSION__: string;
 
 const freshProfile =
   typeof indexedDB.databases === "function"
@@ -47,7 +48,7 @@ export async function resolveColdFallback(
   }
   if (!bangData) {
     const response = await fetch(
-      __BANG_SHARD_ASSETS__[bangShardIndex(parsed.hash)]
+      `/bangs-s${bangShardIndex(parsed.hash, __BANG_SHARD_ROUTER__).toString(36)}-${__BANG_SHARD_VERSION__}.bin`
     );
     if (!response.ok) {
       throw new Error(`Failed to load bang shard: ${response.status}`);

@@ -1673,7 +1673,7 @@ test("first fallback seeds the worker for the next offline redirect", async ({
     context.on("request", (request) => {
       const pathname = new URL(request.url()).pathname;
       if (
-        /^\/bangs-s[0-9a-f]-[a-f0-9]{12}\.bin$/.test(pathname) &&
+        /^\/bangs-s[0-9a-z]+-[a-f0-9]{12}\.bin$/.test(pathname) &&
         !coldFallbackFinished
       ) {
         shardStartedBeforeColdFallbackFinished = true;
@@ -1758,7 +1758,7 @@ test("first fallback seeds the worker for the next offline redirect", async ({
       .toBe(true);
     expect(
       bangDataRequests.some((pathname) =>
-        /^\/bangs-s[0-9a-f]-[a-f0-9]{12}\.bin$/.test(pathname)
+        /^\/bangs-s[0-9a-z]+-[a-f0-9]{12}\.bin$/.test(pathname)
       )
     ).toBe(true);
     expect(shardStartedBeforeColdFallbackFinished).toBe(true);

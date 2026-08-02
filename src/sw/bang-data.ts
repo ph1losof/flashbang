@@ -1,10 +1,11 @@
 export type BuiltinUrlParts = readonly [string, string | null];
 
 const MAGIC = 0x31424246;
-const VERSION = 8;
+const VERSION = 9;
 const HEADER_WORDS = 13;
 const HEADER_BYTES = HEADER_WORDS * Uint32Array.BYTES_PER_ELEMENT;
 const MPH_SLOT_MULTIPLIER = 0x85ebca6b;
+const MPH_BUCKET_MULTIPLIER = 0x7feb352d;
 const CHECKPOINT_SHIFT = 4;
 const CHECKPOINT_SIZE = 1 << CHECKPOINT_SHIFT;
 const PREFIX_LENGTH_MASK = 0x1fff;
@@ -201,7 +202,10 @@ export function initializeBangData(buffer: ArrayBuffer): void {
 
   lookup = (_trigger, hash) => {
     const unsignedHash = hash >>> 0;
-    const bucket = unsignedHash & bucketMask;
+    let bucketHash = unsignedHash ^ (unsignedHash >>> 16);
+    bucketHash = Math.imul(bucketHash, MPH_BUCKET_MULTIPLIER);
+    bucketHash ^= bucketHash >>> 15;
+    const bucket = bucketHash & bucketMask;
     const displacement = displacements[bucket];
     const index =
       displacement < 0

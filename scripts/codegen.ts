@@ -1,7 +1,10 @@
-import { Buffer } from "node:buffer";
 import { mkdir, rm } from "node:fs/promises";
 import { $ } from "bun";
-import { BANG_SHARD_COUNT, bangShardIndex } from "../src/shared/bang-shards";
+import {
+  BANG_SHARD_COUNT,
+  BANG_SHARD_ROUTER_SIZE,
+  bangShardCell,
+} from "../src/shared/bang-shards";
 import {
   CAPTURE_ENCODE_PERCENT,
   CAPTURE_ENCODE_PLUS,
@@ -66,8 +69,9 @@ export const GENERATED_BANG_DATA_FILES = [
   "src/generated/bangs.bin",
   "src/generated/bangs-sparse.js",
   "src/generated/bangs-meta.bin",
-  "src/generated/bangs-trie.js",
+  "src/generated/bangs-trie-loader.js",
   "src/generated/bangs-hot.js",
+  "src/generated/bangs-trie.bin",
 ] as const;
 
 const DATA_DIR = "data";
@@ -79,7 +83,7 @@ const SUGGEST_SITES_PATH = `${DATA_DIR}/suggest-sites.json`;
 const GENERATED_OUT_DIR = "src/generated";
 const HOT_BANG_LIMIT = 24;
 const BANG_BINARY_MAGIC = 0x31424246;
-const BANG_BINARY_VERSION = 8;
+const BANG_BINARY_VERSION = 9;
 
 const DDG_SOURCE_URL = "https://duckduckgo.com/bang.js";
 const KAGI_SOURCE_URL =
@@ -96,11 +100,11 @@ async function generatedBangDataIsCurrent(): Promise<boolean> {
   if (words[0] !== BANG_BINARY_MAGIC || words[1] !== BANG_BINARY_VERSION) {
     return false;
   }
-  const trie = Bun.file("src/generated/bangs-trie.js");
+  const trie = Bun.file("src/generated/bangs-trie-loader.js");
   const tail = await trie
     .slice(Math.max(0, trie.size - 2048), trie.size)
     .text();
-  return tail.includes("export const TRIE_SCHEMA=3;");
+  return tail.includes("export const TRIE_SCHEMA=4;");
 }
 
 export async function ensureGeneratedBangData(
@@ -431,10 +435,14 @@ function nextPow2(n: number): number {
 }
 
 const MPH_SLOT_MULTIPLIER = 0x85ebca6b;
+const MPH_BUCKET_MULTIPLIER = 0x7feb352d;
 const MPH_MAX_DISPLACEMENT = 1_000_000;
 
 function mphBucket(hash: number, mask: number): number {
-  return hash & mask;
+  let mixed = hash ^ (hash >>> 16);
+  mixed = Math.imul(mixed, MPH_BUCKET_MULTIPLIER);
+  mixed ^= mixed >>> 15;
+  return mixed & mask;
 }
 
 function mphSlot(hash: number, displacement: number, size: number): number {
@@ -449,17 +457,19 @@ interface MinimalPerfectHash {
 }
 
 function buildMinimalPerfectHash(
-  triggers: readonly string[]
+  triggers: readonly string[],
+  entriesPerBucket: number
 ): MinimalPerfectHash {
   const entryCount = triggers.length;
   if (entryCount === 0) {
     throw new Error("Binary bang format requires at least one regular entry");
   }
-  const bucketCount = nextPow2(Math.max(2, Math.ceil(entryCount / 4)));
+  const bucketCount = nextPow2(
+    Math.max(2, Math.ceil(entryCount / entriesPerBucket))
+  );
   const bucketMask = bucketCount - 1;
   const hashes = Uint32Array.from(triggers, hashFNV1a);
   const knownHashes = new Map<number, string>();
-  const buckets = Array.from({ length: bucketCount }, () => [] as number[]);
   for (let i = 0; i < entryCount; i++) {
     const hash = hashes[i];
     const collision = knownHashes.get(hash);
@@ -469,9 +479,12 @@ function buildMinimalPerfectHash(
       );
     }
     knownHashes.set(hash, triggers[i]);
-    buckets[mphBucket(hash, bucketMask)].push(i);
   }
 
+  const buckets = Array.from({ length: bucketCount }, () => [] as number[]);
+  for (let i = 0; i < entryCount; i++) {
+    buckets[mphBucket(hashes[i], bucketMask)].push(i);
+  }
   const orderedBuckets = buckets
     .map((entries, id) => ({ entries, id }))
     .filter((bucket) => bucket.entries.length > 1)
@@ -677,9 +690,29 @@ function copyTypedArray(
   return offset + values.byteLength;
 }
 
-export function generateBinary(bangs: readonly Bang[]): Uint8Array {
+function generateBinaryWithBucketLoad(
+  bangs: readonly Bang[],
+  entriesPerBucket: number
+): Uint8Array {
   const packed = packBangData(bangs.filter((bang) => !bang.regex));
-  const mph = buildMinimalPerfectHash(packed.triggers);
+  let bucketLoad = entriesPerBucket;
+  let mph: MinimalPerfectHash;
+  for (;;) {
+    try {
+      mph = buildMinimalPerfectHash(packed.triggers, bucketLoad);
+      break;
+    } catch (error) {
+      const placementFailed =
+        error instanceof Error &&
+        error.message.startsWith("Unable to build binary bang MPHF bucket ");
+      if (!placementFailed || bucketLoad <= 0.25) {
+        throw error;
+      }
+      // A denser bucket assignment can occasionally produce a key group that
+      // this displacement family cannot place. Only expand the affected table.
+      bucketLoad /= 2;
+    }
+  }
   const triggers = Array.from(
     mph.slotToEntry,
     (entry) => packed.triggers[entry]
@@ -790,14 +823,100 @@ export function generateBinary(bangs: readonly Bang[]): Uint8Array {
   return output;
 }
 
-export function generateBinaryShards(bangs: readonly Bang[]): Uint8Array[] {
-  const shards = Array.from({ length: BANG_SHARD_COUNT }, () => [] as Bang[]);
+export function generateBinary(bangs: readonly Bang[]): Uint8Array {
+  return generateBinaryWithBucketLoad(bangs, 4);
+}
+
+export interface GeneratedBinaryShards {
+  router: Uint8Array;
+  shards: Uint8Array[];
+}
+
+function estimateBangBinaryByteLength(bangs: readonly Bang[]): number {
+  const packed = packBangData(bangs.filter((bang) => !bang.regex));
+  const encoder = new TextEncoder();
+  let prefixBytes = 0;
+  for (const prefix of packed.uniquePrefixes) {
+    let payload = prefix;
+    if (payload.startsWith("https://")) {
+      payload = payload.substring(8);
+    } else if (payload.startsWith("http://")) {
+      payload = payload.substring(7);
+    }
+    if (payload.startsWith("www.")) {
+      payload = payload.substring(4);
+    }
+    prefixBytes += encoder.encode(payload).byteLength;
+  }
+  const suffixBytes = encoder.encode(packed.uniqueSuffixes.join("")).byteLength;
+  const bucketCount = nextPow2(Math.max(2, Math.ceil(packed.entryCount / 4)));
+  let numericEnd = 13 * Uint32Array.BYTES_PER_ELEMENT;
+  numericEnd += bucketCount * Int16Array.BYTES_PER_ELEMENT;
+  numericEnd += packed.entryCount * Uint16Array.BYTES_PER_ELEMENT;
+  numericEnd = align2(numericEnd);
+  numericEnd +=
+    (packed.uniquePrefixes.length +
+      packed.uniqueSuffixes.length +
+      2 * packed.entryCount) *
+    Uint16Array.BYTES_PER_ELEMENT;
+  numericEnd = align4(numericEnd);
+  numericEnd +=
+    (Math.ceil(packed.uniquePrefixes.length / BANG_CHECKPOINT_SIZE) +
+      Math.ceil(packed.uniqueSuffixes.length / BANG_CHECKPOINT_SIZE)) *
+    Uint32Array.BYTES_PER_ELEMENT;
+  return numericEnd + prefixBytes + suffixBytes;
+}
+
+export function generateBinaryShards(
+  bangs: readonly Bang[]
+): GeneratedBinaryShards {
+  const cells = Array.from({ length: BANG_SHARD_ROUTER_SIZE }, (_, id) => ({
+    bangs: [] as Bang[],
+    byteWeight: 0,
+    id,
+  }));
   for (const bang of bangs) {
     if (!bang.regex) {
-      shards[bangShardIndex(hashFNV1a(bang.trigger))].push(bang);
+      const cell = cells[bangShardCell(hashFNV1a(bang.trigger))];
+      cell.bangs.push(bang);
     }
   }
-  return shards.map(generateBinary);
+  // Weight cells with Flashbang's actual packed representation. Trigger text is
+  // deliberately absent from that format, so a generic source-text estimate
+  // would optimize bytes that are never transferred.
+  for (const cell of cells) {
+    cell.byteWeight = estimateBangBinaryByteLength(cell.bangs);
+  }
+  const bins = Array.from({ length: BANG_SHARD_COUNT }, () => ({
+    bangs: [] as Bang[],
+    byteWeight: 0,
+    cells: [] as number[],
+  }));
+  for (const cell of cells.sort(
+    (left, right) => right.byteWeight - left.byteWeight || left.id - right.id
+  )) {
+    let target = bins[0];
+    for (let i = 1; i < bins.length; i++) {
+      if (bins[i].byteWeight < target.byteWeight) {
+        target = bins[i];
+      }
+    }
+    target.bangs.push(...cell.bangs);
+    target.byteWeight += cell.byteWeight;
+    target.cells.push(cell.id);
+  }
+  const router = new Uint8Array(BANG_SHARD_ROUTER_SIZE);
+  for (let shard = 0; shard < bins.length; shard++) {
+    for (const cell of bins[shard].cells) {
+      router[cell] = shard;
+    }
+  }
+  return {
+    router,
+    shards: bins.map(({ bangs: shard }) =>
+      generateBinaryWithBucketLoad(shard, 4)
+    ),
+  };
 }
 
 export function renderAdvancedLookup(bangs: readonly Bang[]): string {
@@ -1039,34 +1158,11 @@ interface PackedUnsignedSection {
 }
 
 interface PackedUnsignedData {
-  base64: string;
+  bytes: Uint8Array;
   sections: PackedUnsignedSection[];
 }
 
 const TRIE_RUNTIME_HELPERS_SOURCE = `
-function _b64bytes(s: string): Uint8Array {
-  const typedArray = Uint8Array as typeof Uint8Array & {
-    fromBase64?: (value: string) => Uint8Array;
-  };
-  if (typedArray.fromBase64) {
-    return typedArray.fromBase64(s);
-  }
-  if (typeof atob === "function") {
-    const bin = atob(s);
-    const len = bin.length;
-    const out = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      out[i] = bin.charCodeAt(i);
-    }
-    return out;
-  }
-  if (typeof Buffer !== "undefined") {
-    const b = Buffer.from(s, "base64");
-    return new Uint8Array(b.buffer, b.byteOffset, b.byteLength);
-  }
-  throw new Error("No base64 decoder available");
-}
-
 function _u8(b: Uint8Array, offset: number, length: number): Uint8Array {
   return new Uint8Array(b.buffer, b.byteOffset + offset, length);
 }
@@ -1295,7 +1391,7 @@ function packUnsignedSections(
     );
   }
   return {
-    base64: Buffer.from(output).toString("base64"),
+    bytes: output,
     sections: metadata,
   };
 }
@@ -1308,13 +1404,21 @@ function buildMinifiedTrieRuntimeHelpers(): string {
     minifyWhitespace: true,
   });
   const minified = transpiler.transformSync(TRIE_RUNTIME_HELPERS_SOURCE).trim();
-  if (!minified.includes("function _b64bytes(")) {
+  if (!minified.includes("function _u8(")) {
     throw new Error("Failed to build trie runtime helpers");
   }
   return minified;
 }
 
-function generateTrie(data: FlatTrieData, trieRuntimeHelpers: string): string {
+interface GeneratedTrie {
+  binary: Uint8Array;
+  js: string;
+}
+
+function generateTrie(
+  data: FlatTrieData,
+  trieRuntimeHelpers: string
+): GeneratedTrie {
   const termK = packStrings(data.termK);
   const termS = packStringDictionary(data.termS);
   const termD = packStringDictionary(data.termD);
@@ -1373,41 +1477,68 @@ function generateTrie(data: FlatTrieData, trieRuntimeHelpers: string): string {
       `const _V${index}=${section.reader}(_B,${section.offset},${section.length});`
   );
 
-  return (
-    trieRuntimeHelpers +
-    `const _B=_b64bytes('${packed.base64}');` +
-    views.join("") +
-    "export const NODE_EDGE_STARTS=_V0;" +
-    "export const NODE_EDGE_COUNTS=_V1;" +
-    "export const NODE_TERMINALS=_V2;" +
-    "export const NODE_MAX_RELEVANCE=_V3;" +
-    "export const EDGE_LABEL_STARTS=_V4;" +
-    "export const EDGE_LABEL_LENGTHS=_V5;" +
-    "export const EDGE_CHILDREN=_V6;" +
-    "export const TERM_R=_V7;" +
-    `export const LABELS='${jsEscape(data.labels)}';` +
-    `export const TERM_K_BLOB='${jsEscape(termK.blob)}';` +
-    "export const TERM_K_LEN=_V8;" +
-    "export const TERM_K_CP=_V9;" +
-    `export const TERM_S_BLOB='${jsEscape(termS.blob)}';` +
-    "export const TERM_S_LEN=_V10;" +
-    "export const TERM_S_CP=_V11;" +
-    "export const TERM_S_ID=_V12;" +
-    `export const TERM_D_BLOB='${jsEscape(termD.blob)}';` +
-    "export const TERM_D_LEN=_V13;" +
-    "export const TERM_D_CP=_V14;" +
-    "export const TERM_D_ID=_V15;" +
-    "export const TERM_E_KIND=_V16;" +
-    `export const ENDPOINT_P_BLOB='${jsEscape(endpointPrefixes.blob)}';` +
-    "export const ENDPOINT_P_LEN=_V17;" +
-    "export const ENDPOINT_P_CP=_V18;" +
-    `export const ENDPOINT_S_BLOB='${jsEscape(endpointSuffixes.blob)}';` +
-    "export const ENDPOINT_S_LEN=_V19;" +
-    "export const ENDPOINT_S_CP=_V20;" +
-    "export const ENDPOINT_SHAPE=_V21;" +
-    "export const ROOT=0;" +
-    "export const TRIE_SCHEMA=3;"
-  );
+  const encoder = new TextEncoder();
+  const encodedStrings = [
+    data.labels,
+    termK.blob,
+    termS.blob,
+    termD.blob,
+    endpointPrefixes.blob,
+    endpointSuffixes.blob,
+  ].map((value) => encoder.encode(value));
+  const stringOffsets: number[] = [];
+  let binaryLength = packed.bytes.byteLength;
+  for (const value of encodedStrings) {
+    stringOffsets.push(binaryLength);
+    binaryLength += value.byteLength;
+  }
+  const binary = new Uint8Array(binaryLength);
+  binary.set(packed.bytes);
+  for (let i = 0; i < encodedStrings.length; i++) {
+    binary.set(encodedStrings[i], stringOffsets[i]);
+  }
+  const stringExpression = (index: number) =>
+    `_s(${stringOffsets[index]},${encodedStrings[index].byteLength})`;
+
+  return {
+    binary,
+    js:
+      "const _F=typeof Bun==='undefined'||typeof __BUNDLED_BANG_TRIE__!=='undefined'?(await import('./bangs-trie.bin')).default:new URL('./bangs-trie.bin',import.meta.url)," +
+      `_A=typeof _F==='string'||_F instanceof URL?await Bun.file(typeof _F==='string'?new URL(_F,import.meta.url):_F).arrayBuffer():_F,_B=_A instanceof Uint8Array?_A:new Uint8Array(_A);if(_B.byteLength!==${binary.byteLength})throw new Error('Invalid generated trie data');` +
+      trieRuntimeHelpers +
+      views.join("") +
+      "const _T=new TextDecoder(),_s=(o,l)=>_T.decode(_B.subarray(o,o+l));" +
+      "export const NODE_EDGE_STARTS=_V0;" +
+      "export const NODE_EDGE_COUNTS=_V1;" +
+      "export const NODE_TERMINALS=_V2;" +
+      "export const NODE_MAX_RELEVANCE=_V3;" +
+      "export const EDGE_LABEL_STARTS=_V4;" +
+      "export const EDGE_LABEL_LENGTHS=_V5;" +
+      "export const EDGE_CHILDREN=_V6;" +
+      "export const TERM_R=_V7;" +
+      `export const LABELS=${stringExpression(0)};` +
+      `export const TERM_K_BLOB=${stringExpression(1)};` +
+      "export const TERM_K_LEN=_V8;" +
+      "export const TERM_K_CP=_V9;" +
+      `export const TERM_S_BLOB=${stringExpression(2)};` +
+      "export const TERM_S_LEN=_V10;" +
+      "export const TERM_S_CP=_V11;" +
+      "export const TERM_S_ID=_V12;" +
+      `export const TERM_D_BLOB=${stringExpression(3)};` +
+      "export const TERM_D_LEN=_V13;" +
+      "export const TERM_D_CP=_V14;" +
+      "export const TERM_D_ID=_V15;" +
+      "export const TERM_E_KIND=_V16;" +
+      `export const ENDPOINT_P_BLOB=${stringExpression(4)};` +
+      "export const ENDPOINT_P_LEN=_V17;" +
+      "export const ENDPOINT_P_CP=_V18;" +
+      `export const ENDPOINT_S_BLOB=${stringExpression(5)};` +
+      "export const ENDPOINT_S_LEN=_V19;" +
+      "export const ENDPOINT_S_CP=_V20;" +
+      "export const ENDPOINT_SHAPE=_V21;" +
+      "export const ROOT=0;" +
+      "export const TRIE_SCHEMA=4;",
+  };
 }
 
 interface CodegenOptions {
@@ -1489,7 +1620,8 @@ interface GeneratedArtifacts {
   hotJs: string;
   meta: Uint8Array;
   sparseJs: string;
-  trieJs: string;
+  trieBinary: Uint8Array;
+  trieLoaderJs: string;
 }
 
 function generateHotBangs(bangs: readonly Bang[]): string {
@@ -1587,12 +1719,14 @@ export function buildGeneratedArtifacts(
   );
   const trieData = flattenTrie(trieRoot, suggestionSites);
   const trieRuntimeHelpers = buildMinifiedTrieRuntimeHelpers();
+  const trie = generateTrie(trieData, trieRuntimeHelpers);
   return {
     binary: generateBinary(bangs),
     hotJs: generateHotBangs(bangs),
     meta: generateMeta(bangs),
     sparseJs: generateSparse(bangs),
-    trieJs: generateTrie(trieData, trieRuntimeHelpers),
+    trieBinary: trie.binary,
+    trieLoaderJs: trie.js,
   };
 }
 
@@ -1603,17 +1737,21 @@ async function writeGeneratedArtifacts(
   await Promise.all([
     rm(`${outDir}/bangs-meta.js`, { force: true }),
     rm(`${outDir}/bangs-meta.d.ts`, { force: true }),
+    rm(`${outDir}/bangs-trie.js`, { force: true }),
+    rm(`${outDir}/bangs-trie.d.ts`, { force: true }),
     Bun.write(`${outDir}/bangs.bin`, artifacts.binary),
     Bun.write(`${outDir}/bangs-hot.js`, artifacts.hotJs),
     Bun.write(`${outDir}/bangs-meta.bin`, artifacts.meta),
     Bun.write(`${outDir}/bangs-sparse.js`, artifacts.sparseJs),
-    Bun.write(`${outDir}/bangs-trie.js`, artifacts.trieJs),
+    Bun.write(`${outDir}/bangs-trie.bin`, artifacts.trieBinary),
+    Bun.write(`${outDir}/bangs-trie-loader.js`, artifacts.trieLoaderJs),
   ]);
   console.log(`  bangs.bin: ${artifacts.binary.byteLength} bytes`);
   console.log(`  bangs-hot.js: ${artifacts.hotJs.length} bytes`);
   console.log(`  bangs-meta.bin: ${artifacts.meta.byteLength} bytes`);
   console.log(`  bangs-sparse.js: ${artifacts.sparseJs.length} bytes`);
-  console.log(`  bangs-trie.js: ${artifacts.trieJs.length} bytes`);
+  console.log(`  bangs-trie.bin: ${artifacts.trieBinary.byteLength} bytes`);
+  console.log(`  bangs-trie-loader.js: ${artifacts.trieLoaderJs.length} bytes`);
 }
 
 async function writeGeneratedDeclarations(outDir: string): Promise<void> {
@@ -1639,7 +1777,7 @@ async function writeGeneratedDeclarations(outDir: string): Promise<void> {
       ].join("\n")
     ),
     Bun.write(
-      `${outDir}/bangs-trie.d.ts`,
+      `${outDir}/bangs-trie-loader.d.ts`,
       [
         "export declare const LABELS: string;",
         "export declare const NODE_EDGE_STARTS: Uint8Array | Uint16Array | Uint32Array;",
@@ -1670,7 +1808,7 @@ async function writeGeneratedDeclarations(outDir: string): Promise<void> {
         "export declare const ENDPOINT_S_CP: Uint8Array | Uint16Array | Uint32Array;",
         "export declare const ENDPOINT_SHAPE: Uint8Array | Uint16Array | Uint32Array;",
         "export declare const ROOT: number;",
-        "export declare const TRIE_SCHEMA: 3;",
+        "export declare const TRIE_SCHEMA: 4;",
         "",
       ].join("\n")
     ),

@@ -93,7 +93,8 @@ const generated = [
   Bun.file("src/generated/bangs.bin"),
   Bun.file("src/generated/bangs-sparse.js"),
   Bun.file("src/generated/bangs-meta.bin"),
-  Bun.file("src/generated/bangs-trie.js"),
+  Bun.file("src/generated/bangs-trie-loader.js"),
+  Bun.file("src/generated/bangs-trie.bin"),
   Bun.file("src/generated/bangs-hot.js"),
 ];
 if (

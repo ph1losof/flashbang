@@ -12,7 +12,7 @@ import {
 import {
   bundleUI,
   configureBangDataAsset,
-  configureBangShardAssets,
+  configureBangShardLayout,
   configureColdFallbackAsset,
   configureCustomSuggestOption,
   configureFallbackAsset,
@@ -20,6 +20,7 @@ import {
   configureSeedCacheName,
   customSuggestUrlsEnabled,
 } from "../scripts/shared";
+import { BANG_SHARD_ROUTER_SIZE } from "../src/shared/bang-shards";
 
 interface BuildOutputFixture {
   logs?: Array<Error>;
@@ -356,23 +357,24 @@ describe("bang data asset injection", () => {
     ).toBe('<script src="/cold-fallback-0123456789ab.js"></script>');
   });
 
-  test("replaces the generated bang shard asset marker", () => {
-    const assets = Array.from(
-      { length: 16 },
-      (_, shard) => `/bangs-s${shard.toString(16)}-0123456789ab.bin`
-    );
+  test("replaces the generated bang shard layout markers", () => {
+    const router = new Uint8Array(BANG_SHARD_ROUTER_SIZE);
     expect(
-      configureBangShardAssets(
-        'const shards="__BANG_SHARD_ASSETS_JSON__"',
-        assets
+      configureBangShardLayout(
+        'const router="__BANG_SHARD_ROUTER_JSON__",version="__BANG_SHARD_VERSION__"',
+        router,
+        "0123456789ab"
       )
-    ).toBe(`const shards=${JSON.stringify(assets)}`);
+    ).toBe(
+      `const router=${JSON.stringify(Array.from(router))},version="0123456789ab"`
+    );
     expect(() =>
-      configureBangShardAssets(
-        'const shards="__BANG_SHARD_ASSETS_JSON__"',
-        assets.slice(1)
+      configureBangShardLayout(
+        'const router="__BANG_SHARD_ROUTER_JSON__"',
+        router.slice(1),
+        "0123456789ab"
       )
-    ).toThrow("Expected 16 bang shard assets");
+    ).toThrow(`Expected ${BANG_SHARD_ROUTER_SIZE} bang shard routes`);
   });
 
   test("replaces the generated hot-trigger marker", () => {
