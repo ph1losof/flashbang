@@ -83,7 +83,7 @@ const SUGGEST_SITES_PATH = `${DATA_DIR}/suggest-sites.json`;
 const GENERATED_OUT_DIR = "src/generated";
 const HOT_BANG_LIMIT = 24;
 const BANG_BINARY_MAGIC = 0x31424246;
-const BANG_BINARY_VERSION = 9;
+const BANG_BINARY_VERSION = 10;
 
 const DDG_SOURCE_URL = "https://duckduckgo.com/bang.js";
 const KAGI_SOURCE_URL =
@@ -586,6 +586,7 @@ function buildCheckpoints(
 interface PackedBangData {
   entryCount: number;
   prefixIds: number[];
+  snapTargets: Array<SnapTargetParts | null>;
   suffixIdsPlusOne: number[];
   triggers: string[];
   uniquePrefixes: string[];
@@ -604,6 +605,7 @@ function packBangData(bangs: Bang[]): PackedBangData {
   const triggers = new Array<string>(entryCount);
   const prefixes = new Array<string>(entryCount);
   const rawSuffixes = new Array<string | null>(entryCount);
+  const snapTargets = new Array<SnapTargetParts | null>(entryCount);
 
   for (let i = 0; i < entryCount; i++) {
     const bang = bangs[i];
@@ -611,6 +613,7 @@ function packBangData(bangs: Bang[]): PackedBangData {
     triggers[i] = bang.trigger;
     prefixes[i] = prefix;
     rawSuffixes[i] = suffix;
+    snapTargets[i] = snapOverrideParts(bang);
   }
 
   let { ids: prefixIds, unique: uniquePrefixes } = dedupeStrings(prefixes);
@@ -671,10 +674,82 @@ function packBangData(bangs: Bang[]): PackedBangData {
     entryCount,
     suffixBlob,
     prefixIds,
+    snapTargets,
     suffixIdsPlusOne,
     uniquePrefixes,
     uniqueSuffixes,
     triggers,
+  };
+}
+
+interface PackedSnapData {
+  blob: Uint8Array;
+  lengths: Uint16Array;
+  slots: Uint16Array;
+  targetIds: Uint16Array;
+  targetCount: number;
+  triggerBlob: Uint8Array;
+  triggerLengths: Uint16Array;
+}
+
+function packSnapData(
+  targets: readonly (SnapTargetParts | null)[],
+  triggers: readonly string[],
+  slotToEntry?: Uint16Array
+): PackedSnapData {
+  const slots: number[] = [];
+  const targetIds: number[] = [];
+  const uniqueTargets: SnapTargetParts[] = [];
+  const snapTriggers: string[] = [];
+  const targetByKey = new Map<string, number>();
+  for (let slot = 0; slot < targets.length; slot++) {
+    const target = targets[slotToEntry?.[slot] ?? slot];
+    if (!target) {
+      continue;
+    }
+    const key = `${target[0]}\0${target[1]}`;
+    let id = targetByKey.get(key);
+    if (id === undefined) {
+      id = uniqueTargets.length;
+      if (id >= 0xffff) {
+        throw new Error("Binary bang format has too many snap targets");
+      }
+      uniqueTargets.push(target);
+      targetByKey.set(key, id);
+    }
+    slots.push(slot);
+    targetIds.push(id);
+    snapTriggers.push(triggers[slotToEntry?.[slot] ?? slot]);
+  }
+
+  const encoder = new TextEncoder();
+  const values = uniqueTargets.flatMap((target) => [...target]);
+  const lengths = Uint16Array.from(values, (value) => {
+    const length = encoder.encode(value).byteLength;
+    if (length > 0xffff) {
+      throw new Error(
+        `Binary bang format requires snap target length <= 65535, got ${length}`
+      );
+    }
+    return length;
+  });
+  const triggerLengths = Uint16Array.from(snapTriggers, (trigger) => {
+    const length = encoder.encode(trigger).byteLength;
+    if (length > 0xffff) {
+      throw new Error(
+        `Binary bang format requires trigger length <= 65535, got ${length}`
+      );
+    }
+    return length;
+  });
+  return {
+    blob: encoder.encode(values.join("")),
+    lengths,
+    slots: Uint16Array.from(slots),
+    targetIds: Uint16Array.from(targetIds),
+    targetCount: uniqueTargets.length,
+    triggerBlob: encoder.encode(snapTriggers.join("")),
+    triggerLengths,
   };
 }
 
@@ -772,10 +847,15 @@ function generateBinaryWithBucketLoad(
   });
   const prefixIds = Uint16Array.from(reorderedPrefixIds);
   const suffixIds = Uint16Array.from(reorderedSuffixIds);
+  const snapData = packSnapData(
+    packed.snapTargets,
+    packed.triggers,
+    mph.slotToEntry
+  );
   const prefixCheckpoints = buildCheckpoints(prefixLengths, PREFIX_LENGTH_MASK);
   const suffixCheckpoints = buildCheckpoints(suffixLengths);
 
-  const headerWords = 13;
+  const headerWords = 16;
   const headerBytes = headerWords * Uint32Array.BYTES_PER_ELEMENT;
   let numericEnd = headerBytes + mph.displacements.byteLength;
   numericEnd += fingerprints.byteLength;
@@ -784,11 +864,19 @@ function generateBinaryWithBucketLoad(
     prefixLengths.byteLength +
     suffixLengths.byteLength +
     prefixIds.byteLength +
-    suffixIds.byteLength;
+    suffixIds.byteLength +
+    snapData.slots.byteLength +
+    snapData.targetIds.byteLength +
+    snapData.lengths.byteLength +
+    snapData.triggerLengths.byteLength;
   numericEnd = align4(numericEnd);
   numericEnd += prefixCheckpoints.byteLength + suffixCheckpoints.byteLength;
   const totalBytes =
-    numericEnd + prefixBytes.byteLength + suffixBytes.byteLength;
+    numericEnd +
+    prefixBytes.byteLength +
+    suffixBytes.byteLength +
+    snapData.blob.byteLength +
+    snapData.triggerBlob.byteLength;
   const output = new Uint8Array(new ArrayBuffer(totalBytes));
   new Uint32Array(output.buffer, 0, headerWords).set([
     BANG_BINARY_MAGIC,
@@ -804,6 +892,9 @@ function generateBinaryWithBucketLoad(
     numericEnd,
     totalBytes,
     mph.displacements.BYTES_PER_ELEMENT,
+    snapData.slots.length,
+    snapData.targetCount,
+    snapData.blob.byteLength,
   ]);
 
   let offset = headerBytes;
@@ -814,12 +905,20 @@ function generateBinaryWithBucketLoad(
   offset = copyTypedArray(output, offset, suffixLengths);
   offset = copyTypedArray(output, offset, prefixIds);
   offset = copyTypedArray(output, offset, suffixIds);
+  offset = copyTypedArray(output, offset, snapData.slots);
+  offset = copyTypedArray(output, offset, snapData.targetIds);
+  offset = copyTypedArray(output, offset, snapData.lengths);
+  offset = copyTypedArray(output, offset, snapData.triggerLengths);
   offset = align4(offset);
   offset = copyTypedArray(output, offset, prefixCheckpoints);
   offset = copyTypedArray(output, offset, suffixCheckpoints);
   output.set(prefixBytes, offset);
   offset += prefixBytes.byteLength;
   output.set(suffixBytes, offset);
+  offset += suffixBytes.byteLength;
+  output.set(snapData.blob, offset);
+  offset += snapData.blob.byteLength;
+  output.set(snapData.triggerBlob, offset);
   return output;
 }
 
@@ -834,6 +933,7 @@ export interface GeneratedBinaryShards {
 
 function estimateBangBinaryByteLength(bangs: readonly Bang[]): number {
   const packed = packBangData(bangs.filter((bang) => !bang.regex));
+  const snapData = packSnapData(packed.snapTargets, packed.triggers);
   const encoder = new TextEncoder();
   let prefixBytes = 0;
   for (const prefix of packed.uniquePrefixes) {
@@ -850,7 +950,7 @@ function estimateBangBinaryByteLength(bangs: readonly Bang[]): number {
   }
   const suffixBytes = encoder.encode(packed.uniqueSuffixes.join("")).byteLength;
   const bucketCount = nextPow2(Math.max(2, Math.ceil(packed.entryCount / 4)));
-  let numericEnd = 13 * Uint32Array.BYTES_PER_ELEMENT;
+  let numericEnd = 16 * Uint32Array.BYTES_PER_ELEMENT;
   numericEnd += bucketCount * Int16Array.BYTES_PER_ELEMENT;
   numericEnd += packed.entryCount * Uint16Array.BYTES_PER_ELEMENT;
   numericEnd = align2(numericEnd);
@@ -859,12 +959,23 @@ function estimateBangBinaryByteLength(bangs: readonly Bang[]): number {
       packed.uniqueSuffixes.length +
       2 * packed.entryCount) *
     Uint16Array.BYTES_PER_ELEMENT;
+  numericEnd +=
+    snapData.slots.byteLength +
+    snapData.targetIds.byteLength +
+    snapData.lengths.byteLength +
+    snapData.triggerLengths.byteLength;
   numericEnd = align4(numericEnd);
   numericEnd +=
     (Math.ceil(packed.uniquePrefixes.length / BANG_CHECKPOINT_SIZE) +
       Math.ceil(packed.uniqueSuffixes.length / BANG_CHECKPOINT_SIZE)) *
     Uint32Array.BYTES_PER_ELEMENT;
-  return numericEnd + prefixBytes + suffixBytes;
+  return (
+    numericEnd +
+    prefixBytes +
+    suffixBytes +
+    snapData.blob.byteLength +
+    snapData.triggerBlob.byteLength
+  );
 }
 
 export function generateBinaryShards(
@@ -930,7 +1041,8 @@ export function renderAdvancedLookup(bangs: readonly Bang[]): string {
   for (let i = 0; i < bangs.length; i++) {
     const bang = bangs[i];
     const encoding = bang.captureEncoding ?? CAPTURE_ENCODE_PERCENT;
-    const key = `${bang.url}\0${bang.regex}\0${encoding}`;
+    const snap = snapOverrideParts(bang);
+    const key = `${bang.url}\0${bang.regex}\0${encoding}\0${snap?.join("\0") ?? ""}`;
     let id = definitionByKey.get(key);
     if (id === undefined) {
       id = definitions.length;
@@ -940,7 +1052,7 @@ export function renderAdvancedLookup(bangs: readonly Bang[]): string {
         throw new Error(`Invalid advanced bang !${bang.trigger}`);
       }
       definitions.push(
-        `const _A${id}=['${jsEscape(parsed[0])}',${JSON.stringify(parsed[1])},${JSON.stringify(parsed[2])},new RegExp('${jsEscape(bang.regex)}'),${encoding}];`
+        `const _A${id}=['${jsEscape(parsed[0])}',${JSON.stringify(parsed[1])},${JSON.stringify(parsed[2])},new RegExp('${jsEscape(bang.regex)}'),${encoding}${snap ? `,${JSON.stringify(snap)}` : ""}];`
       );
     }
     definitionIds[i] = id;
@@ -952,11 +1064,6 @@ export function renderAdvancedLookup(bangs: readonly Bang[]): string {
   }
   lookup += "default:return null}}";
   return definitions.join("") + lookup;
-}
-
-interface GeneratedSnapOverride {
-  parts: SnapTargetParts;
-  trigger: string;
 }
 
 function derivedSnapTarget(url: string): SnapTargetParts | null {
@@ -972,105 +1079,39 @@ function derivedSnapTarget(url: string): SnapTargetParts | null {
   }
 }
 
-function collectSnapOverrides(bangs: readonly Bang[]): GeneratedSnapOverride[] {
-  const overrides: GeneratedSnapOverride[] = [];
-  for (const bang of bangs) {
-    if (!bang.snap) {
-      continue;
-    }
-    const parts = compileSnapTarget(bang.snap);
-    if (!parts) {
+function snapOverrideParts(
+  bang: Bang,
+  reportInvalid = false
+): SnapTargetParts | null {
+  if (!bang.snap) {
+    return null;
+  }
+  const parts = compileSnapTarget(bang.snap);
+  if (!parts) {
+    if (reportInvalid) {
       console.error(
         `Warning: bang !${bang.trigger} has invalid ad: ${bang.snap}`
       );
-      continue;
     }
-    const derived = derivedSnapTarget(bang.url);
-    if (
-      derived &&
-      derived[0] === parts[0] &&
-      derived[1].replace("://www.", "://") ===
-        parts[1].replace("://www.", "://")
-    ) {
-      continue;
-    }
-    overrides.push({ trigger: bang.trigger, parts });
+    return null;
   }
-  return overrides;
-}
-
-export function renderSnapLookup(
-  overrides: readonly GeneratedSnapOverride[]
-): string {
-  if (overrides.length === 0) {
-    return "export function lookupSnapOverride(){return null}";
-  }
-
-  const definitions: string[] = [];
-  const definitionByKey = new Map<string, number>();
-  const byHash = new Map<number, Array<{ trigger: string; id: number }>>();
-  for (const override of overrides) {
-    const key = `${override.parts[0]}\0${override.parts[1]}`;
-    let id = definitionByKey.get(key);
-    if (id === undefined) {
-      id = definitions.length;
-      definitionByKey.set(key, id);
-      definitions.push(
-        `'${jsEscape(override.parts[0])}','${jsEscape(override.parts[1])}'`
-      );
-    }
-    const hash = hashFNV1a(override.trigger);
-    const entries = byHash.get(hash);
-    const item = { trigger: override.trigger, id };
-    if (entries) {
-      entries.push(item);
-    } else {
-      byHash.set(hash, [item]);
-    }
-  }
-
-  const triggers: string[] = [];
-  const definitionIds: number[] = [];
-  const indexes: string[] = [];
-  const collisions: string[] = [];
-  for (const [hash, entries] of byHash) {
-    if (entries.length === 1) {
-      const entry = entries[0];
-      indexes.push(`${hash}:${triggers.length}`);
-      triggers.push(`'${jsEscape(entry.trigger)}'`);
-      definitionIds.push(entry.id);
-      continue;
-    }
-
-    let collision = `case ${hash}:`;
-    for (const entry of entries) {
-      collision += `if(t==='${jsEscape(entry.trigger)}')return _ST[${entry.id * 2}+(o?1:0)];`;
-    }
-    collisions.push(`${collision}return null;`);
-  }
-
-  const collisionLookup = collisions.length
-    ? `switch(h>>>0){${collisions.join("")}default:return null}`
-    : "return null";
-  return (
-    `const _ST=[${definitions.join(",")}],` +
-    `_SK=[${triggers.join(",")}],` +
-    `_SD=[${definitionIds.join(",")}],` +
-    `_SI={${indexes.join(",")}};` +
-    "export function lookupSnapOverride(t,h,o){" +
-    "const i=_SI[h>>>0];" +
-    "if(i!==undefined&&_SK[i]===t)return _ST[_SD[i]*2+(o?1:0)];" +
-    `${collisionLookup}}`
-  );
+  const derived = derivedSnapTarget(bang.url);
+  return derived &&
+    derived[0] === parts[0] &&
+    derived[1].replace("://www.", "://") === parts[1].replace("://www.", "://")
+    ? null
+    : parts;
 }
 
 export function generateSparse(bangs: readonly Bang[]): string {
-  const snapOverrides = collectSnapOverrides(bangs);
-  console.log(`  Snap overrides: ${snapOverrides.length} generated`);
+  const snapOverrideCount = bangs.reduce(
+    (count, bang) => count + Number(Boolean(snapOverrideParts(bang, true))),
+    0
+  );
+  console.log(`  Snap overrides: ${snapOverrideCount} embedded`);
   return (
     `export const BANG_COUNT=${bangs.length};` +
-    renderAdvancedLookup(bangs.filter((bang) => bang.regex)) +
-    renderSnapLookup(snapOverrides)
+    renderAdvancedLookup(bangs.filter((bang) => bang.regex))
   );
 }
 
@@ -1771,8 +1812,7 @@ async function writeGeneratedDeclarations(outDir: string): Promise<void> {
       `${outDir}/bangs-sparse.d.ts`,
       [
         "export declare const BANG_COUNT: number;",
-        "export declare function lookupAdvancedBang(trigger: string): readonly [string, readonly string[], readonly number[], RegExp, number] | null;",
-        "export declare function lookupSnapOverride(trigger: string, hash: number, origin: boolean): string | null;",
+        "export declare function lookupAdvancedBang(trigger: string): readonly [string, readonly string[], readonly number[], RegExp, number] | readonly [string, readonly string[], readonly number[], RegExp, number, readonly [string, string]] | null;",
         "",
       ].join("\n")
     ),

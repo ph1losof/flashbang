@@ -1,6 +1,6 @@
 export const BANG_BINARY_MAGIC = 0x31424246;
-export const BANG_BINARY_VERSION = 9;
-export const BANG_BINARY_HEADER_WORDS = 13;
+export const BANG_BINARY_VERSION = 10;
+export const BANG_BINARY_HEADER_WORDS = 16;
 
 export const BANG_META_MAGIC = 0x314d4246;
 export const BANG_META_VERSION = 1;
@@ -20,11 +20,28 @@ export function bangBinaryNumericEnd(header: Uint32Array): number {
 }
 
 export function bangBinaryCheckpointOffset(header: Uint32Array): number {
+  let offset = bangBinarySnapSlotOffset(header);
+  offset += (header[13] * 3 + header[14] * 2) * 2;
+  return alignTo(offset, 4);
+}
+
+export function bangBinarySnapSlotOffset(header: Uint32Array): number {
   let offset = BANG_BINARY_HEADER_WORDS * U32_BYTES;
   offset += header[3] * header[12] + header[2] * header[4];
   offset = alignTo(offset, 2);
-  offset += (header[5] + header[6] + header[2] * 2) * 2;
-  return alignTo(offset, 4);
+  return offset + (header[5] + header[6] + header[2] * 2) * 2;
+}
+
+export function bangBinarySnapTargetIdOffset(header: Uint32Array): number {
+  return bangBinarySnapSlotOffset(header) + header[13] * 2;
+}
+
+export function bangBinarySnapTargetLengthOffset(header: Uint32Array): number {
+  return bangBinarySnapTargetIdOffset(header) + header[13] * 2;
+}
+
+export function bangBinarySnapTriggerLengthOffset(header: Uint32Array): number {
+  return bangBinarySnapTargetLengthOffset(header) + header[14] * 4;
 }
 
 export function bangBinaryFingerprintOffset(header: Uint32Array): number {

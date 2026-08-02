@@ -1,4 +1,8 @@
-export type BuiltinUrlParts = readonly [string, string | null];
+import type { SnapTargetParts } from "../shared/snap-target";
+
+export type BuiltinUrlParts =
+  | readonly [string, string | null]
+  | readonly [string, string | null, SnapTargetParts];
 
 export type BangLookup = (
   trigger: string,
@@ -6,8 +10,8 @@ export type BangLookup = (
 ) => BuiltinUrlParts | null;
 
 const MAGIC = 0x31424246;
-const VERSION = 9;
-const HEADER_WORDS = 13;
+const VERSION = 10;
+const HEADER_WORDS = 16;
 const HEADER_BYTES = HEADER_WORDS * Uint32Array.BYTES_PER_ELEMENT;
 const MPH_SLOT_MULTIPLIER = 0x85ebca6b;
 const MPH_BUCKET_MULTIPLIER = 0x7feb352d;
@@ -85,6 +89,8 @@ export function decodeBangData(buffer: ArrayBuffer): BangLookup {
   const prefixCount = header[5];
   const suffixCount = header[6];
   const displacementWidth = header[12];
+  const snapCount = header[13];
+  const snapTargetCount = header[14];
   if (entryCount === 0) {
     throw new Error("Invalid binary bang entry count");
   }
@@ -96,6 +102,13 @@ export function decodeBangData(buffer: ArrayBuffer): BangLookup {
   }
   if (displacementWidth !== 2 && displacementWidth !== 4) {
     throw new Error("Invalid binary bang MPHF displacement width");
+  }
+  if (
+    snapCount > entryCount ||
+    snapTargetCount > snapCount ||
+    (snapCount === 0) !== (snapTargetCount === 0)
+  ) {
+    throw new Error("Invalid binary bang snap counts");
   }
   let offset = HEADER_BYTES;
 
@@ -120,6 +133,18 @@ export function decodeBangData(buffer: ArrayBuffer): BangLookup {
   offset += prefixIds.byteLength;
   const suffixIds = new Uint16Array(buffer, offset, entryCount);
   offset += suffixIds.byteLength;
+  const snapSlots = new Uint16Array(buffer, offset, snapCount);
+  offset += snapSlots.byteLength;
+  const snapTargetIds = new Uint16Array(buffer, offset, snapCount);
+  offset += snapTargetIds.byteLength;
+  const snapTargetLengths = new Uint16Array(
+    buffer,
+    offset,
+    snapTargetCount * 2
+  );
+  offset += snapTargetLengths.byteLength;
+  const snapTriggerLengths = new Uint16Array(buffer, offset, snapCount);
+  offset += snapTriggerLengths.byteLength;
   offset = (offset + 3) & ~3;
 
   const prefixCheckpoints = new Uint32Array(
@@ -145,6 +170,37 @@ export function decodeBangData(buffer: ArrayBuffer): BangLookup {
   const prefixBlob = new Uint8Array(buffer, offset, header[8]);
   offset += header[8];
   const suffixBlob = new Uint8Array(buffer, offset, header[9]);
+  offset += header[9];
+  const snapTargetBlob = new Uint8Array(buffer, offset, header[15]);
+  offset += header[15];
+  const snapTriggerBlob = new Uint8Array(buffer, offset);
+
+  let previousSnapSlot = -1;
+  for (let i = 0; i < snapCount; i++) {
+    const slot = snapSlots[i];
+    if (
+      slot <= previousSnapSlot ||
+      slot >= entryCount ||
+      snapTargetIds[i] >= snapTargetCount
+    ) {
+      throw new Error("Invalid binary bang snap index");
+    }
+    previousSnapSlot = slot;
+  }
+  let snapTargetBytes = 0;
+  for (const length of snapTargetLengths) {
+    snapTargetBytes += length;
+  }
+  if (snapTargetBytes !== snapTargetBlob.length) {
+    throw new Error("Invalid binary bang snap target lengths");
+  }
+  let snapTriggerBytes = 0;
+  for (const length of snapTriggerLengths) {
+    snapTriggerBytes += length;
+  }
+  if (snapTriggerBytes !== snapTriggerBlob.length) {
+    throw new Error("Invalid binary bang snap trigger lengths");
+  }
 
   validateFinalLength(
     prefixLengths,
@@ -156,7 +212,10 @@ export function decodeBangData(buffer: ArrayBuffer): BangLookup {
 
   const prefixCache: string[] = [];
   const suffixCache: string[] = [];
-  const tupleCache: BuiltinUrlParts[] = [];
+  const snapTargetCache: Array<SnapTargetParts | undefined> = [];
+  const snapTriggerCache: Array<string | undefined> = [];
+  const tupleCache: Array<readonly [string, string | null] | undefined> = [];
+  const snapTupleCache: Array<BuiltinUrlParts | undefined> = [];
   const bucketMask = bucketCount - 1;
 
   function prefix(id: number): string {
@@ -192,20 +251,85 @@ export function decodeBangData(buffer: ArrayBuffer): BangLookup {
     return value;
   }
 
-  function tuple(index: number): BuiltinUrlParts {
-    let value = tupleCache[index];
+  function snapTarget(id: number): SnapTargetParts {
+    let value = snapTargetCache[id];
     if (value === undefined) {
-      const suffixId = suffixIds[index];
-      value =
-        suffixId === 0
-          ? [prefix(prefixIds[index]), null]
-          : [prefix(prefixIds[index]), suffix(suffixId - 1)];
-      tupleCache[index] = value;
+      const lengthIndex = id * 2;
+      let start = 0;
+      for (let i = 0; i < lengthIndex; i++) {
+        start += snapTargetLengths[i];
+      }
+      const siteFilterLength = snapTargetLengths[lengthIndex];
+      const originLength = snapTargetLengths[lengthIndex + 1];
+      const originStart = start + siteFilterLength;
+      value = [
+        decoder.decode(
+          snapTargetBlob.subarray(start, start + siteFilterLength)
+        ),
+        decoder.decode(
+          snapTargetBlob.subarray(originStart, originStart + originLength)
+        ),
+      ];
+      snapTargetCache[id] = value;
     }
     return value;
   }
 
-  return (_trigger, hash) => {
+  function snapTrigger(id: number): string {
+    let value = snapTriggerCache[id];
+    if (value === undefined) {
+      let start = 0;
+      for (let i = 0; i < id; i++) {
+        start += snapTriggerLengths[i];
+      }
+      value = decoder.decode(
+        snapTriggerBlob.subarray(start, start + snapTriggerLengths[id])
+      );
+      snapTriggerCache[id] = value;
+    }
+    return value;
+  }
+
+  function snapTargetId(index: number, trigger: string): number {
+    let low = 0;
+    let high = snapSlots.length - 1;
+    while (low <= high) {
+      const middle = (low + high) >> 1;
+      const slot = snapSlots[middle];
+      if (slot === index) {
+        return snapTrigger(middle) === trigger ? snapTargetIds[middle] : -1;
+      }
+      if (slot < index) {
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    return -1;
+  }
+
+  function tuple(index: number, trigger: string): BuiltinUrlParts {
+    let value = tupleCache[index];
+    if (value === undefined) {
+      const suffixId = suffixIds[index];
+      const tuplePrefix = prefix(prefixIds[index]);
+      const tupleSuffix = suffixId === 0 ? null : suffix(suffixId - 1);
+      value = [tuplePrefix, tupleSuffix];
+      tupleCache[index] = value;
+    }
+    const snapId = snapTargetId(index, trigger);
+    if (snapId === -1) {
+      return value;
+    }
+    let snapValue = snapTupleCache[index];
+    if (snapValue === undefined) {
+      snapValue = [value[0], value[1], snapTarget(snapId)];
+      snapTupleCache[index] = snapValue;
+    }
+    return snapValue;
+  }
+
+  return (trigger, hash) => {
     const unsignedHash = hash >>> 0;
     let bucketHash = unsignedHash ^ (unsignedHash >>> 16);
     bucketHash = Math.imul(bucketHash, MPH_BUCKET_MULTIPLIER);
@@ -218,7 +342,9 @@ export function decodeBangData(buffer: ArrayBuffer): BangLookup {
         : (Math.imul(unsignedHash ^ (displacement + 1), MPH_SLOT_MULTIPLIER) >>>
             0) %
           entryCount;
-    return fingerprints[index] === unsignedHash >>> 16 ? tuple(index) : null;
+    return fingerprints[index] === unsignedHash >>> 16
+      ? tuple(index, trigger)
+      : null;
   };
 }
 

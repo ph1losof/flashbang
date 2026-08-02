@@ -12,7 +12,7 @@ import {
   DEFAULT_SNAP_PREFIX,
   type TriggerPrefix,
 } from "../shared/trigger-prefix";
-import { lookupBang } from "./bang-data";
+import { type BuiltinUrlParts, lookupBang } from "./bang-data";
 import {
   buildUrl,
   compileTriggerMarker as compileMarker,
@@ -55,20 +55,12 @@ export interface RedirectSettings {
 }
 
 type AdvancedBangLookup = (trigger: string) => CaptureEntry | null;
-type SnapOverrideLookup = (
-  trigger: string,
-  hash: number,
-  origin: boolean
-) => string | null;
 let lookupAdvancedBang: AdvancedBangLookup = () => null;
-let lookupSnapOverride: SnapOverrideLookup = () => null;
 
 export function configureRedirectExtensions(
-  advanced: AdvancedBangLookup,
-  snapOverride: SnapOverrideLookup
+  advanced: AdvancedBangLookup
 ): void {
   lookupAdvancedBang = advanced;
-  lookupSnapOverride = snapOverride;
 }
 
 const DEFAULT_SNAP_MARKER = compileTriggerMarker(64);
@@ -79,7 +71,10 @@ export function isHotBangLookupBlocked(error: unknown): boolean {
   return error === HOT_BANG_LOOKUP_BLOCKED;
 }
 
-function lookupBuiltInBang(trigger: string, hash: number): UrlParts | null {
+function lookupBuiltInBang(
+  trigger: string,
+  hash: number
+): BuiltinUrlParts | null {
   if (!activeHotBangLookup) {
     return lookupBang(trigger, hash);
   }
@@ -348,7 +343,9 @@ function resolveBangFill(
     : null;
 }
 
-function customSnapTarget(entry: CustomUrlParts): SnapTargetParts | null {
+function customSnapTarget(
+  entry: CustomUrlParts | BuiltinUrlParts
+): SnapTargetParts | null {
   if (entry.length === 3) {
     return entry[2];
   }
@@ -369,12 +366,11 @@ function resolveSnapOrigin(
   if (cached !== undefined) {
     return cached;
   }
-  const snap = lookupSnapOverride(bang, hash, true);
-  if (snap) {
-    builtInSnapOriginCache[bang] = snap;
-    return snap;
+  const entry = lookupBuiltInBang(bang, hash) ?? lookupAdvancedBang(bang);
+  if (!entry) {
+    return null;
   }
-  const origin = resolveBangOrigin(bang, custom, hash);
+  const origin = customSnapTarget(entry)?.[1] ?? originOfPrefix(entry[0]);
   if (origin) {
     builtInSnapOriginCache[bang] = origin;
   }
@@ -469,15 +465,15 @@ function resolveSnapSiteFilter(
   if (cached !== undefined) {
     return cached;
   }
-  const snap = lookupSnapOverride(bang, hash, false);
-  if (snap) {
-    builtInSnapSiteFilterCache[bang] = snap;
-    return snap;
-  }
   const entry = lookupBuiltInBang(bang, hash);
   const resolved = entry || lookupAdvancedBang(bang);
   if (!resolved) {
     return null;
+  }
+  const snap = customSnapTarget(resolved);
+  if (snap) {
+    builtInSnapSiteFilterCache[bang] = snap[0];
+    return snap[0];
   }
   const domain = domainOfPrefix(resolved[0]);
   if (!domain) {

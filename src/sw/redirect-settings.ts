@@ -179,10 +179,13 @@ export function materializeRedirectSettings(
     defaultEntry =
       customDefault.length < 5 ? (customDefault as UrlParts) : null;
   } else {
-    defaultEntry = lookupBang(
+    const builtInDefault = lookupBang(
       snapshot.defaultBang,
       hashFNV1a(snapshot.defaultBang)
     );
+    defaultEntry = builtInDefault
+      ? [builtInDefault[0], builtInDefault[1]]
+      : null;
   }
   const defaultUrl = defaultEntry || splitUrl(DEFAULT_URL);
   const effectiveDefaultBang = defaultEntry ? snapshot.defaultBang : "g";

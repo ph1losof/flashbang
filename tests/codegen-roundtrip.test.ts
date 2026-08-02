@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { generateBinaryShards } from "../scripts/codegen";
-import {
-  lookupAdvancedBang,
-  lookupSnapOverride,
-} from "../src/generated/bangs-sparse.js";
+import { lookupAdvancedBang } from "../src/generated/bangs-sparse.js";
 import {
   BANG_SHARD_COUNT,
   BANG_SHARD_ROUTER_SIZE,
@@ -22,6 +19,10 @@ import {
   bangBinaryCheckpointOffset,
   bangBinaryFingerprints,
   bangBinaryNumericEnd,
+  bangBinarySnapSlotOffset,
+  bangBinarySnapTargetIdOffset,
+  bangBinarySnapTargetLengthOffset,
+  bangBinarySnapTriggerLengthOffset,
 } from "./helpers/bang-binary";
 import { loadTestBangData } from "./helpers/bang-data";
 
@@ -91,7 +92,7 @@ describe("codegen round-trip", () => {
       const generated = lookupBang(trigger, hashFNV1a(trigger));
       expect(generated).not.toBeNull();
       const placeholder = bang.url.indexOf("{}");
-      expect(generated).toEqual(
+      expect(generated?.slice(0, 2)).toEqual(
         placeholder === -1
           ? [bang.url, null]
           : [
@@ -111,7 +112,7 @@ describe("codegen round-trip", () => {
 
   test("emits the binary lookup artifact", async () => {
     const binary = await Bun.file("src/generated/bangs.bin").arrayBuffer();
-    const header = new Uint32Array(binary, 0, 13);
+    const header = new Uint32Array(binary, 0, BANG_BINARY_HEADER_WORDS);
     expect(header[0]).toBe(BANG_BINARY_MAGIC);
     expect(header[1]).toBe(BANG_BINARY_VERSION);
     expect(header[2]).toBe(bangs.filter((bang) => !bang.regex).length);
@@ -224,6 +225,7 @@ describe("codegen round-trip", () => {
 
   test("rejects invalid binary lookup metadata", async () => {
     const binary = await Bun.file("src/generated/bangs.bin").arrayBuffer();
+    const binaryHeader = new Uint32Array(binary, 0, BANG_BINARY_HEADER_WORDS);
     for (const [word, value, message] of [
       [0, 0, "Unsupported binary bang data"],
       [11, binary.byteLength + 1, "Truncated binary bang data"],
@@ -245,14 +247,81 @@ describe("codegen round-trip", () => {
       [4, 3, "Invalid binary bang fingerprint width"],
       [12, 0, "Invalid binary bang MPHF displacement width"],
       [12, 3, "Invalid binary bang MPHF displacement width"],
+      [13, binaryHeader[2] + 1, "Invalid binary bang snap counts"],
+      [14, binaryHeader[13] + 1, "Invalid binary bang snap counts"],
     ] as const) {
       const invalid = binary.slice(0);
       new Uint32Array(invalid, 0, BANG_BINARY_HEADER_WORDS)[word] = value;
       expect(() => initializeBangData(invalid)).toThrow(message);
     }
 
+    const invalidSnapSlot = binary.slice(0);
+    const snapSlotHeader = new Uint32Array(
+      invalidSnapSlot,
+      0,
+      BANG_BINARY_HEADER_WORDS
+    );
+    const snapSlots = new Uint16Array(
+      invalidSnapSlot,
+      bangBinarySnapSlotOffset(snapSlotHeader),
+      snapSlotHeader[13]
+    );
+    snapSlots[1] = snapSlots[0];
+    expect(() => initializeBangData(invalidSnapSlot)).toThrow(
+      "Invalid binary bang snap index"
+    );
+
+    const invalidSnapTargetId = binary.slice(0);
+    const snapTargetIdHeader = new Uint32Array(
+      invalidSnapTargetId,
+      0,
+      BANG_BINARY_HEADER_WORDS
+    );
+    new Uint16Array(
+      invalidSnapTargetId,
+      bangBinarySnapTargetIdOffset(snapTargetIdHeader),
+      snapTargetIdHeader[13]
+    )[0] = snapTargetIdHeader[14];
+    expect(() => initializeBangData(invalidSnapTargetId)).toThrow(
+      "Invalid binary bang snap index"
+    );
+
+    const invalidSnapTargetLength = binary.slice(0);
+    const snapTargetLengthHeader = new Uint32Array(
+      invalidSnapTargetLength,
+      0,
+      BANG_BINARY_HEADER_WORDS
+    );
+    new Uint16Array(
+      invalidSnapTargetLength,
+      bangBinarySnapTargetLengthOffset(snapTargetLengthHeader),
+      snapTargetLengthHeader[14] * 2
+    )[0]++;
+    expect(() => initializeBangData(invalidSnapTargetLength)).toThrow(
+      "Invalid binary bang snap target lengths"
+    );
+
+    const invalidSnapTriggerLength = binary.slice(0);
+    const snapTriggerLengthHeader = new Uint32Array(
+      invalidSnapTriggerLength,
+      0,
+      BANG_BINARY_HEADER_WORDS
+    );
+    new Uint16Array(
+      invalidSnapTriggerLength,
+      bangBinarySnapTriggerLengthOffset(snapTriggerLengthHeader),
+      snapTriggerLengthHeader[13]
+    )[0]++;
+    expect(() => initializeBangData(invalidSnapTriggerLength)).toThrow(
+      "Invalid binary bang snap trigger lengths"
+    );
+
     const invalidDisplacement = binary.slice(0);
-    const header = new Uint32Array(invalidDisplacement, 0, 13);
+    const header = new Uint32Array(
+      invalidDisplacement,
+      0,
+      BANG_BINARY_HEADER_WORDS
+    );
     const displacements =
       header[12] === 2
         ? new Int16Array(
@@ -271,7 +340,11 @@ describe("codegen round-trip", () => {
     );
 
     const invalidCheckpoint = binary.slice(0);
-    const checkpointHeader = new Uint32Array(invalidCheckpoint, 0, 13);
+    const checkpointHeader = new Uint32Array(
+      invalidCheckpoint,
+      0,
+      BANG_BINARY_HEADER_WORDS
+    );
     const checkpointOffset = bangBinaryCheckpointOffset(checkpointHeader);
     const prefixCheckpoints = new Uint32Array(
       invalidCheckpoint,
@@ -292,22 +365,20 @@ describe("codegen round-trip", () => {
     expect(advanced?.[3].source).toBe("(\\w+)\\s+(.*)");
   });
 
-  test("Kagi ad values are emitted through the hashed snap lookup", () => {
-    expect(lookupSnapOverride("g", hashFNV1a("g"), false)).toBeNull();
-    expect(lookupSnapOverride("not-hn", hashFNV1a("hn"), false)).toBeNull();
-    expect(lookupSnapOverride("hn", hashFNV1a("hn"), false)).toBe(
-      "+site:news.ycombinator.com"
-    );
-    expect(lookupSnapOverride("hn", hashFNV1a("hn"), true)).toBe(
-      "https://news.ycombinator.com"
-    );
-    expect(lookupSnapOverride("nr", hashFNV1a("nr"), false)).toBe(
+  test("Kagi ad values are embedded in binary bang entries", () => {
+    expect(lookupBang("g", hashFNV1a("g"))?.[2]).toBeUndefined();
+    expect(lookupBang("not-hn", hashFNV1a("hn"))?.[2]).toBeUndefined();
+    expect(lookupBang("hn", hashFNV1a("hn"))?.[2]).toEqual([
+      "+site:news.ycombinator.com",
+      "https://news.ycombinator.com",
+    ]);
+    expect(lookupBang("nr", hashFNV1a("nr"))?.[2]?.[0]).toBe(
       "+site:github.com/NixOS/nixpkgs"
     );
-    expect(lookupSnapOverride("sklearn", hashFNV1a("sklearn"), false)).toBe(
+    expect(lookupBang("sklearn", hashFNV1a("sklearn"))?.[2]?.[0]).toBe(
       "+site:scikit-learn.org/stable"
     );
-    expect(lookupSnapOverride("saltstack", hashFNV1a("saltstack"), true)).toBe(
+    expect(lookupBang("saltstack", hashFNV1a("saltstack"))?.[2]?.[1]).toBe(
       "https://docs.saltproject.io/en/latest"
     );
   });

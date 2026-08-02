@@ -210,7 +210,7 @@ describe("codegen artifact generators", () => {
       new Uint32Array([BANG_META_MAGIC, BANG_META_VERSION])
     );
     expect(artifacts.sparseJs).toContain("lookupAdvancedBang");
-    expect(artifacts.sparseJs).toContain("lookupSnapOverride");
+    expect(artifacts.sparseJs).not.toContain("lookupSnapOverride");
     expect(artifacts.trieLoaderJs).toContain("export const NODE_EDGE_STARTS");
     expect(artifacts.trieLoaderJs).toContain("./bangs-trie.bin");
     expect(artifacts.trieBinary.byteLength).toBeGreaterThan(0);

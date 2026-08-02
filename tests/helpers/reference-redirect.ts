@@ -1,7 +1,4 @@
-import {
-  lookupAdvancedBang,
-  lookupSnapOverride,
-} from "../../src/generated/bangs-sparse.js";
+import { lookupAdvancedBang } from "../../src/generated/bangs-sparse.js";
 import {
   CAPTURE_ENCODE_PLUS,
   CAPTURE_ENCODE_RAW,
@@ -222,10 +219,13 @@ function snapOrigin(
   if (customEntry) {
     return customSnap(customEntry)?.[1] ?? originOf(customEntry[0]);
   }
-  return (
-    lookupSnapOverride(trigger, hashFNV1a(trigger), true) ??
-    bangOrigin(trigger, custom)
-  );
+  const entry =
+    lookupBang(trigger, hashFNV1a(trigger)) ??
+    lookupAdvancedBang(trigger) ??
+    null;
+  return entry
+    ? (customSnap(entry as CustomUrlParts)?.[1] ?? originOf(entry[0]))
+    : null;
 }
 
 function snapFilter(
@@ -242,12 +242,12 @@ function snapFilter(
     return domain ? `+site:${domain}` : null;
   }
   const hash = hashFNV1a(trigger);
-  const explicit = lookupSnapOverride(trigger, hash, false);
-  if (explicit) {
-    return explicit;
-  }
   const entry =
     lookupBang(trigger, hash) ?? lookupAdvancedBang(trigger) ?? null;
+  const explicit = entry ? customSnap(entry as CustomUrlParts) : null;
+  if (explicit) {
+    return explicit[0];
+  }
   const domain = entry ? domainOf(entry[0]) : null;
   return domain ? `+site:${domain}` : null;
 }
