@@ -1,4 +1,5 @@
 import { mkdir, rm } from "node:fs/promises";
+import { brotliCompressSync, constants as zlibConstants } from "node:zlib";
 import { $ } from "bun";
 import {
   BANG_SHARD_COUNT,
@@ -553,6 +554,155 @@ function buildMinimalPerfectHash(
   return { displacements, slotToEntry };
 }
 
+const COMPRESSION_LAYOUT_CANDIDATES = 6;
+const COMPRESSION_LAYOUT_DISPLACEMENT_WEIGHT = 1.9401936793041696;
+const COMPRESSION_LAYOUT_LOCALITY_WEIGHT = 0.28722706580560353;
+const COMPRESSION_LAYOUT_RANK_WEIGHT = 1.0623352371655768;
+const COMPRESSION_LAYOUT_NOISE = 0.0034072484835989424;
+const COMPRESSION_LAYOUT_SEED = 200770045;
+const COMPRESSION_LAYOUT_NEIGHBORS = [-8, -4, -2, -1, 1, 2, 4, 8];
+
+// The full catalog has many valid MPHFs. Score a small deterministic sample of
+// placements per bucket so related URL tuples tend to land near one another,
+// improving whole-file compression without changing the runtime data format.
+function buildCompressionAwareMinimalPerfectHash(
+  triggers: readonly string[],
+  prefixIds: readonly number[],
+  suffixIds: readonly number[],
+  entriesPerBucket: number
+): MinimalPerfectHash | null {
+  const entryCount = triggers.length;
+  if (entryCount > 0x7fff) {
+    return null;
+  }
+  const bucketCount = nextPow2(
+    Math.max(2, Math.ceil(entryCount / entriesPerBucket))
+  );
+  const bucketMask = bucketCount - 1;
+  const hashes = Uint32Array.from(triggers, hashFNV1a);
+  const desiredSlot = new Uint16Array(entryCount);
+  const entriesByTuple = Array.from(
+    { length: entryCount },
+    (_, entry) => entry
+  ).sort(
+    (left, right) =>
+      prefixIds[left] - prefixIds[right] ||
+      suffixIds[left] - suffixIds[right] ||
+      hashes[left] - hashes[right]
+  );
+  for (let slot = 0; slot < entryCount; slot++) {
+    desiredSlot[entriesByTuple[slot]] = slot;
+  }
+
+  const buckets = Array.from({ length: bucketCount }, () => [] as number[]);
+  for (let entry = 0; entry < entryCount; entry++) {
+    buckets[mphBucket(hashes[entry], bucketMask)].push(entry);
+  }
+  const orderedBuckets = buckets
+    .map((entries, id) => ({ entries, id }))
+    .filter((bucket) => bucket.entries.length > 1)
+    .sort(
+      (left, right) =>
+        right.entries.length - left.entries.length || left.id - right.id
+    );
+  const occupied = new Uint8Array(entryCount);
+  const slotToEntry = new Uint16Array(entryCount);
+  const displacements = new Int16Array(bucketCount);
+  displacements.fill(-1);
+  let randomState = COMPRESSION_LAYOUT_SEED;
+  const random = () => {
+    randomState ^= randomState << 13;
+    randomState ^= randomState >>> 17;
+    randomState ^= randomState << 5;
+    return (randomState >>> 0) / 0x1_0000_0000;
+  };
+
+  for (const bucket of orderedBuckets) {
+    let best:
+      | { displacement: number; score: number; slots: number[] }
+      | undefined;
+    let candidates = 0;
+    for (
+      let displacement = 0;
+      displacement <= 0x7fff && candidates < COMPRESSION_LAYOUT_CANDIDATES;
+      displacement++
+    ) {
+      const slots = bucket.entries.map((entry) =>
+        mphSlot(hashes[entry], displacement, entryCount)
+      );
+      if (
+        new Set(slots).size !== slots.length ||
+        slots.some((slot) => occupied[slot])
+      ) {
+        continue;
+      }
+      candidates++;
+      let locality = 0;
+      let rankDistance = 0;
+      for (let index = 0; index < slots.length; index++) {
+        const slot = slots[index];
+        const entry = bucket.entries[index];
+        rankDistance += Math.abs(slot - desiredSlot[entry]) / entryCount;
+        for (const delta of COMPRESSION_LAYOUT_NEIGHBORS) {
+          const neighbor = slot + delta;
+          if (neighbor < 0 || neighbor >= entryCount || !occupied[neighbor]) {
+            continue;
+          }
+          const other = slotToEntry[neighbor];
+          if (
+            prefixIds[entry] === prefixIds[other] &&
+            suffixIds[entry] === suffixIds[other]
+          ) {
+            locality += 12 / Math.abs(delta);
+          } else {
+            if (prefixIds[entry] === prefixIds[other]) {
+              locality += 4 / Math.abs(delta);
+            }
+            if (suffixIds[entry] === suffixIds[other]) {
+              locality += 2 / Math.abs(delta);
+            }
+          }
+        }
+      }
+      const score =
+        COMPRESSION_LAYOUT_RANK_WEIGHT * rankDistance -
+        COMPRESSION_LAYOUT_LOCALITY_WEIGHT * locality +
+        COMPRESSION_LAYOUT_DISPLACEMENT_WEIGHT * Math.log2(displacement + 2) +
+        COMPRESSION_LAYOUT_NOISE * random();
+      if (!best || score < best.score) {
+        best = { displacement, score, slots };
+      }
+    }
+    if (!best) {
+      return null;
+    }
+    displacements[bucket.id] = best.displacement;
+    best.slots.forEach((slot, index) => {
+      occupied[slot] = 1;
+      slotToEntry[slot] = bucket.entries[index];
+    });
+  }
+
+  const freeSlots: number[] = [];
+  for (let slot = 0; slot < entryCount; slot++) {
+    if (!occupied[slot]) {
+      freeSlots.push(slot);
+    }
+  }
+  let freeOffset = 0;
+  for (let bucket = 0; bucket < bucketCount; bucket++) {
+    if (buckets[bucket].length !== 1) {
+      continue;
+    }
+    const slot = freeSlots[freeOffset++];
+    displacements[bucket] = -(slot + 1);
+    slotToEntry[slot] = buckets[bucket][0];
+  }
+  return freeOffset === freeSlots.length
+    ? { displacements, slotToEntry }
+    : null;
+}
+
 function align2(value: number): number {
   return (value + 1) & ~1;
 }
@@ -765,16 +915,62 @@ function copyTypedArray(
   return offset + values.byteLength;
 }
 
+function compressionPrefixPayload(value: string): string {
+  let payload = value;
+  if (payload.startsWith("https://")) {
+    payload = payload.substring(8);
+  } else if (payload.startsWith("http://")) {
+    payload = payload.substring(7);
+  }
+  return payload.startsWith("www.") ? payload.substring(4) : payload;
+}
+
+function orderPrefixesForCompression(values: readonly string[]): {
+  ordered: string[];
+  remap: Uint16Array;
+} {
+  const encoder = new TextEncoder();
+  const payloads = values.map(compressionPrefixPayload);
+  const lengths = payloads.map((payload) => encoder.encode(payload).byteLength);
+  const reversed = payloads.map((payload) => [...payload].reverse().join(""));
+  const order = values.map((_, index) => index);
+  order.sort((left, right) => {
+    const lengthDifference = lengths[left] - lengths[right];
+    if (lengthDifference !== 0) {
+      return lengthDifference;
+    }
+    if (reversed[left] < reversed[right]) {
+      return -1;
+    }
+    return reversed[left] > reversed[right] ? 1 : left - right;
+  });
+  const remap = new Uint16Array(values.length);
+  const ordered = order.map((oldId, newId) => {
+    remap[oldId] = newId;
+    return values[oldId];
+  });
+  return { ordered, remap };
+}
+
 function generateBinaryWithBucketLoad(
   bangs: readonly Bang[],
-  entriesPerBucket: number
+  entriesPerBucket: number,
+  compressionAware = false
 ): Uint8Array {
   const packed = packBangData(bangs.filter((bang) => !bang.regex));
   let bucketLoad = entriesPerBucket;
   let mph: MinimalPerfectHash;
   for (;;) {
     try {
-      mph = buildMinimalPerfectHash(packed.triggers, bucketLoad);
+      mph =
+        (compressionAware &&
+          buildCompressionAwareMinimalPerfectHash(
+            packed.triggers,
+            packed.prefixIds,
+            packed.suffixIdsPlusOne,
+            bucketLoad
+          )) ||
+        buildMinimalPerfectHash(packed.triggers, bucketLoad);
       break;
     } catch (error) {
       const placementFailed =
@@ -792,7 +988,7 @@ function generateBinaryWithBucketLoad(
     mph.slotToEntry,
     (entry) => packed.triggers[entry]
   );
-  const reorderedPrefixIds = Array.from(
+  let reorderedPrefixIds = Array.from(
     mph.slotToEntry,
     (entry) => packed.prefixIds[entry]
   );
@@ -801,40 +997,45 @@ function generateBinaryWithBucketLoad(
     (entry) => packed.suffixIdsPlusOne[entry]
   );
   const encoder = new TextEncoder();
+  let uniquePrefixes = packed.uniquePrefixes;
+  if (compressionAware) {
+    const orderedPrefixes = orderPrefixesForCompression(uniquePrefixes);
+    uniquePrefixes = orderedPrefixes.ordered;
+    reorderedPrefixIds = reorderedPrefixIds.map(
+      (id) => orderedPrefixes.remap[id]
+    );
+  }
   const suffixBytes = encoder.encode(packed.suffixBlob.blob);
   const fingerprints = Uint16Array.from(
     triggers,
     (trigger) => hashFNV1a(trigger) >>> 16
   );
   // URL blobs stay byte-backed in the worker and are decoded one entry at a time.
-  const prefixPayloads = new Array<string>(packed.uniquePrefixes.length);
-  const prefixLengths = Uint16Array.from(
-    packed.uniquePrefixes,
-    (value, index) => {
-      let payload = value;
-      let scheme = 0;
-      if (payload.startsWith("https://")) {
-        scheme = 1;
-        payload = payload.substring(8);
-      } else if (payload.startsWith("http://")) {
-        scheme = 2;
-        payload = payload.substring(7);
-      }
-      let flags = scheme << PREFIX_SCHEME_SHIFT;
-      if (payload.startsWith("www.")) {
-        flags |= PREFIX_WWW_FLAG;
-        payload = payload.substring(4);
-      }
-      const length = encoder.encode(payload).byteLength;
-      if (length > PREFIX_LENGTH_MASK) {
-        throw new Error(
-          `Binary bang format requires encoded prefix payload length <= ${PREFIX_LENGTH_MASK}, got ${length}`
-        );
-      }
-      prefixPayloads[index] = payload;
-      return length | flags;
+  const prefixPayloads = new Array<string>(uniquePrefixes.length);
+  const prefixLengths = Uint16Array.from(uniquePrefixes, (value, index) => {
+    let payload = value;
+    let scheme = 0;
+    if (payload.startsWith("https://")) {
+      scheme = 1;
+      payload = payload.substring(8);
+    } else if (payload.startsWith("http://")) {
+      scheme = 2;
+      payload = payload.substring(7);
     }
-  );
+    let flags = scheme << PREFIX_SCHEME_SHIFT;
+    if (payload.startsWith("www.")) {
+      flags |= PREFIX_WWW_FLAG;
+      payload = payload.substring(4);
+    }
+    const length = encoder.encode(payload).byteLength;
+    if (length > PREFIX_LENGTH_MASK) {
+      throw new Error(
+        `Binary bang format requires encoded prefix payload length <= ${PREFIX_LENGTH_MASK}, got ${length}`
+      );
+    }
+    prefixPayloads[index] = payload;
+    return length | flags;
+  });
   const prefixBytes = encoder.encode(prefixPayloads.join(""));
   const suffixLengths = Uint16Array.from(packed.uniqueSuffixes, (value) => {
     const length = encoder.encode(value).byteLength;
@@ -923,7 +1124,20 @@ function generateBinaryWithBucketLoad(
 }
 
 export function generateBinary(bangs: readonly Bang[]): Uint8Array {
-  return generateBinaryWithBucketLoad(bangs, 4);
+  const baseline = generateBinaryWithBucketLoad(bangs, 4);
+  const optimized = generateBinaryWithBucketLoad(bangs, 4, true);
+  const compressedLength = (binary: Uint8Array) =>
+    brotliCompressSync(binary, {
+      params: {
+        [zlibConstants.BROTLI_PARAM_QUALITY]: 11,
+        [zlibConstants.BROTLI_PARAM_SIZE_HINT]: binary.byteLength,
+      },
+    }).byteLength;
+  // Catalog updates can change which layout compresses best. Keep the normal
+  // builder as a guardrail instead of assuming the tuned layout always wins.
+  return compressedLength(optimized) < compressedLength(baseline)
+    ? optimized
+    : baseline;
 }
 
 export interface GeneratedBinaryShards {
