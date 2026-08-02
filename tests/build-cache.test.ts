@@ -12,6 +12,7 @@ import {
 import {
   bundleUI,
   configureBangDataAsset,
+  configureBangShardAssets,
   configureColdFallbackAsset,
   configureCustomSuggestOption,
   configureFallbackAsset,
@@ -353,6 +354,25 @@ describe("bang data asset injection", () => {
         "/cold-fallback-0123456789ab.js"
       )
     ).toBe('<script src="/cold-fallback-0123456789ab.js"></script>');
+  });
+
+  test("replaces the generated bang shard asset marker", () => {
+    const assets = Array.from(
+      { length: 16 },
+      (_, shard) => `/bangs-s${shard.toString(16)}-0123456789ab.bin`
+    );
+    expect(
+      configureBangShardAssets(
+        'const shards="__BANG_SHARD_ASSETS_JSON__"',
+        assets
+      )
+    ).toBe(`const shards=${JSON.stringify(assets)}`);
+    expect(() =>
+      configureBangShardAssets(
+        'const shards="__BANG_SHARD_ASSETS_JSON__"',
+        assets.slice(1)
+      )
+    ).toThrow("Expected 16 bang shard assets");
   });
 
   test("replaces the generated hot-trigger marker", () => {

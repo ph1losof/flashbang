@@ -554,14 +554,16 @@ export function handleInstall(e: ExtendableEvent): void {
 
 export function handleActivate(e: ExtendableEvent): void {
   e.waitUntil(
-    self.clients.claim().then(async () => {
-      await queueHotBootMutation(async () => {
-        await disableHotBoot();
-        await publishHotBoot();
-      }).catch(swallowError);
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      await ensureBangData().catch(swallowError);
+    queueHotBootMutation(async () => {
+      await disableHotBoot();
+      await publishHotBoot();
     })
+      .catch(swallowError)
+      .then(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        await ensureBangData().catch(swallowError);
+        await self.clients.claim();
+      })
   );
 }
 

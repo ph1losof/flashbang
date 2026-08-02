@@ -77,6 +77,43 @@
           return response.arrayBuffer();
         });
 
+      const bangShardAssets = "__BANG_SHARD_ASSETS_JSON__";
+      const loadColdBangData = (value) => {
+        if (privateQuery !== null) {
+          return null;
+        }
+        let start = 0;
+        while (value.charCodeAt(start) === 0x20) {
+          start++;
+        }
+        if (value.charCodeAt(start) !== 0x21) {
+          return null;
+        }
+        const triggerStart = start + 1;
+        let triggerEnd = value.indexOf(" ", triggerStart);
+        if (triggerEnd === -1) {
+          triggerEnd = value.length;
+        }
+        if (triggerStart >= triggerEnd) {
+          return null;
+        }
+        let hash = 2166136261;
+        for (let i = triggerStart; i < triggerEnd; i++) {
+          let code = value.charCodeAt(i);
+          if (code >= 0x41 && code <= 0x5a) {
+            code |= 0x20;
+          }
+          hash = Math.imul(hash ^ code, 16777619);
+        }
+        const asset = bangShardAssets[(hash >>> 8) & 15];
+        return fetch(asset).then((response) => {
+          if (!response.ok) {
+            throw new Error(`Failed to load bang shard: ${response.status}`);
+          }
+          return response.arrayBuffer();
+        });
+      };
+
       const seedWorker = async (data, settings, registrationPromise) => {
         const registration = await registrationPromise;
         const worker =
@@ -149,11 +186,14 @@
           runRichFallback(false, null, registrationPromise);
           return;
         }
-        import("__COLD_FALLBACK_ASSET__")
-          .then(async ({ resolveColdFallback }) => {
+        Promise.all([
+          import("__COLD_FALLBACK_ASSET__"),
+          loadColdBangData(query),
+        ])
+          .then(async ([{ resolveColdFallback }, prefetchedData]) => {
             const result = await resolveColdFallback(
               query,
-              undefined,
+              prefetchedData || undefined,
               privateQuery !== null
             );
             if (!result) {

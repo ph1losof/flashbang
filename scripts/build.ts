@@ -213,7 +213,8 @@ export async function main(): Promise<void> {
     allowUnsafeCustomSuggestUrls,
     bangDataAsset,
     fallbackAsset,
-    coldFallbackAsset
+    coldFallbackAsset,
+    bangShardAssets
   );
   await rm(`${DIST_DIR}/styles.css`);
 

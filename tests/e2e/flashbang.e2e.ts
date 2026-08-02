@@ -1668,13 +1668,30 @@ test("first fallback seeds the worker for the next offline redirect", async ({
       route.fulfill({ status: 200, contentType: "text/plain", body: "github" })
     );
     const bangDataRequests: string[] = [];
+    let coldFallbackFinished = false;
+    let shardStartedBeforeColdFallbackFinished = false;
     context.on("request", (request) => {
       const pathname = new URL(request.url()).pathname;
+      if (
+        /^\/bangs-s[0-9a-f]-[a-f0-9]{12}\.bin$/.test(pathname) &&
+        !coldFallbackFinished
+      ) {
+        shardStartedBeforeColdFallbackFinished = true;
+      }
       if (
         pathname === "/bangs.bin" ||
         (pathname.startsWith("/bangs-") && !pathname.startsWith("/bangs-meta-"))
       ) {
         bangDataRequests.push(pathname);
+      }
+    });
+    context.on("requestfinished", (request) => {
+      if (
+        /^\/cold-fallback-[a-z0-9_-]{8,}\.js$/i.test(
+          new URL(request.url()).pathname
+        )
+      ) {
+        coldFallbackFinished = true;
       }
     });
 
@@ -1744,6 +1761,7 @@ test("first fallback seeds the worker for the next offline redirect", async ({
         /^\/bangs-s[0-9a-f]-[a-f0-9]{12}\.bin$/.test(pathname)
       )
     ).toBe(true);
+    expect(shardStartedBeforeColdFallbackFinished).toBe(true);
 
     const origin = new URL(probe.url()).origin;
     await context.route(`${origin}/**`, (route) => route.abort());

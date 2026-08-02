@@ -9,6 +9,7 @@ const CUSTOM_SUGGEST_OPTION = '<option value="custom">Custom</option>';
 const BANG_DATA_ASSET_MARKER = "__BANG_DATA_ASSET__";
 const FALLBACK_ASSET_MARKER = "__FALLBACK_ASSET__";
 const COLD_FALLBACK_ASSET_MARKER = "__COLD_FALLBACK_ASSET__";
+const BANG_SHARD_ASSETS_MARKER = '"__BANG_SHARD_ASSETS_JSON__"';
 const HOT_BANG_TRIGGERS_MARKER = '"__HOT_BANG_TRIGGERS_JSON__"';
 const SEED_CACHE_NAME_MARKER = "__SEED_CACHE_NAME__";
 export const DIST_DIR = process.env.DIST_DIR || "dist";
@@ -53,6 +54,16 @@ export function configureColdFallbackAsset(
   return html.replaceAll(COLD_FALLBACK_ASSET_MARKER, assetPath);
 }
 
+export function configureBangShardAssets(
+  html: string,
+  assetPaths: readonly string[]
+): string {
+  if (assetPaths.length !== BANG_SHARD_COUNT) {
+    throw new Error(`Expected ${BANG_SHARD_COUNT} bang shard assets`);
+  }
+  return html.replaceAll(BANG_SHARD_ASSETS_MARKER, JSON.stringify(assetPaths));
+}
+
 export function configureHotBangTriggers(
   html: string,
   triggers: readonly string[]
@@ -72,16 +83,20 @@ function configureRedirectAssets(
   bangDataAsset: string,
   fallbackAsset: string,
   coldFallbackAsset: string,
+  bangShardAssets: readonly string[],
   hotBangTriggers: readonly string[]
 ): string {
   return configureSeedCacheName(
     configureHotBangTriggers(
-      configureColdFallbackAsset(
-        configureFallbackAsset(
-          configureBangDataAsset(html, bangDataAsset),
-          fallbackAsset
+      configureBangShardAssets(
+        configureColdFallbackAsset(
+          configureFallbackAsset(
+            configureBangDataAsset(html, bangDataAsset),
+            fallbackAsset
+          ),
+          coldFallbackAsset
         ),
-        coldFallbackAsset
+        bangShardAssets
       ),
       hotBangTriggers
     )
@@ -191,7 +206,11 @@ export async function buildHTMLAssets(
   allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled(),
   bangDataAsset = "/bangs.bin",
   fallbackAsset = "/fallback.js",
-  coldFallbackAsset = "/cold-fallback.js"
+  coldFallbackAsset = "/cold-fallback.js",
+  bangShardAssets: readonly string[] = Array.from(
+    { length: BANG_SHARD_COUNT },
+    () => bangDataAsset
+  )
 ): Promise<void> {
   const { HOT_TRIGGERS } = await import("../src/generated/bangs-hot.js");
   const inlineCSS = (src: string) =>
@@ -205,6 +224,7 @@ export async function buildHTMLAssets(
     bangDataAsset,
     fallbackAsset,
     coldFallbackAsset,
+    bangShardAssets,
     HOT_TRIGGERS
   );
   await Bun.write(
@@ -238,7 +258,11 @@ export async function assembleUIAssets(
   allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled(),
   bangDataAsset = "/bangs.bin",
   fallbackAsset = "/fallback.js",
-  coldFallbackAsset = "/cold-fallback.js"
+  coldFallbackAsset = "/cold-fallback.js",
+  bangShardAssets: readonly string[] = Array.from(
+    { length: BANG_SHARD_COUNT },
+    () => bangDataAsset
+  )
 ): Promise<void> {
   const css = await Bun.file(`${DIST_DIR}/styles.css`).text();
   await buildHTMLAssets(
@@ -246,7 +270,8 @@ export async function assembleUIAssets(
     allowUnsafeCustomSuggestUrls,
     bangDataAsset,
     fallbackAsset,
-    coldFallbackAsset
+    coldFallbackAsset,
+    bangShardAssets
   );
   await copyStaticAssets();
 }
