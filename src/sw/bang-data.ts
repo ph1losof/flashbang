@@ -1,5 +1,10 @@
 export type BuiltinUrlParts = readonly [string, string | null];
 
+export type BangLookup = (
+  trigger: string,
+  hash: number
+) => BuiltinUrlParts | null;
+
 const MAGIC = 0x31424246;
 const VERSION = 9;
 const HEADER_WORDS = 13;
@@ -20,8 +25,8 @@ const PREFIX_HEADS = [
   "",
 ] as const;
 
-let lookup: ((trigger: string, hash: number) => BuiltinUrlParts | null) | null =
-  null;
+let lookup: BangLookup | null = null;
+let fallbackLookup: BangLookup | null = null;
 const BANG_DATA_UNAVAILABLE = new Error("Binary bang data is not initialized");
 
 function checkpointCount(length: number): number {
@@ -65,7 +70,7 @@ function validateFinalLength(
   }
 }
 
-export function initializeBangData(buffer: ArrayBuffer): void {
+export function decodeBangData(buffer: ArrayBuffer): BangLookup {
   const header = new Uint32Array(buffer, 0, HEADER_WORDS);
   if (header[0] !== MAGIC || header[1] !== VERSION) {
     throw new Error("Unsupported binary bang data");
@@ -200,7 +205,7 @@ export function initializeBangData(buffer: ArrayBuffer): void {
     return value;
   }
 
-  lookup = (_trigger, hash) => {
+  return (_trigger, hash) => {
     const unsignedHash = hash >>> 0;
     let bucketHash = unsignedHash ^ (unsignedHash >>> 16);
     bucketHash = Math.imul(bucketHash, MPH_BUCKET_MULTIPLIER);
@@ -217,22 +222,35 @@ export function initializeBangData(buffer: ArrayBuffer): void {
   };
 }
 
+export function initializeBangData(buffer: ArrayBuffer): void {
+  lookup = decodeBangData(buffer);
+  fallbackLookup = null;
+}
+
+export function configureBangFallbackLookup(value: BangLookup): void {
+  fallbackLookup = value;
+}
+
 export function isBangDataInitialized(): boolean {
   return lookup !== null;
 }
 
 export function resetBangDataForTests(): void {
   lookup = null;
+  fallbackLookup = null;
 }
 
 export function lookupBang(
   trigger: string,
   hash: number
 ): BuiltinUrlParts | null {
-  if (!lookup) {
-    throw BANG_DATA_UNAVAILABLE;
+  if (lookup) {
+    return lookup(trigger, hash);
   }
-  return lookup(trigger, hash);
+  if (fallbackLookup) {
+    return fallbackLookup(trigger, hash);
+  }
+  throw BANG_DATA_UNAVAILABLE;
 }
 
 export function isBangDataUnavailable(error: unknown): boolean {

@@ -8,6 +8,7 @@ import {
   BANG_SHARD_COUNT,
   BANG_SHARD_ROUTER_SIZE,
   bangShardIndex,
+  extractBangShardTriggers,
 } from "../src/shared/bang-shards";
 import { hashFNV1a } from "../src/shared/hash";
 import { initializeBangData, lookupBang } from "../src/sw/bang-data";
@@ -39,6 +40,20 @@ const customBangs: Record<string, { url: string }> = await Bun.file(
 ).json();
 
 describe("codegen round-trip", () => {
+  test("extracts canonical cold candidates and complete snap chains", () => {
+    expect(extractBangShardTriggers("!gh cats")).toEqual(["gh"]);
+    expect(extractBangShardTriggers("gh! cats")).toEqual(["gh"]);
+    expect(extractBangShardTriggers("cats !gh")).toEqual(["gh"]);
+    expect(extractBangShardTriggers("@gh,mdn,npm cats")).toEqual([
+      "gh",
+      "mdn",
+      "npm",
+    ]);
+    expect(extractBangShardTriggers("cats @gh,mdn,gh")).toEqual(["gh", "mdn"]);
+    expect(extractBangShardTriggers("$npm cats", "$", "~")).toEqual(["npm"]);
+    expect(extractBangShardTriggers("plain query")).toEqual([]);
+  });
+
   test("every 100th bang resolves to a non-null entry", () => {
     const sample = bangs.filter((_, i) => i % 100 === 0);
     for (const bang of sample) {
