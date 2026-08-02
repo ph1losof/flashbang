@@ -55,6 +55,7 @@ flashbang/
 │   ├── build.ts              # Bundle + minify pipeline
 │   ├── dev.ts                # Dev server with file watching, rebuild & live reload
 │   ├── inline-script-hash.ts # Shared inline-script CSP hash extraction
+│   ├── benchmark-shard-ab.ts # Browser A/B benchmark for full versus sharded worker restarts
 │   ├── profile.ts            # Profiling script
 │   ├── resolve-suggestions.ts # Refresh per-site autocomplete endpoints
 │   ├── shared.ts             # Shared HTML and static-asset build helpers
@@ -98,7 +99,7 @@ flashbang/
 │   │   ├── bangs-trie.js      # radix trie for prefix-matched bang suggestions
 │   │   └── *.d.ts             # TypeScript declarations for each generated .js file
 │   ├── sw/
-│   │   ├── bang-data.ts       # Binary bang decoder and regular lookup
+│   │   ├── bang-data.ts       # Full/sharded binary bang decoder and regular lookup
 │   │   ├── default-redirect-settings.ts # I/O-free default redirect settings
 │   │   ├── redirect-core.ts    # Shared allocation-free redirect resolver
 │   │   ├── redirect-prefix.ts  # Shared prefix parsing and URL assembly

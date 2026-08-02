@@ -126,6 +126,9 @@ describe("build cache version", () => {
           format: "iife",
           define: expect.objectContaining({
             __BANG_DATA_ASSET__: '"/bangs-a.bin"',
+            __BANG_SHARD_ASSETS__: JSON.stringify(
+              Array.from({ length: 16 }, () => "/bangs-a.bin")
+            ),
             __FALLBACK_ASSET__: '"/fallback-a.js"',
             __CACHE_VERSION__: '"fb-test"',
             __REQUIRED_APP_ASSETS__: '["/chunk-a.js"]',

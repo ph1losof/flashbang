@@ -55,6 +55,9 @@ describe("production static caching", () => {
     expect(cacheControlForAsset("/fallback-0123456789ab.js")).toBe(
       "public, max-age=31536000, immutable"
     );
+    expect(cacheControlForAsset("/bangs-sa-0123456789ab.bin")).toBe(
+      "public, max-age=31536000, immutable"
+    );
     for (const path of [
       "/app.js",
       "/bench.js",

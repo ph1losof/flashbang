@@ -7,6 +7,7 @@ import {
   pageHeaders,
   SW_CSP,
 } from "../src/server/headers";
+import { BANG_SHARD_COUNT } from "../src/shared/bang-shards";
 import { ensureGeneratedBangData, generateBinaryShards } from "./codegen";
 import { extractInlineScriptHashes } from "./inline-script-hash";
 import {
@@ -108,7 +109,11 @@ export async function bundleServiceWorker(
   cacheVersion: string,
   requiredAppAssets: readonly string[],
   bangDataAsset: string,
-  fallbackAsset: string
+  fallbackAsset: string,
+  bangShardAssets: readonly string[] = Array.from(
+    { length: BANG_SHARD_COUNT },
+    () => bangDataAsset
+  )
 ): Promise<void> {
   const result = await Bun.build({
     entrypoints: ["src/sw/sw.ts"],
@@ -119,6 +124,7 @@ export async function bundleServiceWorker(
     format: "iife",
     define: {
       __BANG_DATA_ASSET__: JSON.stringify(bangDataAsset),
+      __BANG_SHARD_ASSETS__: JSON.stringify(bangShardAssets),
       __FALLBACK_ASSET__: JSON.stringify(fallbackAsset),
       __CACHE_VERSION__: JSON.stringify(cacheVersion),
       __REQUIRED_APP_ASSETS__: JSON.stringify(requiredAppAssets),
@@ -234,7 +240,8 @@ export async function main(): Promise<void> {
     "fb-cache-version-input",
     requiredAppAssets,
     bangDataAsset,
-    fallbackAsset
+    fallbackAsset,
+    bangShardAssets
   );
   const cacheInputs: CacheVersionInput[] = await Promise.all(
     precacheFileInputs(requiredAppAssets, bangDataAsset, fallbackAsset).map(
@@ -258,7 +265,8 @@ export async function main(): Promise<void> {
     cacheVersion,
     requiredAppAssets,
     bangDataAsset,
-    fallbackAsset
+    fallbackAsset,
+    bangShardAssets
   );
 
   console.log("=== Bundle production server ===");
@@ -314,6 +322,7 @@ export async function main(): Promise<void> {
       bangDataAsset,
       ...bangDataHeaders,
       "",
+      ...bangShardAssets.flatMap((asset) => [asset, ...bangDataHeaders, ""]),
       bangMetaAsset,
       "  Cache-Control: public, max-age=31536000, immutable",
       "",
@@ -340,11 +349,15 @@ export async function main(): Promise<void> {
     await Bun.write(`${DIST_DIR}/${file}.br`, br);
   }
 
-  if (
-    await promoteBrotliForCloudflarePages(bangDataAsset, pagesEncodedBangData)
-  ) {
+  const promotedCatalogs: string[] = [];
+  for (const asset of [bangDataAsset, ...bangShardAssets]) {
+    if (await promoteBrotliForCloudflarePages(asset, pagesEncodedBangData)) {
+      promotedCatalogs.push(asset);
+    }
+  }
+  if (promotedCatalogs.length > 0) {
     console.log(
-      `Embedded Brotli catalog for Cloudflare Pages: ${bangDataAsset}`
+      `Embedded Brotli catalogs for Cloudflare Pages: ${promotedCatalogs.join(", ")}`
     );
   }
 

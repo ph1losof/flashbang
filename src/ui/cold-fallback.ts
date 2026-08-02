@@ -1,20 +1,25 @@
-import { bangShardIndex } from "../shared/bang-shards";
-import { DB_NAME } from "../shared/idb";
-import { initializeBangData, lookupBang } from "../sw/bang-data";
-import { defaultRedirectSettings } from "../sw/default-redirect-settings";
 import {
-  buildUrl,
-  DEFAULT_BANG_MARKER,
-  encodeForRedirect,
-  markerWidthAt,
-  originOfPrefix,
-  parsePrefixBang,
-  trimRawEnd,
-  trimRawStart,
-} from "../sw/redirect-prefix";
+  BANG_SHARD_COUNT,
+  bangShardIndex,
+  extractBangShardTriggers,
+} from "../shared/bang-shards";
+import { hashFNV1a } from "../shared/hash";
+import { DB_NAME } from "../shared/idb";
+import {
+  bangShardUnavailableId,
+  initializeBangShard,
+  isBangShardInitialized,
+} from "../sw/bang-data";
+import { defaultRedirectSettings } from "../sw/default-redirect-settings";
+import { lookupGeneratedHotBang } from "../sw/hot-redirect";
+import { redirectUrl } from "../sw/redirect";
 
 declare const __BANG_SHARD_ASSETS__: readonly string[];
 
+const shardPromises: Array<Promise<void> | null> = Array.from(
+  { length: BANG_SHARD_COUNT },
+  () => null
+);
 const freshProfile =
   typeof indexedDB.databases === "function"
     ? indexedDB
@@ -23,46 +28,78 @@ const freshProfile =
         .catch(() => false)
     : Promise.resolve(false);
 
+function ensureShard(
+  shardId: number,
+  prefetched?: ArrayBuffer | Promise<ArrayBuffer>
+): Promise<void> {
+  if (isBangShardInitialized(shardId)) {
+    return Promise.resolve();
+  }
+  let promise = shardPromises[shardId];
+  if (!promise) {
+    promise = (
+      prefetched
+        ? Promise.resolve(prefetched)
+        : fetch(__BANG_SHARD_ASSETS__[shardId]).then((response) => {
+            if (!response.ok) {
+              throw new Error(`Failed to load bang shard: ${response.status}`);
+            }
+            return response.arrayBuffer();
+          })
+    )
+      .then((buffer) => initializeBangShard(shardId, buffer))
+      .catch((error) => {
+        shardPromises[shardId] = null;
+        throw error;
+      });
+    shardPromises[shardId] = promise;
+  }
+  return promise;
+}
+
+function ensureCandidateShards(
+  query: string,
+  missingShardId: number,
+  prefetched?: ArrayBuffer | Promise<ArrayBuffer>
+): Promise<void> {
+  const shardIds = new Set<number>([missingShardId]);
+  for (const trigger of extractBangShardTriggers(query)) {
+    if (!lookupGeneratedHotBang(trigger)) {
+      shardIds.add(bangShardIndex(hashFNV1a(trigger)));
+    }
+  }
+  return Promise.all(
+    [...shardIds].map((shardId) =>
+      ensureShard(shardId, shardId === missingShardId ? prefetched : undefined)
+    )
+  ).then(() => undefined);
+}
+
 export async function resolveColdFallback(
   query: string,
-  bangData?: ArrayBuffer,
+  bangData?: ArrayBuffer | Promise<ArrayBuffer>,
   raw = false
 ) {
   if (raw || !(await freshProfile)) {
     return null;
   }
-  const rawQuery = encodeForRedirect(query);
-  const start = trimRawStart(rawQuery);
-  const end = trimRawEnd(rawQuery, start);
-  if (start >= end) {
-    return null;
-  }
-  const markerWidth = markerWidthAt(rawQuery, start, end, DEFAULT_BANG_MARKER);
-  if (markerWidth === 0) {
-    return null;
-  }
-  const parsed = parsePrefixBang(rawQuery, start + markerWidth, end);
-  if (parsed.kind !== "bang") {
-    return null;
-  }
-  if (!bangData) {
-    const response = await fetch(
-      __BANG_SHARD_ASSETS__[bangShardIndex(parsed.hash)]
-    );
-    if (!response.ok) {
-      throw new Error(`Failed to load bang shard: ${response.status}`);
-    }
-    bangData = await response.arrayBuffer();
-  }
-  initializeBangData(bangData);
-  const entry = lookupBang(parsed.trigger, parsed.hash);
-  if (!entry) {
-    return null;
-  }
+
   const settings = defaultRedirectSettings();
-  const url =
-    parsed.termStart === null
-      ? originOfPrefix(entry[0])
-      : buildUrl(entry, rawQuery, parsed.termStart, end);
-  return { settings, url };
+  let prefetchedData = bangData;
+  for (let attempt = 0; attempt <= BANG_SHARD_COUNT; attempt++) {
+    try {
+      return {
+        settings,
+        url: redirectUrl(query, settings, lookupGeneratedHotBang),
+      };
+    } catch (error) {
+      const shardId = bangShardUnavailableId(error);
+      if (shardId === null) {
+        throw error;
+      }
+      await ensureCandidateShards(query, shardId, prefetchedData);
+      prefetchedData = undefined;
+    }
+  }
+  throw new Error("Bang shard resolution exceeded the catalog shard count");
 }

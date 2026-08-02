@@ -4,9 +4,18 @@ import {
   lookupAdvancedBang,
   lookupSnapOverride,
 } from "../src/generated/bangs-sparse.js";
-import { bangShardIndex } from "../src/shared/bang-shards";
+import {
+  bangShardIndex,
+  extractBangShardTriggers,
+} from "../src/shared/bang-shards";
 import { hashFNV1a } from "../src/shared/hash";
-import { initializeBangData, lookupBang } from "../src/sw/bang-data";
+import {
+  bangShardUnavailableId,
+  initializeBangData,
+  initializeBangShard,
+  lookupBang,
+  resetBangDataForTests,
+} from "../src/sw/bang-data";
 import { decodeBangCatalog } from "../src/ui/bang-catalog";
 import {
   BANG_BINARY_HEADER_WORDS,
@@ -35,6 +44,20 @@ const customBangs: Record<string, { url: string }> = await Bun.file(
 ).json();
 
 describe("codegen round-trip", () => {
+  test("extracts canonical cold candidates and complete snap chains", () => {
+    expect(extractBangShardTriggers("!gh cats")).toEqual(["gh"]);
+    expect(extractBangShardTriggers("gh! cats")).toEqual(["gh"]);
+    expect(extractBangShardTriggers("cats !gh")).toEqual(["gh"]);
+    expect(extractBangShardTriggers("@gh,mdn,npm cats")).toEqual([
+      "gh",
+      "mdn",
+      "npm",
+    ]);
+    expect(extractBangShardTriggers("cats @gh,mdn,gh")).toEqual(["gh", "mdn"]);
+    expect(extractBangShardTriggers("$npm cats", "$", "~")).toEqual(["npm"]);
+    expect(extractBangShardTriggers("plain query")).toEqual([]);
+  });
+
   test("every 100th bang resolves to a non-null entry", () => {
     const sample = bangs.filter((_, i) => i % 100 === 0);
     for (const bang of sample) {
@@ -125,7 +148,9 @@ describe("codegen round-trip", () => {
     const shards = generateBinaryShards(bangs);
     for (let shardId = 0; shardId < shards.length; shardId++) {
       const shard = shards[shardId];
-      initializeBangData(
+      resetBangDataForTests();
+      initializeBangShard(
+        shardId,
         shard.buffer.slice(
           shard.byteOffset,
           shard.byteOffset + shard.byteLength
@@ -139,6 +164,53 @@ describe("codegen round-trip", () => {
       }
     }
     initializeBangData(await Bun.file("src/generated/bangs.bin").arrayBuffer());
+  });
+
+  test("reports an exact missing shard and isolates loaded shards", async () => {
+    const shards = generateBinaryShards(bangs);
+    const first = bangs.find((bang) => !bang.regex)!;
+    const firstHash = hashFNV1a(first.trigger);
+    const firstShard = bangShardIndex(firstHash);
+    const other = bangs.find(
+      (bang) =>
+        !bang.regex && bangShardIndex(hashFNV1a(bang.trigger)) !== firstShard
+    )!;
+    const otherHash = hashFNV1a(other.trigger);
+
+    resetBangDataForTests();
+    try {
+      let missing: unknown;
+      try {
+        lookupBang(first.trigger, firstHash);
+      } catch (error) {
+        missing = error;
+      }
+      expect(bangShardUnavailableId(missing)).toBe(firstShard);
+
+      const shard = shards[firstShard];
+      initializeBangShard(
+        firstShard,
+        shard.buffer.slice(
+          shard.byteOffset,
+          shard.byteOffset + shard.byteLength
+        ) as ArrayBuffer
+      );
+      expect(lookupBang(first.trigger, firstHash)).not.toBeNull();
+
+      let otherMissing: unknown;
+      try {
+        lookupBang(other.trigger, otherHash);
+      } catch (error) {
+        otherMissing = error;
+      }
+      expect(bangShardUnavailableId(otherMissing)).toBe(
+        bangShardIndex(otherHash)
+      );
+    } finally {
+      initializeBangData(
+        await Bun.file("src/generated/bangs.bin").arrayBuffer()
+      );
+    }
   });
 
   test("rejects sampled unknown triggers with fingerprint verification", () => {

@@ -7,6 +7,7 @@ import {
   handleSuggestRequest,
 } from "../src/server/handlers";
 import { pageHeaders, SW_HEADERS } from "../src/server/headers";
+import { BANG_SHARD_COUNT } from "../src/shared/bang-shards";
 import { readPathname } from "../src/shared/raw-url";
 import {
   assembleUIAssets,
@@ -79,6 +80,9 @@ async function build() {
     format: "esm",
     define: {
       __BANG_DATA_ASSET__: '"/bangs.bin"',
+      __BANG_SHARD_ASSETS__: JSON.stringify(
+        Array.from({ length: BANG_SHARD_COUNT }, () => "/bangs.bin")
+      ),
       __FALLBACK_ASSET__: JSON.stringify(uiBuild.fallbackAsset),
       __CACHE_VERSION__: '"flashbang-dev"',
       __REQUIRED_APP_ASSETS__: '["/bangs-meta.bin"]',

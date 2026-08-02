@@ -82,30 +82,31 @@
         if (privateQuery !== null) {
           return null;
         }
-        let start = 0;
-        while (value.charCodeAt(start) === 0x20) {
-          start++;
+        const tokens = value.trim().toLowerCase().split(/\s+/);
+        const markers = "!@";
+        let trigger = null;
+        for (const token of [tokens[0], tokens.at(-1)]) {
+          if (!token) {
+            continue;
+          }
+          if (markers.includes(token[0])) {
+            trigger = token.substring(1).split(",", 1)[0];
+          } else if (markers.includes(token.at(-1))) {
+            trigger = token.substring(0, token.length - 1);
+          }
+          if (trigger) {
+            break;
+          }
         }
-        if (value.charCodeAt(start) !== 0x21) {
-          return null;
-        }
-        const triggerStart = start + 1;
-        let triggerEnd = value.indexOf(" ", triggerStart);
-        if (triggerEnd === -1) {
-          triggerEnd = value.length;
-        }
-        if (triggerStart >= triggerEnd) {
+        if (!trigger || hotBangTriggers.has(trigger)) {
           return null;
         }
         let hash = 2166136261;
-        for (let i = triggerStart; i < triggerEnd; i++) {
-          let code = value.charCodeAt(i);
-          if (code >= 0x41 && code <= 0x5a) {
-            code |= 0x20;
-          }
-          hash = Math.imul(hash ^ code, 16777619);
+        for (let i = 0; i < trigger.length; i++) {
+          hash = Math.imul(hash ^ trigger.charCodeAt(i), 16777619);
         }
-        const asset = bangShardAssets[(hash >>> 8) & 15];
+        const asset =
+          bangShardAssets[(hash >>> 8) & (bangShardAssets.length - 1)];
         return fetch(asset).then((response) => {
           if (!response.ok) {
             throw new Error(`Failed to load bang shard: ${response.status}`);
@@ -182,22 +183,20 @@
         }
         const registrationPromise = registerWorker();
         const needsCatalog = shouldPrefetchBangData(query);
-        if (!needsCatalog) {
-          runRichFallback(false, null, registrationPromise);
-          return;
-        }
-        Promise.all([
-          import("__COLD_FALLBACK_ASSET__"),
-          loadColdBangData(query),
-        ])
-          .then(async ([{ resolveColdFallback }, prefetchedData]) => {
+        const prefetchedData = loadColdBangData(query);
+        import("__COLD_FALLBACK_ASSET__")
+          .then(async ({ resolveColdFallback }) => {
             const result = await resolveColdFallback(
               query,
               prefetchedData || undefined,
               privateQuery !== null
             );
             if (!result) {
-              runRichFallback(true, loadBangData(), registrationPromise);
+              runRichFallback(
+                needsCatalog,
+                needsCatalog ? loadBangData() : null,
+                registrationPromise
+              );
               return;
             }
             location.replace(result.url);
