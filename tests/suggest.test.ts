@@ -987,7 +987,7 @@ describe("readSuggestQueryParams", () => {
       readSuggestQueryParams(
         "http://localhost/suggest?np=~&q=%24gh&x=1&bp=%24&sp=ddg"
       )
-    ).toEqual(["$gh", "ddg", "$", "~", false]);
+    ).toEqual(["$gh", "ddg", "$", "~", true]);
   });
 
   test("returns first values and preserves missing overrides", () => {
@@ -998,7 +998,10 @@ describe("readSuggestQueryParams", () => {
     ).toEqual(["first", "ddg", null, null, true]);
   });
 
-  test("keeps first-value semantics and decodes the opt-in flag", () => {
+  test("defaults site forwarding on and decodes the opt-out flag", () => {
+    expect(readSuggestQueryParams("http://localhost/suggest?q=x")[4]).toBe(
+      true
+    );
     expect(
       readSuggestQueryParams(
         "http://localhost/suggest?q=x&site_specific_forward=0&site_specific_forward=1"

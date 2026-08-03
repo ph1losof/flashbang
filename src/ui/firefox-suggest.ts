@@ -23,5 +23,5 @@ export function firefoxSuggestionUrl(
     bangPrefix === DEFAULT_BANG_PREFIX && snapPrefix === DEFAULT_SNAP_PREFIX
       ? ""
       : `&bp=${encodeURIComponent(bangPrefix)}&np=${encodeURIComponent(snapPrefix)}`;
-  return `${origin}/suggest?q=%s&sp=${provider}${syntax}`;
+  return `${origin}/suggest?q=%s&sp=${provider}${syntax}&site_specific_forward=1`;
 }

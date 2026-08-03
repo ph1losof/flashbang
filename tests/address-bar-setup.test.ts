@@ -384,14 +384,18 @@ describe("Firefox suggestion URL", () => {
         provider: "google",
         snapPrefix: "@",
       })
-    ).toBe("https://example.com/suggest?q=%s&sp=google");
+    ).toBe(
+      "https://example.com/suggest?q=%s&sp=google&site_specific_forward=1"
+    );
     expect(
       firefoxSuggestionUrl("https://example.com", {
         bangPrefix: "$",
         provider: "startpage",
         snapPrefix: "~",
       })
-    ).toBe("https://example.com/suggest?q=%s&sp=startpage&bp=%24&np=~");
+    ).toBe(
+      "https://example.com/suggest?q=%s&sp=startpage&bp=%24&np=~&site_specific_forward=1"
+    );
   });
 });
 
@@ -557,7 +561,7 @@ describe("address bar setup sheet", () => {
 
     expect(dom.searchUrl.value).toBe("https://flashbang.test?q=%s");
     expect(dom.suggestUrl.value).toBe(
-      "https://flashbang.test/suggest?q=%s&sp=startpage&bp=%24&np=~"
+      "https://flashbang.test/suggest?q=%s&sp=startpage&bp=%24&np=~&site_specific_forward=1"
     );
     expect(dom.browserTabs.children).toHaveLength(5);
     expect(dom.browserName.textContent).toBe("Firefox");

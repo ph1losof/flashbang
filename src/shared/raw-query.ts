@@ -160,7 +160,7 @@ export function readSuggestQueryParams(
 ] {
   const qPos = rawUrl.indexOf("?");
   if (qPos === -1) {
-    return [null, null, null, null, false];
+    return [null, null, null, null, true];
   }
   const hPos = rawUrl.indexOf("#", qPos + 1);
   const end = hPos === -1 ? rawUrl.length : hPos;
@@ -240,5 +240,5 @@ export function readSuggestQueryParams(
     i = amp + 1;
   }
 
-  return [q, sp, bp, np, siteSpecificForward === true];
+  return [q, sp, bp, np, siteSpecificForward !== false];
 }

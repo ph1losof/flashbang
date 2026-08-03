@@ -380,7 +380,7 @@ test("Firefox locks cookie-backed suggestion settings", async ({ page }) => {
   );
   const origin = new URL(page.url()).origin;
   await expect(page.locator("#suggest-firefox-url")).toHaveText(
-    `${origin}/suggest?q=%s&sp=google`
+    `${origin}/suggest?q=%s&sp=google&site_specific_forward=1`
   );
   await expect(page.locator("#suggest-firefox-url span")).toHaveText("google");
   const providerPicker = page.locator("#suggest-firefox-provider-picker");
@@ -390,7 +390,7 @@ test("Firefox locks cookie-backed suggestion settings", async ({ page }) => {
   await page
     .locator('#suggest-firefox-provider-menu [data-provider="startpage"]')
     .click();
-  let expectedUrl = `${origin}/suggest?q=%s&sp=startpage`;
+  let expectedUrl = `${origin}/suggest?q=%s&sp=startpage&site_specific_forward=1`;
   await expect(page.locator("#suggest-provider")).toHaveValue("google");
   await expect(page.locator("#suggest-firefox-url")).toHaveText(expectedUrl);
   await expect(page.locator("#suggest-firefox-url span")).toHaveText(
@@ -404,7 +404,7 @@ test("Firefox locks cookie-backed suggestion settings", async ({ page }) => {
   writeCount = await settingsWriteCount(page);
   await page.selectOption("#snap-prefix", "~");
   await waitForSettingsWrite(page, writeCount);
-  expectedUrl = `${origin}/suggest?q=%s&sp=startpage&bp=%24&np=~`;
+  expectedUrl = `${origin}/suggest?q=%s&sp=startpage&bp=%24&np=~&site_specific_forward=1`;
   await expect(page.locator("#suggest-firefox-url")).toHaveText(expectedUrl);
 
   await providerPicker.click();
