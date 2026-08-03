@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { brotliDecompressSync } from "node:zlib";
+import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { generateBinaryShardPack } from "../scripts/codegen";
 import { extractInlineScriptHashes } from "../scripts/inline-script-hash";
 import {
@@ -343,9 +343,9 @@ describe("production static caching", () => {
       expect(second.status).toBe(200);
       expect(second.headers.get("Content-Encoding")).toBe("gzip");
       expect(second.headers.get("X-Flashbang-Shard-Cache")).toBe("hit");
-      expect(Array.from(new Uint8Array(await second.arrayBuffer()))).toEqual(
-        Array.from(expected)
-      );
+      expect(
+        Array.from(gunzipSync(new Uint8Array(await second.arrayBuffer())))
+      ).toEqual(Array.from(expected));
       expect(assetFetches).toBe(1);
     } finally {
       if (originalCaches) {

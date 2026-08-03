@@ -41,7 +41,7 @@ function textResponse(body: string, status: number): Response {
 }
 
 interface WorkersResponseInit extends ResponseInit {
-  encodeBody: "automatic";
+  encodeBody: "automatic" | "manual";
 }
 
 function encodeForClient(
@@ -57,9 +57,13 @@ function encodeForClient(
   } else {
     headers.delete("Content-Encoding");
   }
-  return new Response(response.body, {
+  const body =
+    encoding === "gzip" && response.body
+      ? response.body.pipeThrough(new CompressionStream("gzip"))
+      : response.body;
+  return new Response(body, {
     headers,
-    encodeBody: "automatic",
+    encodeBody: encoding === "gzip" ? "manual" : "automatic",
   } as WorkersResponseInit);
 }
 
