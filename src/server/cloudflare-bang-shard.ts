@@ -5,9 +5,9 @@ import {
   parseBangShardPath,
 } from "../shared/bang-shard-pack";
 import {
+  acceptsBangShardContentEncoding,
   type BangShardContentEncoding,
   createBangShardResponse,
-  preferredBangShardContentEncoding,
 } from "./bang-shard";
 
 interface AssetFetcher {
@@ -76,9 +76,12 @@ export async function handleCloudflareBangShard({
   if (!requested) {
     return textResponse("Not found", 404);
   }
-  const encoding = preferredBangShardContentEncoding(
-    request.headers.get("Accept-Encoding")
-  );
+  const encoding = acceptsBangShardContentEncoding(
+    request.headers.get("Accept-Encoding"),
+    "br"
+  )
+    ? "br"
+    : null;
 
   const cache = defaultEdgeCache();
   const cacheKey = new Request(request.url);
