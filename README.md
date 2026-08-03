@@ -373,26 +373,6 @@ Flashbang and Unduckified were measured live on August 3, 2026; the remaining de
 
 </details>
 
-### Flashbang vs Unduckified
-
-Both projects now use a Service Worker for controlled redirects and a page fallback for the first uncontrolled search. The important differences are what each path must initialize and when the complete catalog enters the critical path.
-
-| Current source and deployment | **Flashbang** | **[Unduckified](https://github.com/taciturnaxolotl/unduckified)** |
-| ----------------------------- | ------------- | ---------------------------------------------------------------- |
-| **Live redirect lookup** | Persisted hot boot, generated hot table, then a 545 KiB MPHF catalog | In-memory lookup decoded from a 688 KiB MPHF catalog |
-| **Stopped-worker restart** | Common and personalized bangs resolve from persisted hot state before the full catalog is ready | Rebuilds the lookup from the complete cached catalog |
-| **First-search lookup** | Embedded hot table or one routed 6.2–7.0 KiB Brotli shard; the complete catalog warms after the redirect | Complete 188.4 KiB Brotli / 688 KiB decoded catalog |
-| **Offline after first use** | Yes; the full catalog finishes caching behind the first redirect | Yes |
-| **Built-in triggers** | **14,614** from DDG, Kagi, and project overrides | 13,593 from Kagi and project entries |
-| **Snaps and snap chains** | **Yes**, including custom snap targets | No |
-| **Shortcut syntax** | **Separate configurable bang and snap prefixes** | Fixed `!` |
-| **Custom bangs** | **Simple URLs, regex captures, encoding modes, and snap paths** | Simple URLs |
-| **Private fragment search** | **Yes** (`#q=%s`) | No |
-| **Suggestions** | **Bang-aware, frecency-ranked, provider-backed, and site-specific forwarding** | Bang completion with optional provider/site forwarding |
-| **Hosted analytics** | **None**† | Cloudflare `beacon.min.js` and `/cdn-cgi/rum`‡ |
-
-The detailed deployment comparison was rechecked on August 3, 2026 at Flashbang `517d91b` and the Unduckified source revision then matching production, [`e01def4`](https://github.com/taciturnaxolotl/unduckified/commit/e01def4ab4a5fac5ef0a099c6f3c430bbb191d25). Unduckified's live worker advertised catalog version `3988e07507e2`, exactly matching a fresh build of that revision. The broader feature matrix above uses the later current-branch revision linked there.
-
 ### Production benchmark: 11 wins, 0 ties, 0 losses
 
 The final v1.7.0 campaign ran 60 randomized pairs in every category against the current public deployments. Under the predeclared 5% per-category significance rule, Flashbang won every live-worker, stopped-worker, and new-profile category.
