@@ -1147,21 +1147,37 @@ async function runWithShardRuntime<T>(
   throw new Error("Bang shard resolution exceeded the catalog shard count");
 }
 
-async function respondFromShardRuntime(
+function respondFromShardRuntime(
   runtime: BangShardRuntime,
   e: FetchEvent,
   rawQuery: string,
   settings: RedirectSettings,
   hotBangLookup?: HotBangLookup | null
-): Promise<Response> {
-  const shardIds = candidateBangShardIds(rawQuery, settings);
-  if (shardIds.length > 0) {
-    await Promise.all(
-      shardIds.map((shardId) => ensureRuntimeShard(runtime, shardId))
-    );
+): Response | Promise<Response> {
+  // The common warm path must stay synchronous. Generated hot bangs and
+  // already-decoded shards can resolve without parsing the query a second time
+  // or crossing an async boundary. Only predict and fetch candidate shards
+  // after the authoritative lookup reports a genuine cache miss.
+  configureBangFallbackLookup(runtime.lookup);
+  try {
+    return respondToRedirect(e, rawQuery, settings, hotBangLookup);
+  } catch (error) {
+    if (runtime.unavailableShardId(error) === null) {
+      throw error;
+    }
   }
-  return runWithShardRuntime(runtime, () =>
-    respondToRedirect(e, rawQuery, settings, hotBangLookup)
+
+  const shardIds = candidateBangShardIds(rawQuery, settings);
+  const candidatesReady =
+    shardIds.length === 0
+      ? RESOLVED_PROMISE
+      : Promise.all(
+          shardIds.map((shardId) => ensureRuntimeShard(runtime, shardId))
+        ).then(() => undefined);
+  return candidatesReady.then(() =>
+    runWithShardRuntime(runtime, () =>
+      respondToRedirect(e, rawQuery, settings, hotBangLookup)
+    )
   );
 }
 
