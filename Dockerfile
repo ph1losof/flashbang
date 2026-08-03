@@ -17,7 +17,7 @@ ENV ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=$ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS
 
 WORKDIR /app
 COPY --from=builder /app/dist dist
-COPY --from=builder /app/dist-server/server.js server.js
+COPY --from=builder /app/dist-server dist-server
 
 USER bun
 
@@ -25,4 +25,4 @@ ENV PORT=3000
 EXPOSE 3000
 HEALTHCHECK --interval=2s --timeout=2s --start-period=2s --retries=5 CMD bun -e "fetch('http://127.0.0.1:' + process.env.PORT + '/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 
-CMD ["bun", "server.js"]
+CMD ["bun", "dist-server/server.js"]
