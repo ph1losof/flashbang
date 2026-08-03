@@ -12,12 +12,13 @@ import { dirname, posix, relative, resolve } from "node:path";
 
 const IMPORT_SPECIFIER =
   /(?:from\s*|import\s*\(\s*|require\s*\(\s*)["'`](\.[^"'`]+)["'`]/g;
-const GENERATED = "src/generated/";
+/** Mirrors `coveragePathIgnorePatterns` in `bunfig.toml`. */
+const NOT_MEASURED = ["src/generated/", "src/ui/"];
 
 function sourceFiles(): string[] {
   return [...new Bun.Glob("src/**/*.ts").scanSync(".")]
     .map((path) => path.replaceAll("\\", "/"))
-    .filter((path) => !path.startsWith(GENERATED))
+    .filter((path) => !NOT_MEASURED.some((prefix) => path.startsWith(prefix)))
     .sort();
 }
 

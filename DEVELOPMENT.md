@@ -223,24 +223,11 @@ Unit, integration, performance, and docs tests:
 - `tests/sw-runtime.test.ts` and `tests/sw-idb.test.ts` — Service Worker lifecycle, settings, and persistence
 - `tests/start-cache.test.ts` — Production cache headers and Brotli negotiation
 - `tests/ui-db.test.ts` — Settings import/export and custom-bang updates
-- `tests/coverage-completeness.test.ts` — Every source module is reachable from the suite, so none drops out of the coverage report
+- `tests/bang-binary-format.test.ts` — Packed catalog layout primitives: checkpoints, alignment, and prefix heads
+- `tests/coverage-completeness.test.ts` — Every measured source module is reachable from the suite, so none drops out of the coverage report
 
-Browser UI tests. These run against the fake DOM in `tests/helpers/dom.ts`, which parses the real page markup from `src/ui/**/index.html` so a selector change fails the suite:
-
-- `tests/ui-app.test.ts` — Home page boot, suggest-cookie publication, and the `/settings` deep link
-- `tests/ui-page-chrome.test.ts` — Flash/shake animations, the suggest cookie, and the vim blur shortcut
-- `tests/home-command.test.ts` and `tests/home-command-offline.test.ts` — Command palette parsing, snap chains, keyboard selection, submission, and the missing-catalog path
-- `tests/home-shortcuts.test.ts` — Home keyboard shortcuts and the home controller
-- `tests/settings-init.test.ts` — Settings hydration and cross-module wiring
-- `tests/settings-write.test.ts` — Save-status rendering, hot-boot handshakes, write ordering, and the unload guard
-- `tests/settings-providers.test.ts` — Suggestion/lucky provider settings and the Firefox suggestion picker
-- `tests/settings-default-bang.test.ts` — Default-bang preview, selection, and commit
-- `tests/settings-custom-bangs.test.ts` — Custom bang add, edit, and remove flows
-- `tests/settings-syntax.test.ts` and `tests/settings-transfer.test.ts` — Trigger prefix selection and settings import/export
-- `tests/sw-bridge.test.ts` — Service Worker handshakes, timeouts, and invalidation fallbacks
-- `tests/liquid-metal.test.ts` — Wordmark shader setup, animation control, and the no-WebGL fallback
-- `tests/ui-fallback.test.ts` and `tests/ui-cold-fallback.test.ts` — Hot, full-catalog, and sharded cold-start redirect fallbacks
-- `tests/bench-ui.test.ts` — Benchmark page setup, a full measured run, and each abort path
+Browser UI modules under `src/ui/` are covered by the end-to-end suite rather than
+unit tests, and are excluded from coverage reporting in `bunfig.toml`.
 
 End-to-end tests:
 

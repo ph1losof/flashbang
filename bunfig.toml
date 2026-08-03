@@ -12,6 +12,8 @@ coveragePathIgnorePatterns = [
   "scripts/**",
   "tests/**",
   "src/generated/**",
+  # Browser UI is covered by the Playwright suite, not by `bun test`.
+  "src/ui/**",
   "*.config.ts",
 ]
 coverageThreshold = { lines = 0.97, functions = 0.9 }
