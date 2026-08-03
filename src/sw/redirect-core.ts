@@ -45,7 +45,12 @@ type SimpleEntry = UrlParts | UrlPartsWithSnap;
 type CaptureEntry = CaptureUrlParts | CaptureUrlPartsWithSnap;
 export type CustomUrlParts = SimpleEntry | CaptureEntry;
 export type TriggerSyntax = readonly [bangMarker: number, snapMarker: number];
-export type HotBangLookup = (trigger: string) => UrlParts | false | null;
+export type HotBangLookup = (
+  trigger: string,
+  rawQuery?: string,
+  termStart?: number,
+  termEnd?: number
+) => UrlParts | string | false | null;
 
 export interface RedirectSettings {
   custom: Record<string, CustomUrlParts>;
@@ -74,11 +79,25 @@ export function isHotBangLookupBlocked(error: unknown): boolean {
 function lookupBuiltInBang(
   trigger: string,
   hash: number
-): BuiltinUrlParts | null {
+): BuiltinUrlParts | null;
+function lookupBuiltInBang(
+  trigger: string,
+  hash: number,
+  rawQuery: string,
+  termStart: number,
+  termEnd: number
+): BuiltinUrlParts | string | null;
+function lookupBuiltInBang(
+  trigger: string,
+  hash: number,
+  rawQuery?: string,
+  termStart?: number,
+  termEnd?: number
+): BuiltinUrlParts | string | null {
   if (!activeHotBangLookup) {
     return lookupBang(trigger, hash);
   }
-  const entry = activeHotBangLookup(trigger);
+  const entry = activeHotBangLookup(trigger, rawQuery, termStart, termEnd);
   if (entry === false) {
     throw HOT_BANG_LOOKUP_BLOCKED;
   }
@@ -333,7 +352,10 @@ function resolveBangFill(
           termEnd
         );
   }
-  const entry = lookupBuiltInBang(bang, hash);
+  const entry = lookupBuiltInBang(bang, hash, rawQuery, termStart, termEnd);
+  if (typeof entry === "string") {
+    return entry;
+  }
   if (entry) {
     return buildUrl(entry, rawQuery, termStart, termEnd);
   }

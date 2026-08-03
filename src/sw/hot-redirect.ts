@@ -61,9 +61,29 @@ function hotBangParts(id: number): UrlParts {
   return parts;
 }
 
-export function lookupGeneratedHotBang(trigger: string): UrlParts | null {
-  const id = lookupHotBang(trigger, 0, trigger.length);
-  return id === -1 ? null : hotBangParts(id);
+export function lookupGeneratedHotBang(trigger: string): UrlParts | null;
+// Term bounds activate direct filling for generated query-safe hot bangs.
+export function lookupGeneratedHotBang(
+  trigger: string,
+  rawQuery: string,
+  termStart: number,
+  termEnd: number
+): string | null;
+export function lookupGeneratedHotBang(
+  trigger: string,
+  rawQuery?: string,
+  termStart?: number,
+  termEnd?: number
+): UrlParts | string | null {
+  const id = lookupHotBang(trigger);
+  if (id === -1) {
+    return null;
+  }
+  return rawQuery === undefined
+    ? hotBangParts(id)
+    : HOT_PREFIXES[id] +
+        rawQuery.substring(termStart as number, termEnd) +
+        HOT_SUFFIXES[id];
 }
 
 function createHotBangLookup(
@@ -81,7 +101,7 @@ function createCompactHotBangLookup(state: number): HotBangLookup {
     return lookupGeneratedHotBang;
   }
   return (trigger) => {
-    const id = lookupHotBang(trigger, 0, trigger.length);
+    const id = lookupHotBang(trigger);
     if (id === -1) {
       return null;
     }
@@ -396,7 +416,7 @@ function decodeBootSettings(encoded: string): {
       validateCustomTrigger(item[0]) !== null ||
       Object.hasOwn(custom, item[0]) ||
       Object.hasOwn(frecency, item[0]) ||
-      lookupHotBang(item[0], 0, item[0].length) !== -1 ||
+      lookupHotBang(item[0]) !== -1 ||
       !isUrlParts(item[1])
     ) {
       return null;
@@ -525,7 +545,7 @@ export function materializeHotFrecency(
     if (
       entries.length >= TOP_FRECENCY_ENTRIES ||
       Object.hasOwn(snapshot.custom, trigger) ||
-      lookupHotBang(trigger, 0, trigger.length) !== -1
+      lookupHotBang(trigger) !== -1
     ) {
       continue;
     }
