@@ -444,12 +444,10 @@ export async function main(): Promise<void> {
       bangMetaAsset,
       "  Cache-Control: public, max-age=31536000, immutable",
       "",
-      // Shards carry their hash in the name, so one wildcard covers the set.
-      // They sit on the first-search path, so on Pages they get the same
-      // hand-rolled Brotli as the catalog rather than Pages' quality-4 pass.
-      "/bangs-s*",
-      ...bangDataHeaders,
-      "",
+      // Use exact cold-shard paths: `/bangs-s*` also matches the
+      // `/bangs-str-*` string store under Pages' additive wildcard rules,
+      // duplicating Content-Encoding and making a once-compressed body invalid.
+      ...bangShardAssets.flatMap((asset) => [asset, ...bangDataHeaders, ""]),
       "/bangs-i*",
       ...bangDataHeaders,
       "",

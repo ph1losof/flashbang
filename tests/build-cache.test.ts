@@ -327,7 +327,12 @@ describe("build cache version", () => {
     try {
       await buildProductionAssets();
       expect(buildSpy).toHaveBeenCalledTimes(7);
-      expect(await Bun.file("dist/_headers").text()).toContain("/sw.js");
+      const headers = await Bun.file("dist/_headers").text();
+      expect(headers).toContain("/sw.js");
+      expect(headers).not.toContain("/bangs-s*");
+      expect(
+        headers.match(/^\/bangs-s[0-9a-z]+-[a-f0-9]{12}\.bin$/gm)
+      ).toHaveLength(BANG_SHARD_COUNT);
       expect([...new Bun.Glob("*.br").scanSync("dist")].length).toBeGreaterThan(
         0
       );
