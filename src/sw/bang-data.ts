@@ -1,4 +1,8 @@
-import { BANG_BINARY_VERSION_INDEX } from "../shared/bang-binary-format";
+import {
+  BANG_BINARY_VERSION_INDEX,
+  BANG_INDEX_PACK_MAGIC,
+  BANG_INDEX_PACK_VERSION,
+} from "../shared/bang-binary-format";
 import { BANG_SHARD_COUNT, bangShardIndex } from "../shared/bang-shards";
 import type { SnapTargetParts } from "../shared/snap-target";
 import type { BangStrings } from "./bang-strings";
@@ -577,9 +581,13 @@ async function defaultShardRead(asset: string): Promise<ArrayBuffer> {
 function createShardRuntime(
   router: ArrayLike<number>,
   assets: readonly string[],
-  decode: (buffer: ArrayBuffer) => BangLookup,
+  decode: (buffer: ArrayBuffer, shardId: number) => BangLookup,
+  shardsPerAsset: number,
   read: (asset: string) => Promise<ArrayBuffer> = defaultShardRead
 ): BangShardRuntime {
+  if (!Number.isInteger(shardsPerAsset) || shardsPerAsset <= 0) {
+    throw new Error("Bang shards per asset must be a positive integer");
+  }
   const lookups: Array<BangLookup | null> = Array.from(
     { length: BANG_SHARD_COUNT },
     () => null
@@ -614,10 +622,12 @@ function createShardRuntime(
     let promise = promises[shardId];
     if (!promise) {
       promise = (
-        prefetched ? Promise.resolve(prefetched) : read(assets[shardId])
+        prefetched
+          ? Promise.resolve(prefetched)
+          : read(assets[Math.floor(shardId / shardsPerAsset)])
       )
         .then((buffer) => {
-          lookups[shardId] = decode(buffer);
+          lookups[shardId] = decode(buffer, shardId);
         })
         .catch((error) => {
           promises[shardId] = null;
@@ -658,15 +668,58 @@ export function createBangShardRuntime(
   return createShardRuntime(
     router,
     assets,
-    decodeTrustedGeneratedBangData,
+    (buffer) => decodeTrustedGeneratedBangData(buffer),
+    1,
     read
   );
+}
+
+export function decodeBangIndexPack(
+  buffer: ArrayBuffer,
+  shardInPack: number
+): ArrayBuffer {
+  if (buffer.byteLength < 5 * Uint32Array.BYTES_PER_ELEMENT) {
+    throw new Error("Truncated bang index pack");
+  }
+  const prefix = new Uint32Array(buffer, 0, 3);
+  if (
+    prefix[0] !== BANG_INDEX_PACK_MAGIC ||
+    prefix[1] !== BANG_INDEX_PACK_VERSION
+  ) {
+    throw new Error("Unsupported bang index pack");
+  }
+  const count = prefix[2];
+  const headerBytes = (count + 4) * Uint32Array.BYTES_PER_ELEMENT;
+  if (
+    count === 0 ||
+    headerBytes > buffer.byteLength ||
+    shardInPack < 0 ||
+    shardInPack >= count
+  ) {
+    throw new Error("Invalid bang index pack layout");
+  }
+  const offsets = new Uint32Array(buffer, 3 * 4, count + 1);
+  if (offsets[0] !== headerBytes || offsets[count] !== buffer.byteLength) {
+    throw new Error("Invalid bang index pack offsets");
+  }
+  for (let i = 0; i < count; i++) {
+    if (offsets[i + 1] <= offsets[i]) {
+      throw new Error("Invalid bang index pack offsets");
+    }
+  }
+  const start = offsets[shardInPack];
+  const end = offsets[shardInPack + 1];
+  if (start < headerBytes || end <= start || end > buffer.byteLength) {
+    throw new Error("Invalid bang index pack offsets");
+  }
+  return buffer.slice(start, end);
 }
 
 /** v11 index shards resolved lazily against the append-only global store. */
 export function createBangIndexRuntime(
   router: ArrayLike<number>,
   assets: readonly string[],
+  shardsPerAsset: number,
   // A getter lets the runtime be constructed before the store has loaded.
   strings: () => BangStrings | null,
   // The Service Worker supplies a cache-first reader for offline resolution.
@@ -675,13 +728,17 @@ export function createBangIndexRuntime(
   return createShardRuntime(
     router,
     assets,
-    (buffer) => {
+    (buffer, shardId) => {
       const store = strings();
       if (!store) {
         throw new Error("Bang string store is not initialized");
       }
-      return decodeIndexBangData(buffer, store);
+      return decodeIndexBangData(
+        decodeBangIndexPack(buffer, shardId % shardsPerAsset),
+        store
+      );
     },
+    shardsPerAsset,
     read
   );
 }

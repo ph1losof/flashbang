@@ -7,6 +7,11 @@ import {
   pageHeaders,
   SW_CSP,
 } from "../src/server/headers";
+import {
+  BANG_INDEX_PACK_MAGIC,
+  BANG_INDEX_PACK_VERSION,
+  BANG_INDEX_SHARDS_PER_PACK,
+} from "../src/shared/bang-binary-format";
 import { loadStringIdMap } from "./bang-strings-build";
 import { ensureGeneratedBangData, generateCatalog } from "./codegen";
 import { extractInlineScriptHashes } from "./inline-script-hash";
@@ -104,6 +109,83 @@ export function requiredAppAssetPaths(
   ].sort();
 }
 
+export function packBangIndexShards(
+  shards: readonly Uint8Array[],
+  shardsPerPack = BANG_INDEX_SHARDS_PER_PACK
+): Uint8Array[] {
+  if (!Number.isInteger(shardsPerPack) || shardsPerPack <= 0) {
+    throw new Error("Index shards per pack must be a positive integer");
+  }
+  const packs: Uint8Array[] = [];
+  for (let start = 0; start < shards.length; start += shardsPerPack) {
+    const group = shards.slice(start, start + shardsPerPack);
+    const headerBytes = (group.length + 4) * Uint32Array.BYTES_PER_ELEMENT;
+    const byteLength =
+      headerBytes + group.reduce((total, shard) => total + shard.byteLength, 0);
+    const pack = new Uint8Array(byteLength);
+    const header = new Uint32Array(pack.buffer, 0, group.length + 4);
+    header[0] = BANG_INDEX_PACK_MAGIC;
+    header[1] = BANG_INDEX_PACK_VERSION;
+    header[2] = group.length;
+    let offset = headerBytes;
+    for (let i = 0; i < group.length; i++) {
+      header[i + 3] = offset;
+      pack.set(group[i], offset);
+      offset += group[i].byteLength;
+    }
+    header[group.length + 3] = offset;
+    packs.push(pack);
+  }
+  return packs;
+}
+
+export interface CatalogPerformanceSizes {
+  coldFallbackBrotli: number;
+  indexPackBrotli: readonly number[];
+  monolithBrotli: number;
+  storeBrotli: number;
+  serviceWorkerBrotli: number;
+}
+
+/**
+ * Keep the optimized catalog inside the measured transfer-size envelope.
+ * Absolute limits protect the first-search code path; ratios scale with future
+ * catalog growth and preserve the on-demand/full-offline tradeoff.
+ */
+export function assertCatalogPerformanceBudgets(
+  sizes: CatalogPerformanceSizes
+): void {
+  const fail = (label: string, actual: number, limit: number): void => {
+    if (actual > limit) {
+      throw new Error(
+        `${label} performance budget exceeded: ${actual} B > ${Math.floor(limit)} B`
+      );
+    }
+  };
+  if (sizes.indexPackBrotli.length === 0) {
+    throw new Error("Catalog performance budget requires index packs");
+  }
+  fail("Cold fallback Brotli", sizes.coldFallbackBrotli, 7 * 1024);
+  fail("Service worker Brotli", sizes.serviceWorkerBrotli, 19 * 1024);
+  fail("Index pack count", sizes.indexPackBrotli.length, 15);
+
+  const largestPack = Math.max(...sizes.indexPackBrotli);
+  const allPacks = sizes.indexPackBrotli.reduce(
+    (total, size) => total + size,
+    0
+  );
+  fail(
+    "First-demand catalog Brotli",
+    sizes.storeBrotli + largestPack,
+    sizes.monolithBrotli * 0.75
+  );
+  fail(
+    "Full offline catalog Brotli",
+    sizes.storeBrotli + allPacks,
+    sizes.monolithBrotli * 1.1
+  );
+}
+
 export async function bundleServiceWorker(
   naming: string,
   cacheVersion: string,
@@ -113,7 +195,8 @@ export async function bundleServiceWorker(
   bangShardRouter: ArrayLike<number> = [],
   bangShardAssets: readonly string[] = [],
   bangIndexAssets: readonly string[] = [],
-  bangStoreAssets: readonly string[] = []
+  bangStoreAssets: readonly string[] = [],
+  bangIndexShardsPerAsset = 1
 ): Promise<void> {
   const result = await Bun.build({
     entrypoints: ["src/sw/sw.ts"],
@@ -127,6 +210,7 @@ export async function bundleServiceWorker(
       __BANG_SHARD_ROUTER__: JSON.stringify(Array.from(bangShardRouter)),
       __BANG_SHARD_ASSETS__: JSON.stringify(bangShardAssets),
       __BANG_INDEX_ASSETS__: JSON.stringify(bangIndexAssets),
+      __BANG_INDEX_SHARDS_PER_ASSET__: JSON.stringify(bangIndexShardsPerAsset),
       __BANG_STORE_ASSETS__: JSON.stringify(bangStoreAssets),
       __FALLBACK_ASSET__: JSON.stringify(fallbackAsset),
       __CACHE_VERSION__: JSON.stringify(cacheVersion),
@@ -192,8 +276,9 @@ export async function main(): Promise<void> {
   const bangShardAssets = catalog.cold.map((bytes, shard) =>
     contentAsset(bytes, `bangs-s${shard.toString(36)}`)
   );
-  const bangIndexAssets = catalog.index.map((bytes, shard) =>
-    contentAsset(bytes, `bangs-i${shard.toString(36)}`)
+  const bangIndexPacks = packBangIndexShards(catalog.index);
+  const bangIndexAssets = bangIndexPacks.map((bytes, pack) =>
+    contentAsset(bytes, `bangs-ip${pack.toString(36)}`)
   );
   const bangStoreAssets = [
     contentAsset(catalog.storeBase, "bangs-str"),
@@ -203,8 +288,8 @@ export async function main(): Promise<void> {
     ...catalog.cold.map((bytes, shard) =>
       Bun.write(`${DIST_DIR}${bangShardAssets[shard]}`, bytes)
     ),
-    ...catalog.index.map((bytes, shard) =>
-      Bun.write(`${DIST_DIR}${bangIndexAssets[shard]}`, bytes)
+    ...bangIndexPacks.map((bytes, pack) =>
+      Bun.write(`${DIST_DIR}${bangIndexAssets[pack]}`, bytes)
     ),
     Bun.write(`${DIST_DIR}${bangStoreAssets[0]}`, catalog.storeBase),
     Bun.write(`${DIST_DIR}${bangStoreAssets[1]}`, catalog.storeTail),
@@ -270,7 +355,8 @@ export async function main(): Promise<void> {
     bangShardRouter,
     bangShardAssets,
     bangIndexAssets,
-    bangStoreAssets
+    bangStoreAssets,
+    BANG_INDEX_SHARDS_PER_PACK
   );
   const cacheInputs: CacheVersionInput[] = await Promise.all(
     precacheFileInputs(requiredAppAssets, bangDataAsset, fallbackAsset).map(
@@ -298,7 +384,8 @@ export async function main(): Promise<void> {
     bangShardRouter,
     bangShardAssets,
     bangIndexAssets,
-    bangStoreAssets
+    bangStoreAssets,
+    BANG_INDEX_SHARDS_PER_PACK
   );
 
   console.log("=== Bundle production server ===");
@@ -394,6 +481,19 @@ export async function main(): Promise<void> {
     });
     await Bun.write(`${DIST_DIR}/${file}.br`, br);
   }
+
+  const brotliSize = (asset: string): number =>
+    Bun.file(`${DIST_DIR}${asset}.br`).size;
+  assertCatalogPerformanceBudgets({
+    coldFallbackBrotli: brotliSize(coldFallbackAsset),
+    indexPackBrotli: bangIndexAssets.map(brotliSize),
+    monolithBrotli: brotliSize(bangDataAsset),
+    serviceWorkerBrotli: brotliSize("/sw.js"),
+    storeBrotli: bangStoreAssets.reduce(
+      (total, asset) => total + brotliSize(asset),
+      0
+    ),
+  });
 
   if (
     await promoteBrotliForCloudflarePages(bangDataAsset, pagesEncodedBangData)

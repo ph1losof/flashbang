@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { loadStringIdMap } from "../scripts/bang-strings-build";
+import { packBangIndexShards } from "../scripts/build";
 import { generateBinaryShards, generateCatalog } from "../scripts/codegen";
 import { lookupAdvancedBang } from "../src/generated/bangs-sparse.js";
 import {
@@ -12,6 +13,7 @@ import { hashFNV1a } from "../src/shared/hash";
 import {
   createBangIndexRuntime,
   createBangShardRuntime,
+  decodeBangIndexPack,
   initializeBangData,
   isBangStringStoreStale,
   lookupBang,
@@ -264,21 +266,24 @@ describe("codegen round-trip", () => {
       detach(catalog.storeBase),
       detach(catalog.storeTail),
     ]);
-    const assets = catalog.index.map(
-      (_, shard) => `/bangs-i${shard.toString(36)}-test.bin`
+    const shardsPerAsset = 3;
+    const packs = packBangIndexShards(catalog.index, shardsPerAsset);
+    const assets = packs.map(
+      (_, pack) => `/bangs-ip${pack.toString(36)}-test.bin`
     );
     const reads: string[] = [];
     const runtime = createBangIndexRuntime(
       catalog.router,
       assets,
+      shardsPerAsset,
       () => strings,
       (asset) => {
         reads.push(asset);
-        const shard = Number.parseInt(
-          /^\/bangs-i([0-9a-z]+)-/.exec(asset)![1],
+        const pack = Number.parseInt(
+          /^\/bangs-ip([0-9a-z]+)-/.exec(asset)![1],
           36
         );
-        return Promise.resolve(detach(catalog.index[shard]));
+        return Promise.resolve(detach(packs[pack]));
       }
     );
     const trigger = "github";
@@ -287,19 +292,42 @@ describe("codegen round-trip", () => {
     await runtime.ensure(shardId);
     expect(runtime.lookup(trigger, hash)?.[0]).toContain("github.com");
     await runtime.ensure(shardId);
-    expect(reads).toEqual([assets[shardId]]);
+    expect(reads).toEqual([assets[Math.floor(shardId / shardsPerAsset)]]);
 
-    const staleRuntime = createBangIndexRuntime(catalog.router, assets, () => ({
-      ...strings,
-      epoch: strings.epoch + 1,
-    }));
+    const staleRuntime = createBangIndexRuntime(
+      catalog.router,
+      assets,
+      shardsPerAsset,
+      () => ({
+        ...strings,
+        epoch: strings.epoch + 1,
+      })
+    );
     let staleError: unknown;
     try {
-      await staleRuntime.ensure(shardId, detach(catalog.index[shardId]));
+      await staleRuntime.ensure(
+        shardId,
+        detach(packs[Math.floor(shardId / shardsPerAsset)])
+      );
     } catch (error) {
       staleError = error;
     }
     expect(isBangStringStoreStale(staleError)).toBe(true);
+
+    expect(() => createBangIndexRuntime([], [], 0, () => strings)).toThrow(
+      "positive integer"
+    );
+    expect(() => decodeBangIndexPack(new ArrayBuffer(4), 0)).toThrow(
+      "Truncated"
+    );
+    const invalidMagic = detach(packs[0]).slice(0);
+    new Uint32Array(invalidMagic)[0] = 0;
+    expect(() => decodeBangIndexPack(invalidMagic, 0)).toThrow("Unsupported");
+    const invalidOffsets = detach(packs[0]).slice(0);
+    const offsetHeader = new Uint32Array(invalidOffsets);
+    offsetHeader[4] = offsetHeader[3];
+    expect(() => decodeBangIndexPack(invalidOffsets, 0)).toThrow("offsets");
+    expect(() => decodeBangIndexPack(detach(packs[0]), 3)).toThrow("layout");
   });
 
   test("retries a shard after a failed network response", async () => {

@@ -1,10 +1,12 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import {
+  assertCatalogPerformanceBudgets,
   main as buildProductionAssets,
   bundleProductionServer,
   bundleServiceWorker,
   createCacheVersion,
   isCloudflarePagesBuild,
+  packBangIndexShards,
   precacheFileInputs,
   promoteBrotliForCloudflarePages,
   requiredAppAssetPaths,
@@ -40,6 +42,60 @@ function buildOutput({
 }
 
 describe("build cache version", () => {
+  test("packs index shards into independently addressable groups", () => {
+    const shards = ["a", "bb", "ccc", "dddd"].map((value) =>
+      new TextEncoder().encode(value)
+    );
+    const packs = packBangIndexShards(shards, 3);
+    expect(packs).toHaveLength(2);
+
+    const firstHeader = new Uint32Array(packs[0].buffer, 0, 7);
+    expect(firstHeader[2]).toBe(3);
+    expect(firstHeader[3]).toBe(28);
+    expect(firstHeader[6]).toBe(packs[0].byteLength);
+    expect(new TextDecoder().decode(packs[0].subarray(28, 29))).toBe("a");
+    expect(() => packBangIndexShards(shards, 0)).toThrow("positive integer");
+  });
+
+  test("enforces first-demand and full-offline catalog budgets", () => {
+    expect(() =>
+      assertCatalogPerformanceBudgets({
+        coldFallbackBrotli: 7 * 1024,
+        indexPackBrotli: [4_000, 5_000],
+        monolithBrotli: 200_000,
+        serviceWorkerBrotli: 19 * 1024,
+        storeBrotli: 130_000,
+      })
+    ).not.toThrow();
+    expect(() =>
+      assertCatalogPerformanceBudgets({
+        coldFallbackBrotli: 7 * 1024 + 1,
+        indexPackBrotli: [4_000],
+        monolithBrotli: 200_000,
+        serviceWorkerBrotli: 19 * 1024,
+        storeBrotli: 130_000,
+      })
+    ).toThrow("Cold fallback Brotli");
+    expect(() =>
+      assertCatalogPerformanceBudgets({
+        coldFallbackBrotli: 1,
+        indexPackBrotli: [25_001],
+        monolithBrotli: 200_000,
+        serviceWorkerBrotli: 1,
+        storeBrotli: 125_000,
+      })
+    ).toThrow("First-demand catalog Brotli");
+    expect(() =>
+      assertCatalogPerformanceBudgets({
+        coldFallbackBrotli: 1,
+        indexPackBrotli: [20_000, 20_000, 20_000, 20_000, 20_000],
+        monolithBrotli: 200_000,
+        serviceWorkerBrotli: 1,
+        storeBrotli: 130_000,
+      })
+    ).toThrow("Full offline catalog Brotli");
+  });
+
   test("detects Cloudflare Pages builds exactly", () => {
     expect(isCloudflarePagesBuild("1")).toBe(true);
     expect(isCloudflarePagesBuild("true")).toBe(false);
@@ -121,7 +177,10 @@ describe("build cache version", () => {
         "/bangs-a.bin",
         "/fallback-a.js",
         [2, 1],
-        ["/bangs-s0-a.bin"]
+        ["/bangs-s0-a.bin"],
+        ["/bangs-ip0-a.bin"],
+        ["/bangs-str-a.bin"],
+        3
       );
 
       expect(buildSpy).toHaveBeenCalledWith(
@@ -134,6 +193,9 @@ describe("build cache version", () => {
             __BANG_DATA_ASSET__: '"/bangs-a.bin"',
             __BANG_SHARD_ROUTER__: "[2,1]",
             __BANG_SHARD_ASSETS__: '["/bangs-s0-a.bin"]',
+            __BANG_INDEX_ASSETS__: '["/bangs-ip0-a.bin"]',
+            __BANG_INDEX_SHARDS_PER_ASSET__: "3",
+            __BANG_STORE_ASSETS__: '["/bangs-str-a.bin"]',
             __FALLBACK_ASSET__: '"/fallback-a.js"',
             __CACHE_VERSION__: '"fb-test"',
             __REQUIRED_APP_ASSETS__: '["/chunk-a.js"]',

@@ -9,7 +9,7 @@ const GOOGLE_REDIRECT = /google\.com\/search\?q=hello/;
 const GOOGLE_HOST = "https://www.google.com";
 const CUSTOM_HOST = "https://example.com";
 const BANG_COLD_ASSET_RE = /^\/bangs-s(?:[0-9a-z]|1[0-6])-[a-f0-9]{12}\.bin$/;
-const BANG_INDEX_ASSET_RE = /^\/bangs-i(?:[0-9a-z]|1[0-6])-[a-f0-9]{12}\.bin$/;
+const BANG_INDEX_ASSET_RE = /^\/bangs-ip[0-9a-e]-[a-f0-9]{12}\.bin$/;
 const BANG_STORE_ASSET_RE = /\/bangs-str-[a-f0-9]{12}\.bin$/;
 const WEBKIT_SERVICE_WORKER_SKIP =
   "Playwright WebKit does not support service worker lifecycle testing";
@@ -2565,11 +2565,13 @@ test("worker migrates unchanged index shards without refetching", async ({
       page.evaluate(async (currentCacheName) => {
         const cache = await caches.open(currentCacheName);
         return (await cache.keys()).filter((request) =>
-          /\/bangs-i(?:[0-9a-z]|1[0-6])-[a-f0-9]{12}\.bin$/.test(request.url)
+          /^\/bangs-ip[0-9a-e]-[a-f0-9]{12}\.bin$/.test(
+            new URL(request.url).pathname
+          )
         ).length;
       }, cacheName!)
     )
-    .toBe(43);
+    .toBe(15);
 
   const oldCacheName = "fb-e2e-index-migration";
   await page.evaluate(
@@ -2578,7 +2580,9 @@ test("worker migrates unchanged index shards without refetching", async ({
       const previous = await caches.open(previousCacheName);
       for (const request of await current.keys()) {
         if (
-          !/\/bangs-i(?:[0-9a-z]|1[0-6])-[a-f0-9]{12}\.bin$/.test(request.url)
+          !/^\/bangs-ip[0-9a-e]-[a-f0-9]{12}\.bin$/.test(
+            new URL(request.url).pathname
+          )
         ) {
           continue;
         }
@@ -2610,11 +2614,13 @@ test("worker migrates unchanged index shards without refetching", async ({
       page.evaluate(async (currentCacheName) => {
         const cache = await caches.open(currentCacheName);
         return (await cache.keys()).filter((request) =>
-          /\/bangs-i(?:[0-9a-z]|1[0-6])-[a-f0-9]{12}\.bin$/.test(request.url)
+          /^\/bangs-ip[0-9a-e]-[a-f0-9]{12}\.bin$/.test(
+            new URL(request.url).pathname
+          )
         ).length;
       }, cacheName!)
     )
-    .toBe(43);
+    .toBe(15);
   expect(indexRefetches).toBe(0);
   await expect
     .poll(() => page.evaluate(() => caches.keys()))

@@ -14,6 +14,13 @@ export const BANG_STRINGS_MAGIC = 0x31534246;
 export const BANG_STRINGS_VERSION = 1;
 export const BANG_STRINGS_HEADER_WORDS = 12;
 
+// Warm index shards are packed three at a time. This is the measured knee:
+// 15 cache objects instead of 43 and ~5% fewer compressed index bytes, while a
+// one-shard catalog update still invalidates at most a ~5.5 KiB pack.
+export const BANG_INDEX_PACK_MAGIC = 0x50494246;
+export const BANG_INDEX_PACK_VERSION = 1;
+export const BANG_INDEX_SHARDS_PER_PACK = 3;
+
 // Checkpoint stride for the packed string tables: a lookup jumps to
 // checkpoints[id >> CHECKPOINT_SHIFT] and sums at most CHECKPOINT_SIZE - 1
 // lengths. Store chunks are cut on this boundary so each block lies in one

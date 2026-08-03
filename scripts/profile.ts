@@ -2,13 +2,24 @@ import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { cpus } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { brotliCompressSync, constants as zlibConstants } from "node:zlib";
+import { BANG_INDEX_SHARDS_PER_PACK } from "../src/shared/bang-binary-format";
+import { bangShardIndex } from "../src/shared/bang-shards";
 import { compileCaptureUrl } from "../src/shared/capture-template";
 import { readPathname } from "../src/shared/raw-url";
 import { compileSnapTarget } from "../src/shared/snap-target";
 import { TRIGGER_PREFIXES } from "../src/shared/trigger-prefix";
+import { decodeBangIndexPack, decodeIndexBangData } from "../src/sw/bang-data";
+import { createBangStrings } from "../src/sw/bang-strings";
 import type { RedirectSettings } from "../src/sw/redirect";
 import { decodeBangCatalog } from "../src/ui/bang-catalog";
-import { ensureGeneratedBangData, GENERATED_BANG_DATA_FILES } from "./codegen";
+import { loadStringIdMap } from "./bang-strings-build";
+import { packBangIndexShards } from "./build";
+import {
+  ensureGeneratedBangData,
+  GENERATED_BANG_DATA_FILES,
+  generateCatalog,
+} from "./codegen";
 
 const [binaryPath, , , sparsePath, metaPath, trieLoaderPath, , trieBinaryPath] =
   GENERATED_BANG_DATA_FILES;
@@ -45,8 +56,13 @@ interface ProfileMetric {
 }
 
 interface ProfileReport {
-  schemaVersion: 2;
+  schemaVersion: 2 | 3;
   suiteVersion: number;
+  /** Logical catalog identity; comparable across physical representations. */
+  catalogFingerprint?: string;
+  /** Generated representation identity; diagnostic, not a comparability gate. */
+  artifactFingerprint?: string;
+  /** Schema-v2 compatibility field; v3 stores the logical fingerprint here. */
   dataFingerprint: string;
   generatedAt: string;
   environment: {
@@ -157,7 +173,7 @@ function isProfileReport(value: unknown): value is ProfileReport {
   }
   const candidate = value as Partial<ProfileReport>;
   return (
-    candidate.schemaVersion === 2 &&
+    (candidate.schemaVersion === 2 || candidate.schemaVersion === 3) &&
     Number.isInteger(candidate.suiteVersion) &&
     typeof candidate.dataFingerprint === "string" &&
     typeof candidate.environment === "object" &&
@@ -326,7 +342,7 @@ function separator(title: string) {
 
 const RUNS = profileOptions.runs ?? (profileOptions.quick ? 4 : 12);
 const COLD_RUNS = profileOptions.quick ? 3 : 5;
-const PROFILE_SUITE_VERSION = 2;
+const PROFILE_SUITE_VERSION = 3;
 
 function iterations(normal: number): number {
   return profileOptions.quick
@@ -452,6 +468,21 @@ let sink = 0;
 import { hashFNV1a as fnvHash } from "../src/shared/hash";
 
 await ensureGeneratedBangData(true);
+const catalogSourceBytes = await Bun.file("data/bangs.json").bytes();
+const profileCatalog = generateCatalog(
+  JSON.parse(new TextDecoder().decode(catalogSourceBytes)),
+  loadStringIdMap()
+);
+const indexPacks = packBangIndexShards(profileCatalog.index);
+const detach = (bytes: Uint8Array): ArrayBuffer =>
+  bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength
+  ) as ArrayBuffer;
+const profileStrings = createBangStrings([
+  detach(profileCatalog.storeBase),
+  detach(profileCatalog.storeTail),
+]);
 const { initializeBangData, lookupBang } = await import("../src/sw/bang-data");
 const binaryBuffer = await Bun.file(binaryPath).arrayBuffer();
 initializeBangData(binaryBuffer);
@@ -529,6 +560,29 @@ const trieBytes = trieModuleBytes + trieDataBytes;
 const binaryBytes = Bun.file(binaryPath).size;
 const sparseBytes = Bun.file(sparsePath).size;
 const totalGeneratedBytes = binaryBytes + sparseBytes + metaBytes + trieBytes;
+const brotliSize = (bytes: Uint8Array): number =>
+  brotliCompressSync(bytes, {
+    params: {
+      [zlibConstants.BROTLI_PARAM_QUALITY]: zlibConstants.BROTLI_MAX_QUALITY,
+    },
+  }).byteLength;
+const monolithBrotliBytes = brotliSize(new Uint8Array(binaryBuffer));
+const storeRawBytes =
+  profileCatalog.storeBase.byteLength + profileCatalog.storeTail.byteLength;
+const storeBrotliBytes =
+  brotliSize(profileCatalog.storeBase) + brotliSize(profileCatalog.storeTail);
+const indexRawBytes = indexPacks.reduce(
+  (total, pack) => total + pack.byteLength,
+  0
+);
+const indexPackBrotliBytes = indexPacks.map(brotliSize);
+const indexBrotliBytes = indexPackBrotliBytes.reduce(
+  (total, size) => total + size,
+  0
+);
+const firstDemandBrotliBytes =
+  storeBrotliBytes + Math.max(...indexPackBrotliBytes);
+const fullOfflineBrotliBytes = storeBrotliBytes + indexBrotliBytes;
 
 console.log(`\nBang count: ${BANG_COUNT.toLocaleString()}`);
 console.log(
@@ -543,6 +597,19 @@ console.log(
 
 console.log(
   `bangs-trie:    ${fmtBytesExact(trieBytes)}  (${fmtBytesExact(trieModuleBytes)} loader + ${fmtBytesExact(trieDataBytes)} binary data)`
+);
+console.log("\nWarm service-worker catalog (v11):");
+console.log(
+  `  String store: ${fmtBytesExact(storeRawBytes)} raw / ${fmtBytesExact(storeBrotliBytes)} Brotli`
+);
+console.log(
+  `  Index packs:  ${fmtBytesExact(indexRawBytes)} raw / ${fmtBytesExact(indexBrotliBytes)} Brotli (${indexPacks.length} objects)`
+);
+console.log(
+  `  First demand: ${fmtBytesExact(firstDemandBrotliBytes)} Brotli (${((firstDemandBrotliBytes / monolithBrotliBytes - 1) * 100).toFixed(1)}% vs monolith)`
+);
+console.log(
+  `  Full offline: ${fmtBytesExact(fullOfflineBrotliBytes)} Brotli (${((fullOfflineBrotliBytes / monolithBrotliBytes - 1) * 100).toFixed(1)}% vs monolith)`
 );
 console.log(`Production generated: ${fmtBytesExact(totalGeneratedBytes)}`);
 console.log(
@@ -661,6 +728,19 @@ for (let run = 0; run < RUNS; run++) {
   warmTimes.push((Bun.nanoseconds() - t0) / allTriggers.length);
 }
 const warmRunStats = summarizeRuns(warmTimes);
+const indexedLookups = profileCatalog.index.map((shard) =>
+  decodeIndexBangData(detach(shard), profileStrings)
+);
+const indexedWarmTimes: number[] = [];
+for (let run = 0; run < RUNS; run++) {
+  const t0 = Bun.nanoseconds();
+  for (const trigger of allTriggers) {
+    const hash = fnvHash(trigger);
+    indexedLookups[bangShardIndex(hash, profileCatalog.router)](trigger, hash);
+  }
+  indexedWarmTimes.push((Bun.nanoseconds() - t0) / allTriggers.length);
+}
+const indexedWarmStats = summarizeRuns(indexedWarmTimes);
 
 console.log(
   `\nAll-triggers first-lookup/warm (${allTriggers.length.toLocaleString()} triggers):`
@@ -670,6 +750,9 @@ console.log(
 );
 console.log(`  Warm p50 (${RUNS}×):  ${fmt(warmRunStats.p50)}/lookup`);
 console.log(`  Warm p90:          ${fmt(warmRunStats.p90)}/lookup`);
+console.log(
+  `  Warm v11 index:    ${fmt(indexedWarmStats.p50)}/lookup (${((indexedWarmStats.p50 / warmRunStats.p50 - 1) * 100).toFixed(1)}% vs monolith)`
+);
 console.log(
   `  First/warm ratio:  ${(firstLookupStats.p50 / warmRunStats.p50).toFixed(1)}×`
 );
@@ -1428,6 +1511,66 @@ console.log(
   `  Spread: ${fmt(bangDataInitStats.min)}..${fmt(bangDataInitStats.max)} (cv ${bangDataInitStats.cvPct.toFixed(1)}%)`
 );
 
+const stringStoreInitTimes: number[] = [];
+const indexShardInitTimes: number[] = [];
+const fullIndexInitTimes: number[] = [];
+const representativeHash = fnvHash("github");
+const representativeShard = bangShardIndex(
+  representativeHash,
+  profileCatalog.router
+);
+const representativePack = Math.floor(
+  representativeShard / BANG_INDEX_SHARDS_PER_PACK
+);
+for (let i = 0; i < EVAL_RUNS; i++) {
+  let t0 = Bun.nanoseconds();
+  const strings = createBangStrings([
+    detach(profileCatalog.storeBase),
+    detach(profileCatalog.storeTail),
+  ]);
+  stringStoreInitTimes.push(Bun.nanoseconds() - t0);
+
+  t0 = Bun.nanoseconds();
+  decodeIndexBangData(
+    decodeBangIndexPack(
+      detach(indexPacks[representativePack]),
+      representativeShard % BANG_INDEX_SHARDS_PER_PACK
+    ),
+    strings
+  );
+  indexShardInitTimes.push(Bun.nanoseconds() - t0);
+
+  t0 = Bun.nanoseconds();
+  const fullStrings = createBangStrings([
+    detach(profileCatalog.storeBase),
+    detach(profileCatalog.storeTail),
+  ]);
+  for (let shard = 0; shard < profileCatalog.index.length; shard++) {
+    decodeIndexBangData(
+      decodeBangIndexPack(
+        detach(indexPacks[Math.floor(shard / BANG_INDEX_SHARDS_PER_PACK)]),
+        shard % BANG_INDEX_SHARDS_PER_PACK
+      ),
+      fullStrings
+    );
+  }
+  fullIndexInitTimes.push(Bun.nanoseconds() - t0);
+}
+const stringStoreInitStats = summarizeRuns(stringStoreInitTimes);
+const indexShardInitStats = summarizeRuns(indexShardInitTimes);
+const fullIndexInitStats = summarizeRuns(fullIndexInitTimes);
+
+console.log(
+  `\nv11 string store initialization (${fmtBytesExact(storeRawBytes)}):`
+);
+console.log(`  Median: ${fmt(stringStoreInitStats.p50)}`);
+console.log(
+  `v11 one packed index decode (${fmtBytesExact(indexPacks[representativePack].byteLength)} pack):`
+);
+console.log(`  Median: ${fmt(indexShardInitStats.p50)}`);
+console.log(`v11 full warm-catalog decode (${indexPacks.length} packs):`);
+console.log(`  Median: ${fmt(fullIndexInitStats.p50)}`);
+
 const evalFullTimes: number[] = [];
 for (let i = 0; i < COLD_RUNS; i++) {
   evalFullTimes.push(
@@ -1514,6 +1657,24 @@ const summaryRows: ProfileMetric[] = [
     bangDataInitStats
   ),
   metric(
+    "module-eval.v11-strings",
+    "v11 string-store initialization",
+    "Cold start",
+    stringStoreInitStats
+  ),
+  metric(
+    "module-eval.v11-index-shard",
+    "v11 packed index decode",
+    "Cold start",
+    indexShardInitStats
+  ),
+  metric(
+    "module-eval.v11-full-index",
+    "v11 full catalog decode",
+    "Cold start",
+    fullIndexInitStats
+  ),
+  metric(
     "module-eval.meta",
     "First metadata decode",
     "Cold start",
@@ -1549,6 +1710,12 @@ const summaryRows: ProfileMetric[] = [
     "Per redirect",
     lookupNetMedian,
     lookupStats.cvPct
+  ),
+  metric(
+    "lookup.v11-index-warm",
+    "Warm v11 indexed lookup",
+    "Per redirect",
+    indexedWarmStats
   ),
   metric(
     "frecency.incremental",
@@ -1904,16 +2071,26 @@ function gitOutput(args: string[]): string | null {
 
 const gitCommit = gitOutput(["rev-parse", "--short", "HEAD"]);
 const gitStatus = gitOutput(["status", "--porcelain"]);
-const dataHash = createHash("sha256");
+const catalogFingerprint = createHash("sha256")
+  .update(catalogSourceBytes)
+  .digest("hex")
+  .slice(0, 16);
+const artifactHash = createHash("sha256");
 for (const path of GENERATED_BANG_DATA_FILES) {
   const bytes = await Bun.file(path).bytes();
-  dataHash.update(`${path}:${bytes.byteLength}:`);
-  dataHash.update(bytes);
+  artifactHash.update(`${path}:${bytes.byteLength}:`);
+  artifactHash.update(bytes);
+}
+for (let pack = 0; pack < indexPacks.length; pack++) {
+  artifactHash.update(`index-pack-${pack}:${indexPacks[pack].byteLength}:`);
+  artifactHash.update(indexPacks[pack]);
 }
 const profileReport: ProfileReport = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   suiteVersion: PROFILE_SUITE_VERSION,
-  dataFingerprint: dataHash.digest("hex").slice(0, 16),
+  artifactFingerprint: artifactHash.digest("hex").slice(0, 16),
+  catalogFingerprint,
+  dataFingerprint: catalogFingerprint,
   generatedAt: new Date().toISOString(),
   environment: {
     bun: Bun.version,
@@ -1933,12 +2110,22 @@ const profileReport: ProfileReport = {
 
 let stableRegressions = 0;
 if (baselineReport && baselinePath) {
+  if (
+    baselineReport.artifactFingerprint &&
+    baselineReport.artifactFingerprint !== profileReport.artifactFingerprint
+  ) {
+    console.log(
+      color.dim(
+        `  Physical artifact layout differs: ${baselineReport.artifactFingerprint} != ${profileReport.artifactFingerprint}`
+      )
+    );
+  }
   const compatibilityChecks: Array<readonly [string, unknown, unknown]> = [
     ["suite version", baselineReport.suiteVersion, profileReport.suiteVersion],
     [
-      "data fingerprint",
-      baselineReport.dataFingerprint,
-      profileReport.dataFingerprint,
+      "catalog fingerprint",
+      baselineReport.catalogFingerprint ?? baselineReport.dataFingerprint,
+      profileReport.catalogFingerprint ?? profileReport.dataFingerprint,
     ],
     [
       "Bun version",

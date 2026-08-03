@@ -1,6 +1,7 @@
 declare const self: ServiceWorkerGlobalScope;
 declare const cookieStore: CookieStore;
 
+import { HOT_TRIGGERS } from "../generated/bangs-hot.js";
 import {
   BANG_SHARD_COUNT,
   bangShardIndex,
@@ -64,6 +65,7 @@ declare const __BANG_DATA_ASSET__: string;
 declare const __BANG_SHARD_ROUTER__: readonly number[];
 declare const __BANG_SHARD_ASSETS__: readonly string[];
 declare const __BANG_INDEX_ASSETS__: readonly string[];
+declare const __BANG_INDEX_SHARDS_PER_ASSET__: number;
 declare const __BANG_STORE_ASSETS__: readonly string[];
 declare const __FALLBACK_ASSET__: string;
 declare const __REQUIRED_APP_ASSETS__: string[];
@@ -86,8 +88,14 @@ const BANG_SHARD_ASSETS =
   typeof __BANG_SHARD_ASSETS__ === "undefined" ? [] : __BANG_SHARD_ASSETS__;
 const BANG_INDEX_ASSETS =
   typeof __BANG_INDEX_ASSETS__ === "undefined" ? [] : __BANG_INDEX_ASSETS__;
+const BANG_INDEX_SHARDS_PER_ASSET =
+  typeof __BANG_INDEX_SHARDS_PER_ASSET__ === "undefined"
+    ? 1
+    : __BANG_INDEX_SHARDS_PER_ASSET__;
 const BANG_STORE_ASSETS =
   typeof __BANG_STORE_ASSETS__ === "undefined" ? [] : __BANG_STORE_ASSETS__;
+const bangIndexAsset = (shardId: number): string =>
+  BANG_INDEX_ASSETS[Math.floor(shardId / BANG_INDEX_SHARDS_PER_ASSET)];
 const workerShardRuntime: BangShardRuntime | null =
   BANG_SHARD_ROUTER?.length && BANG_SHARD_ASSETS.length
     ? createBangShardRuntime(BANG_SHARD_ROUTER, BANG_SHARD_ASSETS)
@@ -101,6 +109,7 @@ const workerIndexRuntime: BangShardRuntime | null =
     ? createBangIndexRuntime(
         BANG_SHARD_ROUTER,
         BANG_INDEX_ASSETS,
+        BANG_INDEX_SHARDS_PER_ASSET,
         () => bangStrings,
         loadCatalogAsset
       )
@@ -521,14 +530,14 @@ function warmRuntime(): Promise<void> {
       readCurrentRedirectSettings(undefined, bangDataReady),
       loadFrecency(),
     ]).then(async () => {
-      // Offline coverage: pull every index shard into Cache Storage once the
-      // store is loaded. Bytes only — decoding stays lazy.
-      if (workerIndexRuntime) {
-        await warmAllCatalogShards().catch(swallowError);
-      }
       await waitForRedirectSettingsPersistence();
       if (hotBootSettingsNeedPublish(currentHotBoot)) {
         await queueHotBootMutation(() => publishHotBoot(true));
+      }
+      // Offline coverage is deliberately last: settings become executable
+      // before background catalog transfer begins, and decoding remains lazy.
+      if (workerIndexRuntime) {
+        await warmAllCatalogShards().catch(swallowError);
       }
     });
     let current: Promise<void>;
@@ -549,12 +558,37 @@ let catalogWarmPromise: Promise<void> | null = null;
 function warmAllCatalogShards(): Promise<void> {
   if (!catalogWarmPromise) {
     catalogWarmPromise = (async () => {
-      const pending = [...BANG_INDEX_ASSETS];
+      // warmRuntime calls this only after the executable settings state and
+      // hot-boot metadata are durable. The ordering is dependency-based rather
+      // than timed, so it is identical across machines and browsers.
+      const priorityPackIds = HOT_TRIGGERS.map((trigger) =>
+        Math.floor(
+          bangShardIndex(hashFNV1a(trigger), BANG_SHARD_ROUTER!) /
+            BANG_INDEX_SHARDS_PER_ASSET
+        )
+      );
+      if (currentHotBoot?.defaultBang) {
+        priorityPackIds.unshift(
+          Math.floor(
+            bangShardIndex(
+              hashFNV1a(currentHotBoot.defaultBang),
+              BANG_SHARD_ROUTER!
+            ) / BANG_INDEX_SHARDS_PER_ASSET
+          )
+        );
+      }
+      const pending = [
+        ...new Set([
+          ...priorityPackIds.map((packId) => BANG_INDEX_ASSETS[packId]),
+          ...BANG_INDEX_ASSETS,
+        ]),
+      ];
+      let nextIndex = 0;
       const workers = Array.from(
         { length: Math.min(PRECACHE_CONCURRENCY, pending.length) },
         async () => {
           for (;;) {
-            const asset = pending.pop();
+            const asset = pending[nextIndex++];
             if (!asset) {
               return;
             }
@@ -1086,7 +1120,7 @@ async function ensureRuntimeShard(
     await reloadBangStringStore();
     await runtime.ensure(
       shardId,
-      loadCatalogAsset(BANG_INDEX_ASSETS[shardId], true)
+      loadCatalogAsset(bangIndexAsset(shardId), true)
     );
   }
 }
