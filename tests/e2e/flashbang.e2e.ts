@@ -1453,6 +1453,78 @@ test("warm redirect uses service worker controlled fetch path", async ({
   expect(page.url()).toMatch(GOOGLE_REDIRECT);
 });
 
+test("newly activated worker redirects from a shard while the full catalog warms", async ({
+  browser,
+  browserName,
+}) => {
+  skipWebKitServiceWorker(browserName);
+  const context = await browser.newContext();
+  let releaseFullCatalog = () => {
+    // Replaced by the gate constructor before the test can exit.
+  };
+  let fullCatalogReleased = false;
+  const fullCatalogGate = new Promise<void>((resolve) => {
+    releaseFullCatalog = resolve;
+  });
+  try {
+    let fullCatalogStarted = false;
+    const shardRequests: string[] = [];
+    await context.route(/\/bangs-[a-f0-9]{12}\.bin$/, async (route) => {
+      fullCatalogStarted = true;
+      await fullCatalogGate;
+      fullCatalogReleased = true;
+      await route.continue();
+    });
+    await context.route("https://github.com/**", (route) =>
+      route.fulfill({ status: 200, contentType: "text/plain", body: "github" })
+    );
+    context.on("request", (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (/^\/bangs-s[0-9a-z]+-[a-f0-9]{12}\.bin$/.test(pathname)) {
+        shardRequests.push(pathname);
+      }
+    });
+
+    const page = await context.newPage();
+    await page.goto("/health", { waitUntil: "domcontentloaded" });
+    await page.evaluate(async () => {
+      const registration = await navigator.serviceWorker.register("/sw.js");
+      const worker =
+        registration.installing || registration.waiting || registration.active;
+      if (worker?.state !== "activated") {
+        await new Promise<void>((resolve) => {
+          worker?.addEventListener("statechange", () => {
+            if (worker.state === "activated") {
+              resolve();
+            }
+          });
+        });
+      }
+      if (!navigator.serviceWorker.controller) {
+        await new Promise<void>((resolve) =>
+          navigator.serviceWorker.addEventListener(
+            "controllerchange",
+            () => resolve(),
+            { once: true }
+          )
+        );
+      }
+    });
+
+    await navigateAndWaitForRedirect(
+      page,
+      "/?q=%21github%20race",
+      /github\.com\/search\?q=race/
+    );
+    expect(fullCatalogStarted).toBe(true);
+    expect(shardRequests).toHaveLength(1);
+    expect(fullCatalogReleased).toBe(false);
+  } finally {
+    releaseFullCatalog();
+    await context.close();
+  }
+});
+
 test("warm redirect supports suffix bang syntax", async ({ page }) => {
   await mockGoogleSearchRoute(page);
   await ensureWarmController(page);

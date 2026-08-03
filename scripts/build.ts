@@ -108,7 +108,9 @@ export async function bundleServiceWorker(
   cacheVersion: string,
   requiredAppAssets: readonly string[],
   bangDataAsset: string,
-  fallbackAsset: string
+  fallbackAsset: string,
+  bangShardRouter: ArrayLike<number> = [],
+  bangShardVersion = ""
 ): Promise<void> {
   const result = await Bun.build({
     entrypoints: ["src/sw/sw.ts"],
@@ -119,6 +121,8 @@ export async function bundleServiceWorker(
     format: "iife",
     define: {
       __BANG_DATA_ASSET__: JSON.stringify(bangDataAsset),
+      __BANG_SHARD_ROUTER__: JSON.stringify(Array.from(bangShardRouter)),
+      __BANG_SHARD_VERSION__: JSON.stringify(bangShardVersion),
       __FALLBACK_ASSET__: JSON.stringify(fallbackAsset),
       __CACHE_VERSION__: JSON.stringify(cacheVersion),
       __REQUIRED_APP_ASSETS__: JSON.stringify(requiredAppAssets),
@@ -242,7 +246,9 @@ export async function main(): Promise<void> {
     "fb-cache-version-input",
     requiredAppAssets,
     bangDataAsset,
-    fallbackAsset
+    fallbackAsset,
+    bangShardRouter,
+    bangShardVersion
   );
   const cacheInputs: CacheVersionInput[] = await Promise.all(
     precacheFileInputs(requiredAppAssets, bangDataAsset, fallbackAsset).map(
@@ -266,7 +272,9 @@ export async function main(): Promise<void> {
     cacheVersion,
     requiredAppAssets,
     bangDataAsset,
-    fallbackAsset
+    fallbackAsset,
+    bangShardRouter,
+    bangShardVersion
   );
 
   console.log("=== Bundle production server ===");

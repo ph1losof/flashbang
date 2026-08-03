@@ -139,6 +139,35 @@
         }
       };
 
+      const activatedWorker = async (registrationPromise) => {
+        const registration = await registrationPromise;
+        if (!registration) {
+          return null;
+        }
+        const worker =
+          registration.active ||
+          registration.waiting ||
+          registration.installing;
+        if (!worker || worker.state === "redundant") {
+          return null;
+        }
+        while (worker.state !== "activated" && worker.state !== "redundant") {
+          await new Promise((resolve) => {
+            worker.addEventListener("statechange", resolve, { once: true });
+          });
+        }
+        return worker.state === "activated" ? worker : null;
+      };
+
+      const warmWorker = async (workerPromise) => {
+        const worker = await workerPromise;
+        try {
+          worker?.postMessage({ type: "warm-runtime" });
+        } catch {
+          // Background warming must never prevent the resolved navigation.
+        }
+      };
+
       const showFallbackError = () => {
         document.body.textContent =
           "Flashbang could not resolve this query. Reload the page or enable Service Workers.";
@@ -183,6 +212,7 @@
           return;
         }
         const registrationPromise = registerWorker();
+        const workerPromise = activatedWorker(registrationPromise);
         const needsCatalog = shouldPrefetchBangData(query);
         const prefetchedData = loadColdBangData(query);
         import("__COLD_FALLBACK_ASSET__")
@@ -199,6 +229,9 @@
                 registrationPromise
               );
               return;
+            }
+            if (needsCatalog) {
+              await warmWorker(workerPromise);
             }
             location.replace(result.url);
           })

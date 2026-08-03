@@ -1,13 +1,22 @@
 declare const self: ServiceWorkerGlobalScope;
 declare const cookieStore: CookieStore;
 
+import {
+  BANG_SHARD_COUNT,
+  bangShardIndex,
+  extractBangShardTriggers,
+} from "../shared/bang-shards";
 import { COOKIE_MAX_AGE_S } from "../shared/constants";
+import { hashFNV1a } from "../shared/hash";
 import { SEED_CACHE_NAME } from "../shared/seed-cache";
 import {
   encodeSuggestCookieValue,
   parseSuggestCookieValue,
 } from "../shared/suggest-cookie";
 import {
+  type BangShardRuntime,
+  configureBangFallbackLookup,
+  createBangShardRuntime,
   initializeBangData,
   isBangDataInitialized,
   isBangDataUnavailable,
@@ -49,6 +58,8 @@ import {
 
 declare const __CACHE_VERSION__: string;
 declare const __BANG_DATA_ASSET__: string;
+declare const __BANG_SHARD_ROUTER__: readonly number[];
+declare const __BANG_SHARD_VERSION__: string;
 declare const __FALLBACK_ASSET__: string;
 declare const __REQUIRED_APP_ASSETS__: string[];
 declare const __IS_DEV__: boolean;
@@ -64,6 +75,14 @@ const BANG_DATA_ASSET =
   typeof __BANG_DATA_ASSET__ === "undefined"
     ? "/bangs.bin"
     : __BANG_DATA_ASSET__;
+const BANG_SHARD_ROUTER =
+  typeof __BANG_SHARD_ROUTER__ === "undefined" ? null : __BANG_SHARD_ROUTER__;
+const BANG_SHARD_VERSION =
+  typeof __BANG_SHARD_VERSION__ === "undefined" ? "" : __BANG_SHARD_VERSION__;
+const workerShardRuntime: BangShardRuntime | null =
+  BANG_SHARD_ROUTER?.length && BANG_SHARD_VERSION
+    ? createBangShardRuntime(BANG_SHARD_ROUTER, BANG_SHARD_VERSION)
+    : null;
 const BASE_APP_ASSETS = [
   "/home",
   "/app.js",
@@ -111,6 +130,7 @@ function currentNavigationPreload(): NavigationPreloadManager | undefined {
 let hotBootAvailable = currentNavigationPreload() !== undefined;
 let hotBootGeneration = 0;
 let currentHotBoot: HotBootRecord | null = null;
+let coldRedirectSettings: RedirectSettings | null = null;
 let hotBootPromise: Promise<HotBootRecord | null> = readInitialHotBoot();
 let hotBootMutation: Promise<void> = RESOLVED_PROMISE;
 const hotBootUpdateTokens = new Set<string>();
@@ -181,6 +201,7 @@ function queueHotBootMutation(operation: () => Promise<void>): Promise<void> {
 async function disableHotBoot(): Promise<void> {
   hotBootGeneration++;
   currentHotBoot = null;
+  coldRedirectSettings = null;
   hotBootPromise = NO_HOT_BOOT_PROMISE;
   const navigationPreload = currentNavigationPreload();
   if (!(navigationPreload && hotBootAvailable)) {
@@ -225,6 +246,9 @@ async function publishHotBoot(includeSettings = false): Promise<void> {
   const compactSettings = settings
     ? undefined
     : materializeCompactBaseSettings(snapshot, prepared.settings);
+  coldRedirectSettings =
+    settings ??
+    (compactSettings ? { ...compactSettings, custom: snapshot.custom } : null);
   const record = encodeHotBootRecord(
     CACHE_NAME,
     state,
@@ -559,11 +583,7 @@ export function handleActivate(e: ExtendableEvent): void {
       await publishHotBoot();
     })
       .catch(swallowError)
-      .then(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        await ensureBangData().catch(swallowError);
-        await self.clients.claim();
-      })
+      .then(() => self.clients.claim())
   );
 }
 
@@ -581,6 +601,10 @@ export function handleMessage(e: ExtendableMessageEvent): void {
     e.waitUntil(
       seedRuntime(e.data.bangData, e.data.redirectSettings as RedirectSettings)
     );
+    return;
+  }
+  if (e.data?.type === "warm-runtime") {
+    e.waitUntil(warmRuntime());
     return;
   }
   if (e.data?.type === "benchmark-mode") {
@@ -793,6 +817,66 @@ function respondToCompactHotBang(
   return response;
 }
 
+async function respondFromColdShard(
+  e: FetchEvent,
+  rawQuery: string,
+  settings: RedirectSettings,
+  hotBangLookup: HotBangLookup,
+  bangDataReady: Promise<void>
+): Promise<Response | null> {
+  const runtime = workerShardRuntime;
+  if (!runtime) {
+    return null;
+  }
+  let candidateShardsReady: Promise<void> | null = null;
+  try {
+    const query = decodeURIComponent(rawQuery.replaceAll("+", " "));
+    const bangMarker = String.fromCharCode((settings.syntax?.[0] ?? 33) & 0xff);
+    const snapMarker = String.fromCharCode((settings.syntax?.[1] ?? 64) & 0xff);
+    const shardIds = new Set(
+      extractBangShardTriggers(query, bangMarker, snapMarker)
+        .filter((trigger) => !lookupGeneratedHotBang(trigger))
+        .map((trigger) =>
+          bangShardIndex(hashFNV1a(trigger), BANG_SHARD_ROUTER!)
+        )
+    );
+    if (shardIds.size > 0) {
+      candidateShardsReady = Promise.all(
+        [...shardIds].map((shardId) => runtime.ensure(shardId))
+      ).then(() => undefined);
+    }
+  } catch {
+    // The canonical parser below remains authoritative for malformed input.
+  }
+  configureBangFallbackLookup(runtime.lookup);
+  for (let attempt = 0; attempt <= BANG_SHARD_COUNT; attempt++) {
+    try {
+      return respondToRedirect(e, rawQuery, settings, hotBangLookup);
+    } catch (error) {
+      if (isHotBangLookupBlocked(error)) {
+        return null;
+      }
+      const shardId = runtime.unavailableShardId(error);
+      if (shardId === null) {
+        if (!isBangDataUnavailable(error)) {
+          throw error;
+        }
+        return null;
+      }
+      try {
+        await Promise.any([
+          runtime.ensure(shardId),
+          ...(candidateShardsReady ? [candidateShardsReady] : []),
+          bangDataReady,
+        ]);
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
 function responseForQuery(
   e: FetchEvent,
   rawQuery: string
@@ -830,43 +914,56 @@ function responseForQuery(
         }
       }
     }
-    const bangDataReady =
+    const bangDataReady = RESOLVED_PROMISE.then(() =>
       hotBootUpdateTokens.size > 0
         ? invalidateCache().then(ensureBangData)
-        : ensureBangData();
-    e.waitUntil(bangDataReady.catch(swallowError));
-    return readCurrentRedirectSettings(undefined, bangDataReady).then(
-      async (settings) => {
-        if (hotBootSettingsNeedPublish(currentHotBoot)) {
-          e.waitUntil(
-            bangDataReady
-              .then(() => queueHotBootMutation(() => publishHotBoot(true)))
-              .catch(swallowError)
-          );
-        }
-        try {
-          return respondToRedirect(
-            e,
-            rawQuery,
-            settings,
-            hotBoot?.hotBangLookup ?? lookupGeneratedHotBang
-          );
-        } catch (error) {
-          if (
-            !(isBangDataUnavailable(error) || isHotBangLookupBlocked(error))
-          ) {
-            throw error;
-          }
-          await bangDataReady;
-          return respondToRedirect(
-            e,
-            rawQuery,
-            settings,
-            hotBoot?.hotBangLookup ?? lookupGeneratedHotBang
-          );
-        }
-      }
+        : ensureBangData()
     );
+    e.waitUntil(bangDataReady.catch(swallowError));
+    if (hotBootSettingsNeedPublish(currentHotBoot)) {
+      e.waitUntil(
+        bangDataReady
+          .then(() => queueHotBootMutation(() => publishHotBoot(true)))
+          .catch(swallowError)
+      );
+    }
+    const resolveWithFullCatalog = () =>
+      readCurrentRedirectSettings(undefined, bangDataReady).then(
+        async (settings) => {
+          try {
+            return respondToRedirect(
+              e,
+              rawQuery,
+              settings,
+              hotBoot?.hotBangLookup ?? lookupGeneratedHotBang
+            );
+          } catch (error) {
+            if (
+              !(isBangDataUnavailable(error) || isHotBangLookupBlocked(error))
+            ) {
+              throw error;
+            }
+            await bangDataReady;
+            return respondToRedirect(
+              e,
+              rawQuery,
+              settings,
+              hotBoot?.hotBangLookup ?? lookupGeneratedHotBang
+            );
+          }
+        }
+      );
+    const coldSettings = hotBoot?.settings ?? coldRedirectSettings;
+    if (e.request.mode === "navigate" && coldSettings && workerShardRuntime) {
+      return respondFromColdShard(
+        e,
+        rawQuery,
+        coldSettings,
+        hotBoot?.hotBangLookup ?? lookupGeneratedHotBang,
+        bangDataReady
+      ).then((response) => response ?? resolveWithFullCatalog());
+    }
+    return resolveWithFullCatalog();
   });
 }
 
@@ -1076,9 +1173,11 @@ export function resetSwStateForTests(): void {
   hotBootAvailable = currentNavigationPreload() !== undefined;
   hotBootGeneration = 0;
   currentHotBoot = null;
+  coldRedirectSettings = null;
   hotBootPromise = readInitialHotBoot();
   hotBootMutation = RESOLVED_PROMISE;
   hotBootUpdateTokens.clear();
+  workerShardRuntime?.reset();
 }
 
 registerServiceWorker();

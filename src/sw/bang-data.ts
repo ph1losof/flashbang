@@ -1,3 +1,4 @@
+import { BANG_SHARD_COUNT, bangShardIndex } from "../shared/bang-shards";
 import type { SnapTargetParts } from "../shared/snap-target";
 
 export type BuiltinUrlParts =
@@ -8,6 +9,20 @@ export type BangLookup = (
   trigger: string,
   hash: number
 ) => BuiltinUrlParts | null;
+
+interface BangShardUnavailableError extends Error {
+  readonly shardId: number;
+}
+
+export interface BangShardRuntime {
+  ensure: (
+    shardId: number,
+    prefetched?: ArrayBuffer | Promise<ArrayBuffer>
+  ) => Promise<void>;
+  lookup: BangLookup;
+  reset: () => void;
+  unavailableShardId: (error: unknown) => number | null;
+}
 
 const MAGIC = 0x31424246;
 const VERSION = 10;
@@ -345,6 +360,88 @@ export function decodeBangData(buffer: ArrayBuffer): BangLookup {
     return fingerprints[index] === unsignedHash >>> 16
       ? tuple(index, trigger)
       : null;
+  };
+}
+
+export function createBangShardRuntime(
+  router: ArrayLike<number>,
+  version: string
+): BangShardRuntime {
+  const lookups: Array<BangLookup | null> = Array.from(
+    { length: BANG_SHARD_COUNT },
+    () => null
+  );
+  const unavailable = Array.from(
+    { length: BANG_SHARD_COUNT },
+    (_, shardId) =>
+      Object.freeze(
+        Object.assign(new Error(`Bang shard ${shardId} is not initialized`), {
+          shardId,
+        })
+      ) as BangShardUnavailableError
+  );
+  const promises: Array<Promise<void> | null> = Array.from(
+    { length: BANG_SHARD_COUNT },
+    () => null
+  );
+
+  const shardLookup: BangLookup = (trigger, hash) => {
+    const shardId = bangShardIndex(hash, router);
+    const resolved = lookups[shardId];
+    if (!resolved) {
+      throw unavailable[shardId];
+    }
+    return resolved(trigger, hash);
+  };
+
+  const ensure: BangShardRuntime["ensure"] = (shardId, prefetched) => {
+    if (lookups[shardId]) {
+      return Promise.resolve();
+    }
+    let promise = promises[shardId];
+    if (!promise) {
+      promise = (
+        prefetched
+          ? Promise.resolve(prefetched)
+          : fetch(`/bangs-s${shardId.toString(36)}-${version}.bin`).then(
+              (response) => {
+                if (!response.ok) {
+                  throw new Error(
+                    `Failed to load bang shard: ${response.status}`
+                  );
+                }
+                return response.arrayBuffer();
+              }
+            )
+      )
+        .then((buffer) => {
+          lookups[shardId] = decodeBangData(buffer);
+        })
+        .catch((error) => {
+          promises[shardId] = null;
+          throw error;
+        });
+      promises[shardId] = promise;
+    }
+    return promise;
+  };
+
+  return {
+    ensure,
+    lookup: shardLookup,
+    reset() {
+      lookups.fill(null);
+      promises.fill(null);
+    },
+    unavailableShardId(error) {
+      if (!error || typeof error !== "object") {
+        return null;
+      }
+      const shardId = (error as Partial<BangShardUnavailableError>).shardId;
+      return typeof shardId === "number" && unavailable[shardId] === error
+        ? shardId
+        : null;
+    },
   };
 }
 

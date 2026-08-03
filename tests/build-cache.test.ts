@@ -116,7 +116,9 @@ describe("build cache version", () => {
         "fb-test",
         ["/chunk-a.js"],
         "/bangs-a.bin",
-        "/fallback-a.js"
+        "/fallback-a.js",
+        [2, 1],
+        "shards-a"
       );
 
       expect(buildSpy).toHaveBeenCalledWith(
@@ -127,6 +129,8 @@ describe("build cache version", () => {
           format: "iife",
           define: expect.objectContaining({
             __BANG_DATA_ASSET__: '"/bangs-a.bin"',
+            __BANG_SHARD_ROUTER__: "[2,1]",
+            __BANG_SHARD_VERSION__: '"shards-a"',
             __FALLBACK_ASSET__: '"/fallback-a.js"',
             __CACHE_VERSION__: '"fb-test"',
             __REQUIRED_APP_ASSETS__: '["/chunk-a.js"]',

@@ -499,6 +499,27 @@ describe("sw runtime with real modules", () => {
     expect(fetchCalls).toEqual([]);
   });
 
+  test("activation defers full catalog loading until runtime warming", async () => {
+    resetBangDataForTests();
+    await loadSwRuntime();
+
+    const activateEvt = createExtendableEvent();
+    await handlers.activate?.(activateEvt.event);
+    await Promise.all(activateEvt.waits);
+
+    expect(claimCalls).toBe(1);
+    expect(fetchCalls).not.toContain("/bangs.bin");
+
+    const bangData = await Bun.file("src/generated/bangs.bin").arrayBuffer();
+    fetchImpl = () => Promise.resolve(new Response(bangData));
+    const warmEvt = createMessageEvent({ type: "warm-runtime" });
+    await handlers.message?.(warmEvt.event);
+    await Promise.all(warmEvt.waits);
+
+    expect(fetchCalls).toContain("/bangs.bin");
+    expect(cachePutCalls).toContain("/bangs.bin");
+  });
+
   test("seeds bang data and redirect settings without a worker fetch", async () => {
     await loadSwRuntime();
     const bangData = await Bun.file("src/generated/bangs.bin").arrayBuffer();

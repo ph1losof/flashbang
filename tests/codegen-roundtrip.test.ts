@@ -8,7 +8,11 @@ import {
   extractBangShardTriggers,
 } from "../src/shared/bang-shards";
 import { hashFNV1a } from "../src/shared/hash";
-import { initializeBangData, lookupBang } from "../src/sw/bang-data";
+import {
+  createBangShardRuntime,
+  initializeBangData,
+  lookupBang,
+} from "../src/sw/bang-data";
 import { decodeBangCatalog } from "../src/ui/bang-catalog";
 import {
   BANG_BINARY_HEADER_WORDS,
@@ -172,6 +176,35 @@ describe("codegen round-trip", () => {
       }
     }
     initializeBangData(await Bun.file("src/generated/bangs.bin").arrayBuffer());
+  });
+
+  test("loads and resets an exact shard through the shared runtime", async () => {
+    const { router, shards } = generateBinaryShards(bangs);
+    const runtime = createBangShardRuntime(router, "test");
+    const trigger = "github";
+    const hash = hashFNV1a(trigger);
+    const shardId = bangShardIndex(hash, router);
+
+    let unavailable: unknown;
+    try {
+      runtime.lookup(trigger, hash);
+    } catch (error) {
+      unavailable = error;
+    }
+    expect(runtime.unavailableShardId(unavailable)).toBe(shardId);
+
+    const shard = shards[shardId];
+    await runtime.ensure(
+      shardId,
+      shard.buffer.slice(
+        shard.byteOffset,
+        shard.byteOffset + shard.byteLength
+      ) as ArrayBuffer
+    );
+    expect(runtime.lookup(trigger, hash)?.[0]).toContain("github.com");
+
+    runtime.reset();
+    expect(() => runtime.lookup(trigger, hash)).toThrow();
   });
 
   test("rejects sampled unknown triggers with fingerprint verification", () => {
