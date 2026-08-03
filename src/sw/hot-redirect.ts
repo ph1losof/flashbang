@@ -61,52 +61,80 @@ function hotBangParts(id: number): UrlParts {
   return parts;
 }
 
-export function lookupGeneratedHotBang(trigger: string): UrlParts | null;
-// Term bounds activate direct filling for generated query-safe hot bangs.
-export function lookupGeneratedHotBang(
-  trigger: string,
-  rawQuery: string,
-  termStart: number,
-  termEnd: number
-): string | null;
-export function lookupGeneratedHotBang(
-  trigger: string,
-  rawQuery?: string,
-  termStart?: number,
-  termEnd?: number
-): UrlParts | string | null {
+function generatedHotBangParts(trigger: string): UrlParts | null {
   const id = lookupHotBang(trigger);
-  if (id === -1) {
-    return null;
-  }
-  return rawQuery === undefined
-    ? hotBangParts(id)
-    : HOT_PREFIXES[id] +
-        rawQuery.substring(termStart as number, termEnd) +
-        HOT_SUFFIXES[id];
+  return id === -1 ? null : hotBangParts(id);
 }
 
-function createHotBangLookup(
-  frecency: Readonly<Record<string, UrlParts>>
+/**
+ * The single source location for every hot-bang lookup handed to the redirect
+ * core.
+ *
+ * V8 keys a call site's inline cache on the callee's closure identity, which is
+ * derived from where the closure was created. Three separate factories made the
+ * core's two lookup sites polymorphic as soon as a worker moved from compact to
+ * full hot-boot settings within one lifetime. One factory keeps them
+ * monomorphic; `frecency === null` and `overrides === 0` are the fast defaults.
+ *
+ * Term bounds activate direct filling for generated query-safe hot bangs.
+ * Frecency hits deliberately return parts instead: they are arbitrary catalog
+ * URLs, so the core still owns their encoding.
+ */
+function makeHotBangLookup(
+  frecency: Readonly<Record<string, UrlParts>> | null,
+  overrides: number
 ): HotBangLookup {
-  if (Object.keys(frecency).length === 0) {
-    return lookupGeneratedHotBang;
-  }
-  return (trigger) => frecency[trigger] ?? lookupGeneratedHotBang(trigger);
-}
-
-function createCompactHotBangLookup(state: number): HotBangLookup {
-  const overrides = state & (MASK_BASE - 1);
-  if (overrides === 0) {
-    return lookupGeneratedHotBang;
-  }
-  return (trigger) => {
+  return ((
+    trigger: string,
+    rawQuery?: string,
+    termStart?: number,
+    termEnd?: number
+  ): UrlParts | string | false | null => {
+    if (frecency !== null) {
+      const hit = frecency[trigger];
+      if (hit !== undefined) {
+        return hit;
+      }
+    }
     const id = lookupHotBang(trigger);
     if (id === -1) {
       return null;
     }
-    return (overrides & (1 << id)) === 0 ? hotBangParts(id) : false;
-  };
+    if (overrides !== 0 && (overrides & (1 << id)) !== 0) {
+      return false;
+    }
+    return rawQuery === undefined
+      ? hotBangParts(id)
+      : HOT_PREFIXES[id] +
+          rawQuery.substring(termStart as number, termEnd) +
+          HOT_SUFFIXES[id];
+  }) as HotBangLookup;
+}
+
+export const lookupGeneratedHotBang: HotBangLookup = makeHotBangLookup(null, 0);
+
+// Nothing to specialize means the shared instance: one less closure per
+// hot-boot decode, and callers can still compare against it by identity.
+function createHotBangLookup(
+  frecency: Readonly<Record<string, UrlParts>> | null,
+  overrides: number
+): HotBangLookup {
+  return frecency === null && overrides === 0
+    ? lookupGeneratedHotBang
+    : makeHotBangLookup(frecency, overrides);
+}
+
+function createFrecencyHotBangLookup(
+  frecency: Readonly<Record<string, UrlParts>>
+): HotBangLookup {
+  return createHotBangLookup(
+    Object.keys(frecency).length === 0 ? null : frecency,
+    0
+  );
+}
+
+function createCompactHotBangLookup(state: number): HotBangLookup {
+  return createHotBangLookup(null, state & (MASK_BASE - 1));
 }
 
 function createCompactSettings(state: number): RedirectSettings {
@@ -163,7 +191,7 @@ export function materializeCompactBaseSettings(
       effectiveDefaultBang = "g";
     }
   } else {
-    const generatedDefault = lookupGeneratedHotBang(snapshot.defaultBang);
+    const generatedDefault = generatedHotBangParts(snapshot.defaultBang);
     if (!generatedDefault) {
       return null;
     }
@@ -644,7 +672,7 @@ export function decodeHotBootRecord(
     compactSettings: null,
     defaultBang: decoded.defaultBang,
     frecency: decoded.frecency,
-    hotBangLookup: createHotBangLookup(decoded.frecency),
+    hotBangLookup: createFrecencyHotBangLookup(decoded.frecency),
     payloadComplete: true,
     settings: decoded.settings,
     state: packed,

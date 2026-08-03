@@ -605,11 +605,19 @@ function warmAllCatalogShards(): Promise<void> {
   return catalogWarmPromise;
 }
 
-function warmRuntimeAfterResponse(e: FetchEvent): void {
-  const warming = new Promise<void>((resolve) => {
+// Defer work that must not run inside the fetch dispatch task. A response
+// handed to FetchEvent.respondWith() only reaches the browser at the microtask
+// checkpoint after every listener returns, and respondWith() queues its
+// reaction after any microtask scheduled earlier from within the handler. Only
+// a macrotask hop reliably lands after the redirect has been delivered.
+function afterResponse(): Promise<void> {
+  return new Promise<void>((resolve) => {
     setTimeout(resolve, 0);
-  }).then(warmRuntime);
-  e.waitUntil(warming);
+  });
+}
+
+function warmRuntimeAfterResponse(e: FetchEvent): void {
+  e.waitUntil(afterResponse().then(warmRuntime));
 }
 
 async function precacheAssets(
@@ -724,9 +732,14 @@ function findQueryValueStart(raw: string): number {
   return -1;
 }
 
+// Usage counting, the suggestion cookie, and hot-boot refreshes are all
+// write-behind: none of them feed the redirect being served. loadFrecency()
+// runs into an IndexedDB open on the first redirect of a worker lifetime, so it
+// waits for the response to be delivered rather than running during dispatch.
 function queueBangSideEffects(e: FetchEvent, trigger: string): void {
   e.waitUntil(
-    loadFrecency()
+    afterResponse()
+      .then(loadFrecency)
       .then(() => {
         const usage = trackBangUsage(trigger);
         const hotBootSync =
@@ -1225,7 +1238,8 @@ async function respondFromColdShard(
 
 function responseForQuery(
   e: FetchEvent,
-  rawQuery: string
+  rawQuery: string,
+  isNavigate: boolean
 ): Response | Promise<Response> {
   if (isBangDataInitialized()) {
     const cached = getCachedSettings();
@@ -1257,7 +1271,7 @@ function responseForQuery(
         );
   }
   return hotBootPromise.then((hotBoot) => {
-    if (e.request.mode === "navigate") {
+    if (isNavigate) {
       const settings = hotBoot?.settings;
       try {
         if (settings) {
@@ -1334,7 +1348,7 @@ function responseForQuery(
         }
       );
     const coldSettings = hotBoot?.settings ?? coldRedirectSettings;
-    if (e.request.mode === "navigate" && coldSettings && workerShardRuntime) {
+    if (isNavigate && coldSettings && workerShardRuntime) {
       return respondFromColdShard(
         e,
         rawQuery,
@@ -1380,7 +1394,10 @@ function refreshHome(): Response {
 }
 
 export function handleFetch(e: FetchEvent): void {
-  const raw = e.request.url;
+  // Request accessors cross into the host on every read, so the two the
+  // redirect path needs are pulled once instead of per branch.
+  const request = e.request;
+  const raw = request.url;
 
   if (
     typeof __IS_DEV__ !== "undefined" &&
@@ -1420,7 +1437,9 @@ export function handleFetch(e: FetchEvent): void {
     }
   }
 
-  if (e.request.mode === "navigate") {
+  const isNavigate = request.mode === "navigate";
+
+  if (isNavigate) {
     const privateQuery = rawPrivateQuery(raw);
     if (privateQuery !== null) {
       if (!privateQuery) {
@@ -1428,7 +1447,7 @@ export function handleFetch(e: FetchEvent): void {
         return;
       }
       e.respondWith(
-        Promise.resolve(responseForQuery(e, privateQuery)).then(
+        Promise.resolve(responseForQuery(e, privateQuery, isNavigate)).then(
           createSyntheticRedirectResponse
         )
       );
@@ -1442,10 +1461,7 @@ export function handleFetch(e: FetchEvent): void {
     const rawQ =
       vEnd === -1 ? raw.substring(vStart) : raw.substring(vStart, vEnd);
     if (rawQ) {
-      if (
-        e.request.mode === "navigate" &&
-        benchmarkState?.token === benchmarkToken
-      ) {
+      if (isNavigate && benchmarkState?.token === benchmarkToken) {
         redirectRawUrl(rawQ, BENCHMARK_SETTINGS);
         benchmarkState.navigationCount++;
         const sequence = rawQueryParameter(raw, "fb-seq") ?? "0";
@@ -1464,15 +1480,12 @@ export function handleFetch(e: FetchEvent): void {
         );
         return;
       }
-      e.respondWith(responseForQuery(e, rawQ));
+      e.respondWith(responseForQuery(e, rawQ, isNavigate));
       return;
     }
   }
 
-  if (
-    e.request.mode === "navigate" &&
-    (raw === ROOT_URL || raw === INDEX_URL)
-  ) {
+  if (isNavigate && (raw === ROOT_URL || raw === INDEX_URL)) {
     e.respondWith(Response.redirect(`${APP_ORIGIN}/home`, 302));
     return;
   }
@@ -1502,7 +1515,7 @@ export function handleFetch(e: FetchEvent): void {
   }
 
   if (isAppPath(raw, "/bench.js")) {
-    e.respondWith(cacheOnUse(e.request));
+    e.respondWith(cacheOnUse(request));
     return;
   }
 
@@ -1521,11 +1534,11 @@ export function handleFetch(e: FetchEvent): void {
 
   e.respondWith(
     caches
-      .match(e.request)
+      .match(request)
       .then(
         (r) =>
           r ||
-          fetch(e.request).catch(() => new Response("Offline", { status: 503 }))
+          fetch(request).catch(() => new Response("Offline", { status: 503 }))
       )
       .catch(() => new Response("Offline", { status: 503 }))
   );
