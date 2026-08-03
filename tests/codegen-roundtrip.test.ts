@@ -13,6 +13,7 @@ import {
   initializeBangData,
   lookupBang,
 } from "../src/sw/bang-data";
+import { redirectRawUrl } from "../src/sw/redirect";
 import { decodeBangCatalog } from "../src/ui/bang-catalog";
 import {
   BANG_BINARY_HEADER_WORDS,
@@ -76,6 +77,23 @@ describe("codegen round-trip", () => {
       expect(result).not.toBeNull();
       expect(result![0]).toContain("://");
     }
+  });
+
+  test("compiles binary URL mode on fill but not lookup", async () => {
+    initializeBangData(await Bun.file("src/generated/bangs.bin").arrayBuffer());
+    const hash = hashFNV1a("g");
+    const entry = lookupBang("g", hash)!;
+
+    expect(Object.hasOwn(entry, "m")).toBeFalse();
+    expect(
+      redirectRawUrl("!g+a+b%2Fc", {
+        custom: Object.create(null),
+        defaultUrl: ["https://default.example/?q=", ""],
+        luckyUrl: null,
+      })
+    ).toBe("https://www.google.com/search?q=a+b%2Fc");
+    expect(lookupBang("g", hash)).toBe(entry);
+    expect(Object.hasOwn(entry, "m")).toBeTrue();
   });
 
   test("preserves upstream site-filter search templates", () => {

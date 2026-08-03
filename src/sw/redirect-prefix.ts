@@ -1,4 +1,4 @@
-import { CH_0, CH_2, CH_F, CH_f, CH_PERCENT, CH_PLUS } from "../shared/chars";
+import { CH_0, CH_2, CH_f, CH_PERCENT, CH_PLUS } from "../shared/chars";
 
 export type UrlParts = readonly [string, string | null];
 type UrlEntry = readonly [string, string | null, ...unknown[]];
@@ -180,12 +180,7 @@ const ENTRY_QUERY_SAFE = 1;
 const ENTRY_REPEATED_PLACEHOLDER = 2;
 const entryFlagsCache = new WeakMap<object, number>();
 
-function entryFlags(entry: UrlEntry): number {
-  const cached = entryFlagsCache.get(entry);
-  if (cached !== undefined) {
-    return cached;
-  }
-  const prefix = entry[0];
+export function compileUrlMode(prefix: string, suffix: string): number {
   const query = prefix.indexOf("?");
   let flags = 0;
   if (query !== -1) {
@@ -194,9 +189,18 @@ function entryFlags(entry: UrlEntry): number {
       flags |= ENTRY_QUERY_SAFE;
     }
   }
-  if (entry[1]?.includes("{}")) {
+  if (suffix.includes("{}")) {
     flags |= ENTRY_REPEATED_PLACEHOLDER;
   }
+  return flags;
+}
+
+function entryFlags(entry: UrlEntry): number {
+  const cached = entryFlagsCache.get(entry);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const flags = compileUrlMode(entry[0], entry[1] as string);
   entryFlagsCache.set(entry, flags);
   return flags;
 }
@@ -210,25 +214,6 @@ function fixupForPath(raw: string): string {
   if (hasPlus && !hasSlash) {
     return raw.replaceAll("+", "%20");
   }
-  if (!hasPlus) {
-    let result = "";
-    let segment = 0;
-    for (let i = 0; i < raw.length; i++) {
-      if (
-        raw.charCodeAt(i) === CH_PERCENT &&
-        i + 2 < raw.length &&
-        raw.charCodeAt(i + 1) === CH_2
-      ) {
-        const c2 = raw.charCodeAt(i + 2);
-        if (c2 === CH_F || c2 === CH_f) {
-          result += `${raw.substring(segment, i)}/`;
-          segment = i + 3;
-          i += 2;
-        }
-      }
-    }
-    return result + raw.substring(segment);
-  }
   let result = "";
   let segment = 0;
   for (let i = 0; i < raw.length; i++) {
@@ -239,14 +224,12 @@ function fixupForPath(raw: string): string {
     } else if (
       c === CH_PERCENT &&
       i + 2 < raw.length &&
-      raw.charCodeAt(i + 1) === CH_2
+      raw.charCodeAt(i + 1) === CH_2 &&
+      (raw.charCodeAt(i + 2) | 32) === CH_f
     ) {
-      const c2 = raw.charCodeAt(i + 2);
-      if (c2 === CH_F || c2 === CH_f) {
-        result += `${raw.substring(segment, i)}/`;
-        segment = i + 3;
-        i += 2;
-      }
+      result += `${raw.substring(segment, i)}/`;
+      segment = i + 3;
+      i += 2;
     }
   }
   return result + raw.substring(segment);
@@ -256,7 +239,8 @@ export function buildUrl(
   entry: UrlEntry,
   value: string,
   termStart: number,
-  termEnd: number
+  termEnd: number,
+  mode?: number
 ): string {
   const suffix = entry[1];
   if (suffix === null) {
@@ -267,7 +251,7 @@ export function buildUrl(
     termStart === 0 && termEnd === value.length
       ? value
       : value.substring(termStart, termEnd);
-  const flags = entryFlags(entry);
+  const flags = mode ?? entryFlags(entry);
   const querySafe = (flags & ENTRY_QUERY_SAFE) !== 0;
   const encoded = querySafe ? raw : fixupForPath(raw);
   if ((flags & ENTRY_REPEATED_PLACEHOLDER) === 0) {

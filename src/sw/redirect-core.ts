@@ -16,6 +16,7 @@ import { type BuiltinUrlParts, lookupBang } from "./bang-data";
 import {
   buildUrl,
   compileTriggerMarker as compileMarker,
+  compileUrlMode,
   DEFAULT_BANG_MARKER,
   encodeForRedirect,
   extractTriggerWithHash,
@@ -43,14 +44,18 @@ type UrlPartsWithSnap = readonly [string, string | null, SnapTargetParts];
 type CaptureUrlPartsWithSnap = readonly [...CaptureUrlParts, SnapTargetParts];
 type SimpleEntry = UrlParts | UrlPartsWithSnap;
 type CaptureEntry = CaptureUrlParts | CaptureUrlPartsWithSnap;
+type FilledUrlParts = BuiltinUrlParts & { m?: number };
 export type CustomUrlParts = SimpleEntry | CaptureEntry;
 export type TriggerSyntax = readonly [bangMarker: number, snapMarker: number];
-export type HotBangLookup = (
-  trigger: string,
-  rawQuery?: string,
-  termStart?: number,
-  termEnd?: number
-) => UrlParts | string | false | null;
+export interface HotBangLookup {
+  (trigger: string): UrlParts | false | null;
+  (
+    trigger: string,
+    rawQuery: string,
+    termStart: number,
+    termEnd: number
+  ): UrlParts | string | false | null;
+}
 
 export interface RedirectSettings {
   custom: Record<string, CustomUrlParts>;
@@ -79,25 +84,11 @@ export function isHotBangLookupBlocked(error: unknown): boolean {
 function lookupBuiltInBang(
   trigger: string,
   hash: number
-): BuiltinUrlParts | null;
-function lookupBuiltInBang(
-  trigger: string,
-  hash: number,
-  rawQuery: string,
-  termStart: number,
-  termEnd: number
-): BuiltinUrlParts | string | null;
-function lookupBuiltInBang(
-  trigger: string,
-  hash: number,
-  rawQuery?: string,
-  termStart?: number,
-  termEnd?: number
-): BuiltinUrlParts | string | null {
+): BuiltinUrlParts | null {
   if (!activeHotBangLookup) {
     return lookupBang(trigger, hash);
   }
-  const entry = activeHotBangLookup(trigger, rawQuery, termStart, termEnd);
+  const entry = activeHotBangLookup(trigger);
   if (entry === false) {
     throw HOT_BANG_LOOKUP_BLOCKED;
   }
@@ -352,12 +343,24 @@ function resolveBangFill(
           termEnd
         );
   }
-  const entry = lookupBuiltInBang(bang, hash, rawQuery, termStart, termEnd);
-  if (typeof entry === "string") {
-    return entry;
+  const hotEntry = activeHotBangLookup?.(bang, rawQuery, termStart, termEnd);
+  if (hotEntry === false) {
+    throw HOT_BANG_LOOKUP_BLOCKED;
   }
+  if (typeof hotEntry === "string") {
+    return hotEntry;
+  }
+  if (hotEntry) {
+    return buildUrl(hotEntry, rawQuery, termStart, termEnd);
+  }
+  const entry = lookupBang(bang, hash);
   if (entry) {
-    return buildUrl(entry, rawQuery, termStart, termEnd);
+    let mode = (entry as FilledUrlParts).m;
+    if (mode === undefined && entry[1] !== null) {
+      mode = compileUrlMode(entry[0], entry[1]);
+      (entry as FilledUrlParts).m = mode;
+    }
+    return buildUrl(entry, rawQuery, termStart, termEnd, mode);
   }
   const advanced = lookupAdvancedBang(bang);
   return advanced
