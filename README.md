@@ -324,7 +324,56 @@ The privacy-first `#q=%s` URL takes a related but intentionally slower path. The
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for build pipeline and project structure details.
 
-## Flashbang vs Unduckified
+## Comparison with other bang tools
+
+🥇, 🥈, and 🥉 mark first, second, and third place. Ties share a medal; subjective or effectively universal rows are not ranked.
+
+| | **flashbang** | **[unduck](https://github.com/T3-Content/unduck)** | **[unduckified](https://github.com/taciturnaxolotl/unduckified)** | **[ReBang](https://github.com/Void-n-Null/rebang)** | **[bangs.fast](https://github.com/kristianvld/bangs.fast)** | **[cf-unduck](https://github.com/mynameistito/cf-unduck)** |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Redirect method** | 🥇 **Service Worker intercept + persisted hot boot + client fallback** | 🥉 **`window.location.replace`** | 🥇 **Service Worker intercept + client fallback** | 🥈 **Cloudflare Worker + client fallback** | 🥉 **`window.location.replace`** | 🥈 **Cloudflare Worker + client fallback** |
+| **When redirect happens** | 🥇 **Before render when controlled; after a minimal cold page otherwise** | 🥉 **After page loads** | 🥇 **Before render when controlled; after a minimal cold page otherwise** | 🥈 **At edge or after page loads** | 🥉 **After page loads** | 🥈 **At edge or after page loads** |
+| **Sources / measured triggers‖** | 🥇 **DDG + Kagi + custom — 14,614** | DDG + project entries — 13,570 | Kagi + custom — 13,593 | 🥈 **DDG + Kagi — 14,432** | 🥉 **Selectable DDG or Kagi — 13,541–14,074** | DDG + Kagi — 13,598 |
+| **Analytics** | 🥇 **None†** | Plausible | Cloudflare `beacon.min.js` on hosted deployment‡ | Plausible + Vercel Analytics + Speed Insights | 🥇 **None (static GitHub Pages)** | None found in source |
+| **Server required** | 🥇 **No for redirects**; yes for optional suggestions/OpenSearch | 🥇 **No** | 🥇 **No for redirects**; yes for optional suggestions | Yes (Cloudflare Worker) | 🥇 **No** | Yes (Cloudflare Worker) |
+| **Snaps (`site:` search)** | 🥇 **Yes (`@trigger`)** | No | No | No | No | No |
+| **Snap chains** | 🥇 **Yes (2–8 sites)** | No | No | No | No | No |
+| **Feeling Lucky** | 🥇 **Yes (configurable per-engine)** | No | No | No | No | No |
+| **Configurable shortcut syntax** | 🥇 **Yes (separate bang/snap prefixes)** | No (fixed `!`) | No (fixed `!`) | No (fixed `!`) | No (fixed `!`) | No (fixed `!`) |
+| **Private fragment search** | 🥇 **Yes (`#q=%s`, Service Worker)** | No | No | No | 🥈 **Yes (`#q=%s`, page-based)** | No |
+| **Address-bar suggestions** | 🥇 **Built in (bang-aware + regular queries + opt-in site forwarding)** | No | 🥈 **Built-in bang completion + opt-in provider/site forwarding** | No | No | 🥈 **Built-in DuckDuckGo suggestions** |
+| **Frecency-ranked suggestions** | 🥇 **Yes (local usage; Chromium)** | No | No | No | No | No |
+| **OpenSearch** | 🥇 **Yes (dynamic, self-host friendly)** | No | 🥈 **Yes (static)** | 🥈 **Yes (static)** | 🥈 **Yes (static)** | 🥈 **Yes (static)** |
+| **Default engine setting** | Yes | `localStorage` only; no UI | Yes | Yes | Yes | Yes |
+| **Custom bangs** | 🥇 **Yes (IndexedDB + persisted hot boot)** | No | 🥈 **Yes (`localStorage` + SW Cache Storage)** | 🥉 **Yes (`localStorage`)** | 🥈 **Yes (IndexedDB)** | 🥉 **Yes (`localStorage` + cookie)** |
+| **Advanced custom bangs** | 🥇 **Regex captures, encoding modes, custom snap paths** | No | No | No | No | No |
+| **Bang catalog search** | Trigger, name, or domain | No | No | Yes | Yes | Yes |
+| **Settings import/export** | 🥇 **Yes** | No | 🥇 **Yes** | No | 🥈 **Shareable settings link** | Shareable custom-bang link |
+| **Automatic bang updates** | Daily | No | Daily | Monthly | Daily | Daily pull request |
+| **Build tool** | Bun | Vite | Bun + Vite | Vite | Bun + Vite | Bun + Vite |
+| **Bang data for redirects** | 🥇 **~545 KiB packed trigger→URL lookup** | 2.7 MB (full metadata) | 🥈 **~688 KiB packed trigger→URL lookup** | 🥉 **~208 KB inline + 1.23 MB lazy-loaded** | ~1,744–1,977 KiB JSON dataset | ~1,560 KiB generated trigger map |
+| **Core client redirect assets¶** | 🥇 **~219 KiB transfer / ~597 KiB decoded** | 🥉 ~466 KiB transfer / ~1,980 KiB decoded | 🥇 **~191 KiB transfer / ~694 KiB decoded** | Edge path | ~525 KiB transfer / ~2,295 KiB decoded | Edge path |
+| **Parsed on** | 🥇 **SW thread once per worker lifetime; main thread on cold fallback** | Main thread (every page load) | 🥇 **SW thread once per worker lifetime; main thread on cold fallback** | 🥈 **Edge worker or main-thread fallback** | 🥉 **Main thread with cached index** | 🥈 **Edge worker or main-thread fallback** |
+| **License** | AGPL-3.0 | MIT | MIT | MIT | MIT | MIT |
+| **GitHub stars** | [![Flashbang stars](https://img.shields.io/github/stars/ph1losof/flashbang?style=flat&label=stars)](https://github.com/ph1losof/flashbang/stargazers) | [![Unduck stars](https://img.shields.io/github/stars/T3-Content/unduck?style=flat&label=stars)](https://github.com/T3-Content/unduck/stargazers) | [![Unduckified stars](https://img.shields.io/github/stars/taciturnaxolotl/unduckified?style=flat&label=stars)](https://github.com/taciturnaxolotl/unduckified/stargazers) | [![ReBang stars](https://img.shields.io/github/stars/Void-n-Null/rebang?style=flat&label=stars)](https://github.com/Void-n-Null/rebang/stargazers) | [![bangs.fast stars](https://img.shields.io/github/stars/kristianvld/bangs.fast?style=flat&label=stars)](https://github.com/kristianvld/bangs.fast/stargazers) | [![cf-unduck stars](https://img.shields.io/github/stars/mynameistito/cf-unduck?style=flat&label=stars)](https://github.com/mynameistito/cf-unduck/stargazers) |
+
+† Flashbang does not include analytics scripts or tracking. Cloudflare Pages exposes basic request counts in its dashboard as a platform feature; that aggregate platform metric is not Cloudflare Web Analytics.
+
+‡ Unduckified's source contains no analytics code, but its hosted custom domain requested Cloudflare's `beacon.min.js` and `/cdn-cgi/rum` on August 3, 2026. Issue [#13](https://github.com/taciturnaxolotl/unduckified/issues/13) documents the beacon remaining in browser network requests after the author disabled Web Analytics. This is deployment-level behavior rather than code in the Unduckified repository.
+
+<details>
+<summary>Measurement definitions and source revisions</summary>
+
+‖ The medals in this row compare effective unique built-in redirect triggers after checked-in aliases and project-specific entries are expanded. Fixed catalogs use their complete runtime total. bangs.fast exposes mutually exclusive presets, so its range is 13,541 for the default DDG preset, 13,589 for Kagi Community, and 14,074 for Kagi Community + Internal; its medal uses that largest supported preset. Flashbang ranks first overall at 14,614, followed by ReBang at 14,432 and bangs.fast at up to 14,074. Flashbang covers 182 more triggers (1.3%) than runner-up ReBang and 1,021 more (7.5%) than Unduckified. The remaining totals are cf-unduck 13,598, Unduckified 13,593, and unduck 13,570.
+
+Trigger counts were measured from source on August 3, 2026 at Flashbang `706ea00`, [unduck `c1b821d`](https://github.com/T3-Content/unduck/commit/c1b821de0ffa286cfd964817d1918c5e90545db4), [Unduckified `58b33a7`](https://github.com/taciturnaxolotl/unduckified/commit/58b33a7004472724a2ba76e612af549049cff2fa), [ReBang `45d3a03`](https://github.com/Void-n-Null/rebang/commit/45d3a03bbfbb64da233f748ffc0f273903f603ba), [bangs.fast `213d94e`](https://github.com/kristianvld/bangs.fast/commit/213d94e3075ba5769caa0d703f9cb576df2c1c6f), and [cf-unduck `74ffeb8`](https://github.com/mynameistito/cf-unduck/commit/74ffeb8190b5686f5bb345952529b43f2d68438f). Feature behavior was additionally refreshed against [Unduckified `3907ca6`](https://github.com/taciturnaxolotl/unduckified/commit/3907ca692ea4bda6d12e5e40d32bd6816b128860). These projects are actively developed and may have changed since.
+
+¶ Core client redirect assets are the aggregate cacheable response-body footprint of redirect code and complete built-in lookup data. This is not the number of bytes transferred on every redirect, first-search critical-path traffic, total page weight, or runtime memory use. “Transfer” uses each deployment's supported HTTP content encoding; “decoded” is the body size after HTTP decompression. For Service Worker tools, the measurement includes the installed worker and complete packed catalog but excludes the first-uncontrolled-navigation fallback. For page-based tools, it includes the JavaScript and fetched catalog used by their normal client redirect. HTML, CSS, fonts, analytics, settings, suggestions, and unrelated UI assets are excluded. Unduckified's Brotli-compressed redirect runtime transferred less than Flashbang's in the measured snapshot, while Flashbang remained smaller decoded.
+
+Flashbang and Unduckified were measured live on August 3, 2026; the remaining deployments were measured on July 23, 2026. Successful ReBang and cf-unduck edge redirects execute remotely and have no client runtime body; “Edge path” does not mean zero network cost, excludes response headers and server code, and does not include their larger client fallback paths. “No” means no built-in implementation was found; manual browser configuration is not counted.
+
+</details>
+
+### Flashbang vs Unduckified
 
 Both projects now use a Service Worker for controlled redirects and a page fallback for the first uncontrolled search. The important differences are what each path must initialize and when the complete catalog enters the critical path.
 
@@ -342,11 +391,7 @@ Both projects now use a Service Worker for controlled redirects and a page fallb
 | **Suggestions** | **Bang-aware, frecency-ranked, provider-backed, and site-specific forwarding** | Bang completion with optional provider/site forwarding |
 | **Hosted analytics** | **None**† | Cloudflare `beacon.min.js` and `/cdn-cgi/rum`‡ |
 
-The source comparison was rechecked on August 3, 2026 at Flashbang `517d91b` and Unduckified current `main` commit [`e01def4`](https://github.com/taciturnaxolotl/unduckified/commit/e01def4ab4a5fac5ef0a099c6f3c430bbb191d25). Unduckified's live worker advertises catalog version `3988e07507e2`, exactly matching a fresh build of that commit.
-
-† Flashbang includes no analytics or tracking script. Cloudflare Pages exposes aggregate request counts to the deployment owner, but Flashbang does not enable Cloudflare Web Analytics.
-
-‡ Unduckified's repository contains no analytics source. Its public `s.dunkirk.sh` deployment nevertheless requested Cloudflare's `beacon.min.js` and sent `/cdn-cgi/rum` during this recheck. Issue [#13](https://github.com/taciturnaxolotl/unduckified/issues/13) documents the same deployment-level injection after Web Analytics was disabled.
+The detailed deployment comparison was rechecked on August 3, 2026 at Flashbang `517d91b` and the Unduckified source revision then matching production, [`e01def4`](https://github.com/taciturnaxolotl/unduckified/commit/e01def4ab4a5fac5ef0a099c6f3c430bbb191d25). Unduckified's live worker advertised catalog version `3988e07507e2`, exactly matching a fresh build of that revision. The broader feature matrix above uses the later current-branch revision linked there.
 
 ### Production benchmark: 11 wins, 0 ties, 0 losses
 

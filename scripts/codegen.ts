@@ -2,10 +2,29 @@ import { mkdir, rm } from "node:fs/promises";
 import { brotliCompressSync, constants as zlibConstants } from "node:zlib";
 import { $ } from "bun";
 import {
+  align2,
+  align4,
+  BANG_BINARY_MAGIC,
+  BANG_BINARY_VERSION,
+  BANG_CHECKPOINT_SIZE,
+  BANG_SHARD_PACK_DIRECTORY_WORDS,
+  BANG_SHARD_PACK_HEADER_WORDS,
+  BANG_SHARD_PACK_MAGIC,
+  BANG_SHARD_PACK_SHARD_HEADER_WORDS,
+  BANG_SHARD_PACK_VERSION,
+  type BangBinarySnapData,
+  type BangBinaryTables,
+  copyTypedArray,
+  encodeBangStrings,
+  orderStringsByLength,
+  serializeBangBinary,
+} from "../src/shared/bang-shard-pack";
+import {
   BANG_SHARD_COUNT,
   BANG_SHARD_ROUTER_SIZE,
   bangShardCell,
 } from "../src/shared/bang-shards";
+
 import {
   CAPTURE_ENCODE_PERCENT,
   CAPTURE_ENCODE_PLUS,
@@ -83,8 +102,6 @@ const MERGED_BANGS_PATH = `${DATA_DIR}/bangs.json`;
 const SUGGEST_SITES_PATH = `${DATA_DIR}/suggest-sites.json`;
 const GENERATED_OUT_DIR = "src/generated";
 const HOT_BANG_LIMIT = 24;
-const BANG_BINARY_MAGIC = 0x31424246;
-const BANG_BINARY_VERSION = 10;
 
 const DDG_SOURCE_URL = "https://duckduckgo.com/bang.js";
 const KAGI_SOURCE_URL =
@@ -401,32 +418,6 @@ function dedupeStrings(values: readonly string[]): {
   return { ids, unique };
 }
 
-function orderStringsByLength(values: readonly string[]): {
-  ordered: string[];
-  remap: number[];
-} {
-  const indexes = values.map((_, index) => index);
-  indexes.sort((a, b) => {
-    const lengthDifference = values[a].length - values[b].length;
-    if (lengthDifference !== 0) {
-      return lengthDifference;
-    }
-    if (values[a] < values[b]) {
-      return -1;
-    }
-    return values[a] > values[b] ? 1 : 0;
-  });
-
-  const ordered = new Array<string>(values.length);
-  const remap = new Array<number>(values.length);
-  for (let id = 0; id < indexes.length; id++) {
-    const oldId = indexes[id];
-    ordered[id] = values[oldId];
-    remap[oldId] = id;
-  }
-  return { ordered, remap };
-}
-
 function nextPow2(n: number): number {
   let p = 1;
   while (p < n) {
@@ -703,36 +694,6 @@ function buildCompressionAwareMinimalPerfectHash(
     : null;
 }
 
-function align2(value: number): number {
-  return (value + 1) & ~1;
-}
-
-function align4(value: number): number {
-  return (value + 3) & ~3;
-}
-
-const BANG_CHECKPOINT_SIZE = 16;
-const PREFIX_LENGTH_MASK = 0x1fff;
-const PREFIX_WWW_FLAG = 0x2000;
-const PREFIX_SCHEME_SHIFT = 14;
-
-function buildCheckpoints(
-  lengths: Uint8Array | Uint16Array,
-  lengthMask = 0xffff
-): Uint32Array {
-  const checkpoints = new Uint32Array(
-    Math.ceil(lengths.length / BANG_CHECKPOINT_SIZE)
-  );
-  let position = 0;
-  for (let i = 0; i < lengths.length; i++) {
-    if (i % BANG_CHECKPOINT_SIZE === 0) {
-      checkpoints[i / BANG_CHECKPOINT_SIZE] = position;
-    }
-    position += lengths[i] & lengthMask;
-  }
-  return checkpoints;
-}
-
 interface PackedBangData {
   entryCount: number;
   prefixIds: number[];
@@ -832,21 +793,11 @@ function packBangData(bangs: Bang[]): PackedBangData {
   };
 }
 
-interface PackedSnapData {
-  blob: Uint8Array;
-  lengths: Uint16Array;
-  slots: Uint16Array;
-  targetIds: Uint16Array;
-  targetCount: number;
-  triggerBlob: Uint8Array;
-  triggerLengths: Uint16Array;
-}
-
 function packSnapData(
   targets: readonly (SnapTargetParts | null)[],
   triggers: readonly string[],
   slotToEntry?: Uint16Array
-): PackedSnapData {
+): BangBinarySnapData {
   const slots: number[] = [];
   const targetIds: number[] = [];
   const uniqueTargets: SnapTargetParts[] = [];
@@ -901,18 +852,6 @@ function packSnapData(
     triggerBlob: encoder.encode(snapTriggers.join("")),
     triggerLengths,
   };
-}
-
-function copyTypedArray(
-  output: Uint8Array,
-  offset: number,
-  values: Uint8Array | Uint16Array | Uint32Array | Int16Array | Int32Array
-): number {
-  output.set(
-    new Uint8Array(values.buffer, values.byteOffset, values.byteLength),
-    offset
-  );
-  return offset + values.byteLength;
 }
 
 function compressionPrefixPayload(value: string): string {
@@ -996,7 +935,6 @@ function generateBinaryWithBucketLoad(
     mph.slotToEntry,
     (entry) => packed.suffixIdsPlusOne[entry]
   );
-  const encoder = new TextEncoder();
   let uniquePrefixes = packed.uniquePrefixes;
   if (compressionAware) {
     const orderedPrefixes = orderPrefixesForCompression(uniquePrefixes);
@@ -1005,47 +943,10 @@ function generateBinaryWithBucketLoad(
       (id) => orderedPrefixes.remap[id]
     );
   }
-  const suffixBytes = encoder.encode(packed.suffixBlob.blob);
   const fingerprints = Uint16Array.from(
     triggers,
     (trigger) => hashFNV1a(trigger) >>> 16
   );
-  // URL blobs stay byte-backed in the worker and are decoded one entry at a time.
-  const prefixPayloads = new Array<string>(uniquePrefixes.length);
-  const prefixLengths = Uint16Array.from(uniquePrefixes, (value, index) => {
-    let payload = value;
-    let scheme = 0;
-    if (payload.startsWith("https://")) {
-      scheme = 1;
-      payload = payload.substring(8);
-    } else if (payload.startsWith("http://")) {
-      scheme = 2;
-      payload = payload.substring(7);
-    }
-    let flags = scheme << PREFIX_SCHEME_SHIFT;
-    if (payload.startsWith("www.")) {
-      flags |= PREFIX_WWW_FLAG;
-      payload = payload.substring(4);
-    }
-    const length = encoder.encode(payload).byteLength;
-    if (length > PREFIX_LENGTH_MASK) {
-      throw new Error(
-        `Binary bang format requires encoded prefix payload length <= ${PREFIX_LENGTH_MASK}, got ${length}`
-      );
-    }
-    prefixPayloads[index] = payload;
-    return length | flags;
-  });
-  const prefixBytes = encoder.encode(prefixPayloads.join(""));
-  const suffixLengths = Uint16Array.from(packed.uniqueSuffixes, (value) => {
-    const length = encoder.encode(value).byteLength;
-    if (length > 0xffff) {
-      throw new Error(
-        `Binary bang format requires encoded suffix length <= 65535, got ${length}`
-      );
-    }
-    return length;
-  });
   const prefixIds = Uint16Array.from(reorderedPrefixIds);
   const suffixIds = Uint16Array.from(reorderedSuffixIds);
   const snapData = packSnapData(
@@ -1053,74 +954,15 @@ function generateBinaryWithBucketLoad(
     packed.triggers,
     mph.slotToEntry
   );
-  const prefixCheckpoints = buildCheckpoints(prefixLengths, PREFIX_LENGTH_MASK);
-  const suffixCheckpoints = buildCheckpoints(suffixLengths);
-
-  const headerWords = 16;
-  const headerBytes = headerWords * Uint32Array.BYTES_PER_ELEMENT;
-  let numericEnd = headerBytes + mph.displacements.byteLength;
-  numericEnd += fingerprints.byteLength;
-  numericEnd = align2(numericEnd);
-  numericEnd +=
-    prefixLengths.byteLength +
-    suffixLengths.byteLength +
-    prefixIds.byteLength +
-    suffixIds.byteLength +
-    snapData.slots.byteLength +
-    snapData.targetIds.byteLength +
-    snapData.lengths.byteLength +
-    snapData.triggerLengths.byteLength;
-  numericEnd = align4(numericEnd);
-  numericEnd += prefixCheckpoints.byteLength + suffixCheckpoints.byteLength;
-  const totalBytes =
-    numericEnd +
-    prefixBytes.byteLength +
-    suffixBytes.byteLength +
-    snapData.blob.byteLength +
-    snapData.triggerBlob.byteLength;
-  const output = new Uint8Array(new ArrayBuffer(totalBytes));
-  new Uint32Array(output.buffer, 0, headerWords).set([
-    BANG_BINARY_MAGIC,
-    BANG_BINARY_VERSION,
-    packed.entryCount,
-    mph.displacements.length,
-    fingerprints.BYTES_PER_ELEMENT,
-    packed.uniquePrefixes.length,
-    packed.uniqueSuffixes.length,
-    0,
-    prefixBytes.byteLength,
-    suffixBytes.byteLength,
-    numericEnd,
-    totalBytes,
-    mph.displacements.BYTES_PER_ELEMENT,
-    snapData.slots.length,
-    snapData.targetCount,
-    snapData.blob.byteLength,
-  ]);
-
-  let offset = headerBytes;
-  offset = copyTypedArray(output, offset, mph.displacements);
-  offset = copyTypedArray(output, offset, fingerprints);
-  offset = align2(offset);
-  offset = copyTypedArray(output, offset, prefixLengths);
-  offset = copyTypedArray(output, offset, suffixLengths);
-  offset = copyTypedArray(output, offset, prefixIds);
-  offset = copyTypedArray(output, offset, suffixIds);
-  offset = copyTypedArray(output, offset, snapData.slots);
-  offset = copyTypedArray(output, offset, snapData.targetIds);
-  offset = copyTypedArray(output, offset, snapData.lengths);
-  offset = copyTypedArray(output, offset, snapData.triggerLengths);
-  offset = align4(offset);
-  offset = copyTypedArray(output, offset, prefixCheckpoints);
-  offset = copyTypedArray(output, offset, suffixCheckpoints);
-  output.set(prefixBytes, offset);
-  offset += prefixBytes.byteLength;
-  output.set(suffixBytes, offset);
-  offset += suffixBytes.byteLength;
-  output.set(snapData.blob, offset);
-  offset += snapData.blob.byteLength;
-  output.set(snapData.triggerBlob, offset);
-  return output;
+  return serializeBangBinary({
+    displacements: mph.displacements,
+    fingerprints,
+    prefixIds,
+    snapData,
+    suffixIds,
+    uniquePrefixes,
+    uniqueSuffixes: packed.uniqueSuffixes,
+  });
 }
 
 export function generateBinary(bangs: readonly Bang[]): Uint8Array {
@@ -1143,6 +985,11 @@ export function generateBinary(bangs: readonly Bang[]): Uint8Array {
 export interface GeneratedBinaryShards {
   router: Uint8Array;
   shards: Uint8Array[];
+}
+
+export interface GeneratedBinaryShardPack {
+  pack: Uint8Array;
+  router: Uint8Array;
 }
 
 function estimateBangBinaryByteLength(bangs: readonly Bang[]): number {
@@ -1192,9 +1039,14 @@ function estimateBangBinaryByteLength(bangs: readonly Bang[]): number {
   );
 }
 
-export function generateBinaryShards(
+interface PartitionedBinaryShards {
+  router: Uint8Array;
+  shards: Bang[][];
+}
+
+function partitionBinaryShards(
   bangs: readonly Bang[]
-): GeneratedBinaryShards {
+): PartitionedBinaryShards {
   const cells = Array.from({ length: BANG_SHARD_ROUTER_SIZE }, (_, id) => ({
     bangs: [] as Bang[],
     byteWeight: 0,
@@ -1238,10 +1090,223 @@ export function generateBinaryShards(
   }
   return {
     router,
-    shards: bins.map(({ bangs: shard }) =>
-      generateBinaryWithBucketLoad(shard, 4)
-    ),
+    shards: bins.map(({ bangs: shard }) => shard),
   };
+}
+
+export function generateBinaryShards(
+  bangs: readonly Bang[]
+): GeneratedBinaryShards {
+  const { router, shards } = partitionBinaryShards(bangs);
+  return {
+    router,
+    shards: shards.map((shard) => generateBinaryWithBucketLoad(shard, 4)),
+  };
+}
+
+function buildShardMinimalPerfectHash(
+  triggers: readonly string[]
+): MinimalPerfectHash {
+  let bucketLoad = 4;
+  for (;;) {
+    try {
+      return buildMinimalPerfectHash(triggers, bucketLoad);
+    } catch (error) {
+      const placementFailed =
+        error instanceof Error &&
+        error.message.startsWith("Unable to build binary bang MPHF bucket ");
+      if (!placementFailed || bucketLoad <= 0.25) {
+        throw error;
+      }
+      bucketLoad /= 2;
+    }
+  }
+}
+
+function serializePackedShardBlock(
+  tables: Pick<
+    BangBinaryTables,
+    "displacements" | "fingerprints" | "prefixIds" | "snapData" | "suffixIds"
+  >
+): Uint8Array {
+  const { displacements, fingerprints, prefixIds, snapData, suffixIds } =
+    tables;
+  const headerBytes =
+    BANG_SHARD_PACK_SHARD_HEADER_WORDS * Uint32Array.BYTES_PER_ELEMENT;
+  let numericEnd =
+    headerBytes +
+    displacements.byteLength +
+    fingerprints.byteLength +
+    prefixIds.byteLength +
+    suffixIds.byteLength +
+    snapData.slots.byteLength +
+    snapData.targetIds.byteLength +
+    snapData.lengths.byteLength +
+    snapData.triggerLengths.byteLength;
+  numericEnd = align4(numericEnd);
+  const totalBytes =
+    numericEnd + snapData.blob.byteLength + snapData.triggerBlob.byteLength;
+  const output = new Uint8Array(new ArrayBuffer(totalBytes));
+  new Uint32Array(output.buffer, 0, BANG_SHARD_PACK_SHARD_HEADER_WORDS).set([
+    fingerprints.length,
+    displacements.length,
+    displacements.BYTES_PER_ELEMENT,
+    snapData.slots.length,
+    snapData.targetCount,
+    snapData.blob.byteLength,
+    snapData.triggerBlob.byteLength,
+    numericEnd,
+    totalBytes,
+    0,
+  ]);
+  let offset = headerBytes;
+  offset = copyTypedArray(output, offset, displacements);
+  offset = copyTypedArray(output, offset, fingerprints);
+  offset = copyTypedArray(output, offset, prefixIds);
+  offset = copyTypedArray(output, offset, suffixIds);
+  offset = copyTypedArray(output, offset, snapData.slots);
+  offset = copyTypedArray(output, offset, snapData.targetIds);
+  offset = copyTypedArray(output, offset, snapData.lengths);
+  offset = copyTypedArray(output, offset, snapData.triggerLengths);
+  offset = align4(offset);
+  output.set(snapData.blob, offset);
+  offset += snapData.blob.byteLength;
+  output.set(snapData.triggerBlob, offset);
+  return output;
+}
+
+function createPackedShardBlock(
+  shard: readonly Bang[],
+  globalPacked: PackedBangData,
+  globalEntryByTrigger: ReadonlyMap<string, number>
+): Uint8Array {
+  const triggers = shard.map((bang) => bang.trigger);
+  const mph = buildShardMinimalPerfectHash(triggers);
+  const globalEntries = shard.map((bang) => {
+    const entry = globalEntryByTrigger.get(bang.trigger);
+    if (entry === undefined) {
+      throw new Error(`Missing global binary entry for !${bang.trigger}`);
+    }
+    return entry;
+  });
+  const fingerprints = Uint16Array.from(
+    mph.slotToEntry,
+    (entry) => hashFNV1a(triggers[entry]) >>> 16
+  );
+  const prefixIds = Uint16Array.from(
+    mph.slotToEntry,
+    (entry) => globalPacked.prefixIds[globalEntries[entry]]
+  );
+  const suffixIds = Uint16Array.from(
+    mph.slotToEntry,
+    (entry) => globalPacked.suffixIdsPlusOne[globalEntries[entry]]
+  );
+  const snapData = packSnapData(
+    globalEntries.map((entry) => globalPacked.snapTargets[entry]),
+    triggers,
+    mph.slotToEntry
+  );
+  return serializePackedShardBlock({
+    displacements: mph.displacements,
+    fingerprints,
+    prefixIds,
+    snapData,
+    suffixIds,
+  });
+}
+
+export function generateBinaryShardPack(
+  bangs: readonly Bang[]
+): GeneratedBinaryShardPack {
+  const { router, shards } = partitionBinaryShards(bangs);
+  const regular = bangs.filter((bang) => !bang.regex);
+  const globalPacked = packBangData(regular);
+  const globalEntryByTrigger = new Map(
+    globalPacked.triggers.map((trigger, entry) => [trigger, entry])
+  );
+  const blocks = shards.map((shard) =>
+    createPackedShardBlock(shard, globalPacked, globalEntryByTrigger)
+  );
+  const strings = encodeBangStrings({
+    uniquePrefixes: globalPacked.uniquePrefixes,
+    uniqueSuffixes: globalPacked.uniqueSuffixes,
+  });
+
+  const headerBytes =
+    BANG_SHARD_PACK_HEADER_WORDS * Uint32Array.BYTES_PER_ELEMENT;
+  const routerOffset = headerBytes;
+  const directoryOffset = align4(routerOffset + router.byteLength);
+  const globalNumericOffset = align4(
+    directoryOffset +
+      blocks.length *
+        BANG_SHARD_PACK_DIRECTORY_WORDS *
+        Uint32Array.BYTES_PER_ELEMENT
+  );
+  let globalBlobOffset =
+    globalNumericOffset +
+    strings.prefixLengths.byteLength +
+    strings.suffixLengths.byteLength;
+  globalBlobOffset = align4(globalBlobOffset);
+  globalBlobOffset +=
+    strings.prefixCheckpoints.byteLength + strings.suffixCheckpoints.byteLength;
+  const shardDataOffset = align4(
+    globalBlobOffset +
+      strings.prefixBytes.byteLength +
+      strings.suffixBytes.byteLength
+  );
+  let totalBytes = shardDataOffset;
+  const blockOffsets = blocks.map((block) => {
+    const offset = totalBytes;
+    totalBytes = align4(totalBytes + block.byteLength);
+    return offset;
+  });
+
+  const pack = new Uint8Array(new ArrayBuffer(totalBytes));
+  new Uint32Array(pack.buffer, 0, BANG_SHARD_PACK_HEADER_WORDS).set([
+    BANG_SHARD_PACK_MAGIC,
+    BANG_SHARD_PACK_VERSION,
+    blocks.length,
+    router.length,
+    globalPacked.uniquePrefixes.length,
+    globalPacked.uniqueSuffixes.length,
+    strings.prefixBytes.byteLength,
+    strings.suffixBytes.byteLength,
+    globalNumericOffset,
+    globalBlobOffset,
+    directoryOffset,
+    shardDataOffset,
+    totalBytes,
+    strings.prefixCheckpoints.length,
+    strings.suffixCheckpoints.length,
+    0,
+  ]);
+  pack.set(router, routerOffset);
+  const directory = new Uint32Array(
+    pack.buffer,
+    directoryOffset,
+    blocks.length * BANG_SHARD_PACK_DIRECTORY_WORDS
+  );
+  for (let shard = 0; shard < blocks.length; shard++) {
+    directory[shard * BANG_SHARD_PACK_DIRECTORY_WORDS] = blockOffsets[shard];
+    directory[shard * BANG_SHARD_PACK_DIRECTORY_WORDS + 1] =
+      blocks[shard].byteLength;
+  }
+  let offset = globalNumericOffset;
+  offset = copyTypedArray(pack, offset, strings.prefixLengths);
+  offset = copyTypedArray(pack, offset, strings.suffixLengths);
+  offset = align4(offset);
+  offset = copyTypedArray(pack, offset, strings.prefixCheckpoints);
+  offset = copyTypedArray(pack, offset, strings.suffixCheckpoints);
+  if (offset !== globalBlobOffset) {
+    throw new Error("Invalid generated bang shard pack string layout");
+  }
+  pack.set(strings.prefixBytes, offset);
+  offset += strings.prefixBytes.byteLength;
+  pack.set(strings.suffixBytes, offset);
+  for (let shard = 0; shard < blocks.length; shard++) {
+    pack.set(blocks[shard], blockOffsets[shard]);
+  }
+  return { pack, router };
 }
 
 export function renderAdvancedLookup(bangs: readonly Bang[]): string {

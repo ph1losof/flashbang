@@ -1,4 +1,6 @@
 import { normalize } from "node:path";
+import { brotliCompressSync, constants } from "node:zlib";
+import { createBangShardResponse } from "../src/server/bang-shard";
 import {
   handleOpenSearchRequest,
   handleSuggestRequest,
@@ -8,6 +10,12 @@ import {
   pageHeaders,
   SW_HEADERS,
 } from "../src/server/headers";
+import {
+  bangShardPackAssetPath,
+  binaryShardPackShardCount,
+  materializeBinaryShard,
+  parseBangShardPath,
+} from "../src/shared/bang-shard-pack";
 import { readPathname } from "../src/shared/raw-url";
 import { extractInlineScriptHashes } from "./inline-script-hash";
 
@@ -15,7 +23,7 @@ let securityHeaders = pageHeaders("");
 const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const REVALIDATE_CACHE_CONTROL = "public, max-age=0, must-revalidate";
 const HASHED_ASSET_RE =
-  /^\/(?:chunk-[a-z0-9_-]{8,}\.js|fallback-[a-z0-9_-]{8,}\.js|bangs(?:-meta)?-[a-f0-9]{8,}\.bin)$/i;
+  /^\/(?:chunk-[a-z0-9_-]{8,}\.js|fallback-[a-z0-9_-]{8,}\.js|bangs(?:-meta|-pack)?-[a-f0-9]{8,}\.bin)$/i;
 const DIST_DIR = process.env.DIST_DIR || "dist";
 const DIST_PREFIX = `${DIST_DIR}/`;
 
@@ -23,6 +31,11 @@ export interface StaticAsset {
   br: Bun.BunFile | null;
   file: Bun.BunFile;
   type: string;
+}
+
+interface MaterializedBangShard {
+  brotli: Uint8Array;
+  identity: Uint8Array;
 }
 
 export function acceptsBrotli(header: string | null): boolean {
@@ -130,6 +143,44 @@ export function createStaticFetchHandler(
   staticManifest: ReadonlyMap<string, StaticAsset>,
   securityHeaderEntries = Object.entries(securityHeaders)
 ): (req: Request) => Promise<Response> {
+  const materializedBangShards = new Map<
+    string,
+    Promise<MaterializedBangShard>
+  >();
+
+  const loadBangShard = (
+    version: string,
+    shardId: number
+  ): Promise<MaterializedBangShard> => {
+    const key = `${version}/${shardId}`;
+    const existing = materializedBangShards.get(key);
+    if (existing) {
+      return existing;
+    }
+    const loading = (async () => {
+      const packAsset = staticManifest.get(bangShardPackAssetPath(version));
+      if (!packAsset) {
+        throw new Error("Missing binary bang shard pack");
+      }
+      const pack = new Uint8Array(await packAsset.file.arrayBuffer());
+      if (shardId >= binaryShardPackShardCount(pack)) {
+        throw new RangeError("Invalid binary bang shard id");
+      }
+      const identity = materializeBinaryShard(pack, shardId);
+      return {
+        brotli: brotliCompressSync(identity, {
+          params: {
+            [constants.BROTLI_PARAM_QUALITY]: constants.BROTLI_MAX_QUALITY,
+          },
+        }),
+        identity,
+      };
+    })();
+    materializedBangShards.set(key, loading);
+    loading.catch(() => materializedBangShards.delete(key));
+    return loading;
+  };
+
   return async (req) => {
     const pathname = readPathname(req.url);
 
@@ -151,6 +202,43 @@ export function createStaticFetchHandler(
         res.headers.set(k, v);
       }
       return res;
+    }
+
+    if (pathname.startsWith("/bang-shard/")) {
+      const requested = parseBangShardPath(pathname);
+      if (!requested) {
+        return new Response("Not found", {
+          status: 404,
+          headers: securityHeaders,
+        });
+      }
+      try {
+        const cacheHit = materializedBangShards.has(
+          `${requested.version}/${requested.shardId}`
+        );
+        const shard = await loadBangShard(requested.version, requested.shardId);
+        const compressed = acceptsBrotli(req.headers.get("accept-encoding"));
+        return createBangShardResponse(
+          compressed ? shard.brotli : shard.identity,
+          compressed,
+          [
+            ...securityHeaderEntries,
+            ["X-Flashbang-Shard-Cache", cacheHit ? "hit" : "miss"],
+          ]
+        );
+      } catch (error) {
+        const missing =
+          error instanceof RangeError ||
+          (error instanceof Error &&
+            error.message === "Missing binary bang shard pack");
+        if (!missing) {
+          console.error("Unable to materialize bang shard", error);
+        }
+        return new Response(missing ? "Not found" : "Invalid bang shard pack", {
+          status: missing ? 404 : 500,
+          headers: securityHeaders,
+        });
+      }
     }
 
     if (pathname === "/sw.js") {

@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { brotliDecompressSync } from "node:zlib";
+import { generateBinaryShardPack } from "../scripts/codegen";
 import { extractInlineScriptHashes } from "../scripts/inline-script-hash";
 import {
   acceptsBrotli,
@@ -9,6 +11,28 @@ import {
   serveCompressed,
   staticAssetHeaders,
 } from "../scripts/start";
+import { handleCloudflareBangShard } from "../src/server/cloudflare-bang-shard";
+import {
+  bangShardEndpointPath,
+  bangShardPackAssetPath,
+  materializeBinaryShard,
+} from "../src/shared/bang-shard-pack";
+
+const SHARD_VERSION = "0123456789ab";
+
+let shardPackFixture:
+  | Promise<{ expected: Uint8Array; pack: Uint8Array }>
+  | undefined;
+
+function loadShardPackFixture() {
+  shardPackFixture ??= Bun.file("data/bangs.json")
+    .json()
+    .then((bangs) => {
+      const { pack } = generateBinaryShardPack(bangs);
+      return { expected: materializeBinaryShard(pack, 0), pack };
+    });
+  return shardPackFixture;
+}
 
 const staticAsset = (text: string, type: string): StaticAsset => ({
   file: new Blob([text]) as unknown as Bun.BunFile,
@@ -184,6 +208,133 @@ describe("production static caching", () => {
     expect(sw.headers.get("Content-Security-Policy")).toContain(
       "connect-src 'self'"
     );
+  });
+  test("materializes and process-caches Brotli shards for Railway", async () => {
+    const { expected, pack } = await loadShardPackFixture();
+    let packReads = 0;
+    const manifest = new Map([
+      ["/index.html", staticAsset("index", "text/html")],
+      [
+        bangShardPackAssetPath(SHARD_VERSION),
+        {
+          br: null,
+          file: {
+            arrayBuffer: () => {
+              packReads++;
+              return Promise.resolve(
+                pack.buffer.slice(
+                  pack.byteOffset,
+                  pack.byteOffset + pack.byteLength
+                ) as ArrayBuffer
+              );
+            },
+          } as Bun.BunFile,
+          type: "application/octet-stream",
+        },
+      ],
+    ]);
+    const fetch = createStaticFetchHandler(manifest, [["X-Security", "1"]]);
+    const endpoint = `https://example.com${bangShardEndpointPath(SHARD_VERSION, 0)}`;
+
+    const identity = await fetch(new Request(endpoint));
+    expect(identity.status).toBe(200);
+    expect(Array.from(new Uint8Array(await identity.arrayBuffer()))).toEqual(
+      Array.from(expected)
+    );
+    expect(identity.headers.get("Cache-Control")).toContain("immutable");
+    expect(identity.headers.get("Content-Encoding")).toBeNull();
+    expect(identity.headers.get("X-Flashbang-Shard-Cache")).toBe("miss");
+
+    const compressed = await fetch(
+      new Request(endpoint, { headers: { "Accept-Encoding": "br" } })
+    );
+    expect(compressed.status).toBe(200);
+    expect(compressed.headers.get("Content-Encoding")).toBe("br");
+    expect(compressed.headers.get("X-Flashbang-Shard-Cache")).toBe("hit");
+    expect(
+      Array.from(
+        brotliDecompressSync(new Uint8Array(await compressed.arrayBuffer()))
+      )
+    ).toEqual(Array.from(expected));
+    expect(packReads).toBe(1);
+
+    const missing = await fetch(
+      new Request(
+        `https://example.com${bangShardEndpointPath(SHARD_VERSION, 999)}`
+      )
+    );
+    expect(missing.status).toBe(404);
+  });
+  test("edge-caches Cloudflare materialized shards", async () => {
+    const { expected, pack } = await loadShardPackFixture();
+    const responses = new Map<string, Response>();
+    const waits: Promise<unknown>[] = [];
+    let assetFetches = 0;
+    const originalCaches = Object.getOwnPropertyDescriptor(
+      globalThis,
+      "caches"
+    );
+    Object.defineProperty(globalThis, "caches", {
+      configurable: true,
+      value: {
+        default: {
+          match: (request: Request) =>
+            Promise.resolve(responses.get(request.url)?.clone()),
+          put: (request: Request, response: Response) => {
+            responses.set(request.url, response.clone());
+            return Promise.resolve();
+          },
+        },
+      },
+    });
+    try {
+      const endpoint = `https://example.com${bangShardEndpointPath(SHARD_VERSION, 0)}`;
+      const context = {
+        env: {
+          ASSETS: {
+            fetch: (request: Request) => {
+              assetFetches++;
+              expect(new URL(request.url).pathname).toBe(
+                bangShardPackAssetPath(SHARD_VERSION)
+              );
+              expect(request.headers.get("Accept-Encoding")).toBe("identity");
+              return Promise.resolve(
+                new Response(
+                  pack.buffer.slice(
+                    pack.byteOffset,
+                    pack.byteOffset + pack.byteLength
+                  ) as ArrayBuffer
+                )
+              );
+            },
+          },
+        },
+        request: new Request(endpoint),
+        waitUntil: (promise: Promise<unknown>) => waits.push(promise),
+      };
+
+      const first = await handleCloudflareBangShard(context);
+      expect(first.status).toBe(200);
+      expect(first.headers.get("X-Flashbang-Shard-Cache")).toBe("miss");
+      expect(Array.from(new Uint8Array(await first.arrayBuffer()))).toEqual(
+        Array.from(expected)
+      );
+      await Promise.all(waits);
+
+      const second = await handleCloudflareBangShard(context);
+      expect(second.status).toBe(200);
+      expect(second.headers.get("X-Flashbang-Shard-Cache")).toBe("hit");
+      expect(Array.from(new Uint8Array(await second.arrayBuffer()))).toEqual(
+        Array.from(expected)
+      );
+      expect(assetFetches).toBe(1);
+    } finally {
+      if (originalCaches) {
+        Object.defineProperty(globalThis, "caches", originalCaches);
+      } else {
+        Reflect.deleteProperty(globalThis, "caches");
+      }
+    }
   });
   test("hashes only inline scripts for the production CSP", () => {
     const hashes = extractInlineScriptHashes(

@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { generateBinaryShards } from "../scripts/codegen";
+import { brotliCompressSync, constants as zlibConstants } from "node:zlib";
+import {
+  generateBinaryShardPack,
+  generateBinaryShards,
+} from "../scripts/codegen";
 import { lookupAdvancedBang } from "../src/generated/bangs-sparse.js";
+import { materializeBinaryShard } from "../src/shared/bang-shard-pack";
 import {
   BANG_SHARD_COUNT,
   BANG_SHARD_ROUTER_SIZE,
@@ -176,6 +181,54 @@ describe("codegen round-trip", () => {
       }
     }
     initializeBangData(await Bun.file("src/generated/bangs.bin").arrayBuffer());
+  });
+
+  test("packs globally shared strings and materializes identical cold shards", async () => {
+    const generated = generateBinaryShards(bangs);
+    const packed = generateBinaryShardPack(bangs);
+    const repeated = generateBinaryShardPack(bangs);
+    expect(Array.from(packed.router)).toEqual(Array.from(generated.router));
+    expect(Bun.hash(repeated.pack)).toBe(Bun.hash(packed.pack));
+
+    for (let shardId = 0; shardId < generated.shards.length; shardId++) {
+      expect(materializeBinaryShard(packed.pack, shardId)).toEqual(
+        generated.shards[shardId]
+      );
+    }
+
+    const full = await Bun.file("src/generated/bangs.bin").bytes();
+    const compressedSize = (bytes: Uint8Array) =>
+      brotliCompressSync(bytes, {
+        params: {
+          [zlibConstants.BROTLI_PARAM_QUALITY]: 11,
+          [zlibConstants.BROTLI_PARAM_SIZE_HINT]: bytes.byteLength,
+        },
+      }).byteLength;
+    expect(packed.pack.byteLength).toBeLessThan(full.byteLength * 1.03);
+    expect(compressedSize(packed.pack)).toBeLessThan(
+      compressedSize(full) * 1.03
+    );
+  });
+
+  test("rejects malformed global shard packs", () => {
+    const { pack } = generateBinaryShardPack(bangs);
+    expect(() => materializeBinaryShard(pack, -1)).toThrow(
+      "Invalid binary bang shard id"
+    );
+    expect(() => materializeBinaryShard(pack, BANG_SHARD_COUNT)).toThrow(
+      "Invalid binary bang shard id"
+    );
+
+    const invalidMagic = pack.slice();
+    new Uint32Array(invalidMagic.buffer)[0] = 0;
+    expect(() => materializeBinaryShard(invalidMagic, 0)).toThrow(
+      "Unsupported binary bang shard pack"
+    );
+
+    const truncated = pack.slice(0, -1);
+    expect(() => materializeBinaryShard(truncated, 0)).toThrow(
+      "Truncated binary bang shard pack"
+    );
   });
 
   test("loads and resets an exact shard through the shared runtime", async () => {

@@ -7,7 +7,12 @@ import {
   pageHeaders,
   SW_CSP,
 } from "../src/server/headers";
-import { ensureGeneratedBangData, generateBinaryShards } from "./codegen";
+import {
+  bangShardPackAssetPath,
+  binaryShardPackShardCount,
+  materializeBinaryShard,
+} from "../src/shared/bang-shard-pack";
+import { ensureGeneratedBangData, generateBinaryShardPack } from "./codegen";
 import { extractInlineScriptHashes } from "./inline-script-hash";
 import {
   assembleUIAssets,
@@ -173,8 +178,12 @@ export async function main(): Promise<void> {
     .slice(0, 12);
   const bangDataAsset = `/bangs-${bangDataHash}.bin`;
   await Bun.write(`${DIST_DIR}${bangDataAsset}`, bangDataBytes);
-  const { router: bangShardRouter, shards: bangShardBytes } =
-    generateBinaryShards(await Bun.file("data/bangs.json").json());
+  const { pack: bangShardPack, router: bangShardRouter } =
+    generateBinaryShardPack(await Bun.file("data/bangs.json").json());
+  const bangShardBytes = Array.from(
+    { length: binaryShardPackShardCount(bangShardPack) },
+    (_, shard) => materializeBinaryShard(bangShardPack, shard)
+  );
   const bangShardHash = createHash("sha256").update(bangShardRouter);
   for (const bytes of bangShardBytes) {
     bangShardHash.update(`${bytes.byteLength}:`);
@@ -184,11 +193,13 @@ export async function main(): Promise<void> {
   const bangShardAssets = bangShardBytes.map(
     (_, shard) => `/bangs-s${shard.toString(36)}-${bangShardVersion}.bin`
   );
-  await Promise.all(
-    bangShardBytes.map((bytes, shard) =>
+  const bangShardPackAsset = bangShardPackAssetPath(bangShardVersion);
+  await Promise.all([
+    Bun.write(`${DIST_DIR}${bangShardPackAsset}`, bangShardPack),
+    ...bangShardBytes.map((bytes, shard) =>
       Bun.write(`${DIST_DIR}${bangShardAssets[shard]}`, bytes)
-    )
-  );
+    ),
+  ]);
   const bangMetaBytes = await Bun.file("src/generated/bangs-meta.bin").bytes();
   const bangMetaHash = createHash("sha256")
     .update(bangMetaBytes)
@@ -331,6 +342,9 @@ export async function main(): Promise<void> {
       ...bangDataHeaders,
       "",
       bangMetaAsset,
+      "  Cache-Control: public, max-age=31536000, immutable",
+      "",
+      bangShardPackAsset,
       "  Cache-Control: public, max-age=31536000, immutable",
       "",
       fallbackAsset,
