@@ -179,7 +179,7 @@ describe("build cache version", () => {
         [2, 1],
         ["/bangs-s0-a.bin"],
         ["/bangs-ip0-a.bin"],
-        ["/bangs-str-a.bin"],
+        ["/bangs-g-a.bin"],
         3
       );
 
@@ -195,7 +195,7 @@ describe("build cache version", () => {
             __BANG_SHARD_ASSETS__: '["/bangs-s0-a.bin"]',
             __BANG_INDEX_ASSETS__: '["/bangs-ip0-a.bin"]',
             __BANG_INDEX_SHARDS_PER_ASSET__: "3",
-            __BANG_STORE_ASSETS__: '["/bangs-str-a.bin"]',
+            __BANG_STORE_ASSETS__: '["/bangs-g-a.bin"]',
             __FALLBACK_ASSET__: '"/fallback-a.js"',
             __CACHE_VERSION__: '"fb-test"',
             __REQUIRED_APP_ASSETS__: '["/chunk-a.js"]',

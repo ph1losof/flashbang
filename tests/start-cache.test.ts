@@ -60,7 +60,7 @@ describe("production static caching", () => {
     );
     // Shards carry a base36 id between the prefix and the version hash, so both
     // the single- and double-digit forms have to match.
-    expect(cacheControlForAsset("/bangs-str-0123456789ab.bin")).toBe(
+    expect(cacheControlForAsset("/bangs-g-0123456789ab.bin")).toBe(
       "public, max-age=31536000, immutable"
     );
     for (const shard of ["s0", "s9", "sw", "s10", "s16", "i0", "iw", "i13"]) {

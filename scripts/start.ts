@@ -15,12 +15,12 @@ let securityHeaders = pageHeaders("");
 const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const REVALIDATE_CACHE_CONTROL = "public, max-age=0, must-revalidate";
 // Every content-addressed asset. Catalog binaries share one shape:
-//   bangs[-<kind>]-<hex>.bin   where <kind> is `meta`, `str`, or a shard id
+//   bangs[-<kind>]-<hex>.bin   where <kind> is `meta`, `g`, or a shard id
 //                              prefixed `s` (self-contained) or `i` (index).
 // One pattern rather than a list per class, which drifts and silently serves
 // immutable artifacts as must-revalidate.
 const HASHED_ASSET_RE =
-  /^\/(?:(?:chunk|fallback|cold-fallback)-[a-z0-9_-]{8,}\.js|bangs-(?:meta-|str-|[si][0-9a-z]{1,2}-)?[a-f0-9]{8,}\.bin)$/i;
+  /^\/(?:(?:chunk|fallback|cold-fallback)-[a-z0-9_-]{8,}\.js|bangs-(?:meta-|g-|[si][0-9a-z]{1,2}-)?[a-f0-9]{8,}\.bin)$/i;
 const DIST_DIR = process.env.DIST_DIR || "dist";
 const DIST_PREFIX = `${DIST_DIR}/`;
 

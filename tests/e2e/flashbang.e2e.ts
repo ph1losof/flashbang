@@ -10,7 +10,7 @@ const GOOGLE_HOST = "https://www.google.com";
 const CUSTOM_HOST = "https://example.com";
 const BANG_COLD_ASSET_RE = /^\/bangs-s(?:[0-9a-z]|1[0-6])-[a-f0-9]{12}\.bin$/;
 const BANG_INDEX_ASSET_RE = /^\/bangs-ip[0-9a-e]-[a-f0-9]{12}\.bin$/;
-const BANG_STORE_ASSET_RE = /\/bangs-str-[a-f0-9]{12}\.bin$/;
+const BANG_STORE_ASSET_RE = /\/bangs-g-[a-f0-9]{12}\.bin$/;
 const WEBKIT_SERVICE_WORKER_SKIP =
   "Playwright WebKit does not support service worker lifecycle testing";
 
@@ -1547,7 +1547,7 @@ test("newly activated worker redirects from a shard while the full catalog warms
               for (const request of await (
                 await caches.open(cacheName)
               ).keys()) {
-                if (/\/bangs-str-[a-f0-9]{12}\.bin$/.test(request.url)) {
+                if (/\/bangs-g-[a-f0-9]{12}\.bin$/.test(request.url)) {
                   return true;
                 }
               }
@@ -1571,7 +1571,7 @@ test("newly activated worker redirects from a shard while the full catalog warms
         settlingPage.evaluate(async () => {
           for (const cacheName of await caches.keys()) {
             for (const request of await (await caches.open(cacheName)).keys()) {
-              if (/\/bangs-str-[a-f0-9]{12}\.bin$/.test(request.url)) {
+              if (/\/bangs-g-[a-f0-9]{12}\.bin$/.test(request.url)) {
                 return true;
               }
             }
@@ -1914,7 +1914,7 @@ test("first hot redirect warms the full catalog without waiting", async ({
               for (const request of await (
                 await caches.open(cacheName)
               ).keys()) {
-                if (/\/bangs-str-[a-f0-9]{12}\.bin$/.test(request.url)) {
+                if (/\/bangs-g-[a-f0-9]{12}\.bin$/.test(request.url)) {
                   return true;
                 }
               }
@@ -1943,7 +1943,7 @@ test("first hot redirect warms the full catalog without waiting", async ({
         settlingPage.evaluate(async () => {
           for (const cacheName of await caches.keys()) {
             for (const request of await (await caches.open(cacheName)).keys()) {
-              if (/\/bangs-str-[a-f0-9]{12}\.bin$/.test(request.url)) {
+              if (/\/bangs-g-[a-f0-9]{12}\.bin$/.test(request.url)) {
                 return true;
               }
             }
@@ -2045,7 +2045,7 @@ test("first fallback seeds the worker for the next offline redirect", async ({
                 const pathname = new URL(url).pathname;
                 return (
                   pathname === "/bangs.bin" ||
-                  /^\/bangs-str-[a-f0-9]{12}\.bin$/.test(pathname)
+                  /^\/bangs-g-[a-f0-9]{12}\.bin$/.test(pathname)
                 );
               })
             ) {
@@ -2496,7 +2496,7 @@ test("warm redirect repairs a stale string store exactly once", async ({
         let count = 0;
         for (const cacheName of await caches.keys()) {
           for (const request of await (await caches.open(cacheName)).keys()) {
-            if (/\/bangs-str-[a-f0-9]{12}\.bin$/.test(request.url)) {
+            if (/\/bangs-g-[a-f0-9]{12}\.bin$/.test(request.url)) {
               count++;
             }
           }
@@ -2510,7 +2510,7 @@ test("warm redirect repairs a stale string store exactly once", async ({
     for (const cacheName of await caches.keys()) {
       const cache = await caches.open(cacheName);
       for (const request of await cache.keys()) {
-        if (!/\/bangs-str-[a-f0-9]{12}\.bin$/.test(request.url)) {
+        if (!/\/bangs-g-[a-f0-9]{12}\.bin$/.test(request.url)) {
           continue;
         }
         const response = await cache.match(request);

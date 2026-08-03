@@ -281,8 +281,8 @@ export async function main(): Promise<void> {
     contentAsset(bytes, `bangs-ip${pack.toString(36)}`)
   );
   const bangStoreAssets = [
-    contentAsset(catalog.storeBase, "bangs-str"),
-    contentAsset(catalog.storeTail, "bangs-str"),
+    contentAsset(catalog.storeBase, "bangs-g"),
+    contentAsset(catalog.storeTail, "bangs-g"),
   ];
   await Promise.all([
     ...catalog.cold.map((bytes, shard) =>
@@ -444,14 +444,13 @@ export async function main(): Promise<void> {
       bangMetaAsset,
       "  Cache-Control: public, max-age=31536000, immutable",
       "",
-      // Use exact cold-shard paths: `/bangs-s*` also matches the
-      // `/bangs-str-*` string store under Pages' additive wildcard rules,
-      // duplicating Content-Encoding and making a once-compressed body invalid.
+      // Exact cold-shard paths prevent future namespaces beginning `bangs-s`
+      // from inheriting duplicate headers under Pages' additive wildcard rules.
       ...bangShardAssets.flatMap((asset) => [asset, ...bangDataHeaders, ""]),
       "/bangs-i*",
       ...bangDataHeaders,
       "",
-      "/bangs-str-*",
+      "/bangs-g-*",
       ...bangDataHeaders,
       "",
       fallbackAsset,
