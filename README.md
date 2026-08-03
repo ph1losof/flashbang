@@ -375,36 +375,38 @@ Flashbang and Unduckified were measured live on August 3, 2026; the remaining de
 
 </details>
 
-### Production benchmark: 5 wins, 6 ties, 0 losses
+### Production benchmark: 8 wins, 3 ties, 0 losses
 
-The `e6dd2e6` campaign ran 60 randomized pairs in every category against the current public deployments. Under the predeclared 5% per-category significance rule, Flashbang recorded five wins and no losses; the other six categories were ties. Flashbang had the lower raw median in 10 of 11 categories.
+The `e6dd2e6` campaign ran 60 randomized pairs in every category against the current public deployments. Each category is scored by which tool won the majority of its 60 pairs: Flashbang took eight, three live-worker categories split exactly 30–30, and Unduckified won none. Flashbang also had the lower raw median in 10 of 11 categories. Per-category permutation tests are retained in the full results below; five of the eight majority wins also clear a 5% significance threshold.
 
-| Lifecycle      |                  Score | **Flashbang median range** | **Unduckified median range** |
-| -------------- | ---------------------: | -------------------------: | ---------------------------: |
-| Live worker    | **2 wins, 4 ties** |           **0.52–0.54 ms** |                 0.52–0.61 ms |
-| Worker restart | **1 win, 2 ties**  |           **2.75–2.89 ms** |                 3.59–3.90 ms |
-| New profile    |             **2 wins** |        **92.15–106.55 ms** |             167.60–170.45 ms |
+| Lifecycle      |              Score | **Flashbang median range** | **Unduckified median range** |
+| -------------- | -----------------: | -------------------------: | ---------------------------: |
+| Live worker    | **3 wins, 3 ties** |           **0.52–0.54 ms** |                 0.52–0.61 ms |
+| Worker restart |         **3 wins** |           **2.75–2.89 ms** |                 3.59–3.90 ms |
+| New profile    |         **2 wins** |        **92.15–106.55 ms** |             167.60–170.45 ms |
 
-The significant live-worker advantages are only 0.04–0.05 ms. The useful separation is in the lifecycle medians: Flashbang was 0.79–1.01 ms lower after a stopped worker restarted and 61.05–78.30 ms lower on the measured first search. Rare scheduling outliers made two restart categories ties under the paired mean test even though Flashbang had the lower median and won 51/60 and 56/60 pairs respectively. The architecture behind those states is explained in [Why Flashbang is faster](#why-is-flashbang-faster).
+The live-worker margins are small — 0.01–0.05 ms — and three of those six categories are exact 30–30 splits with no majority for either tool. The useful separation is in the lifecycle medians: Flashbang was 0.79–1.01 ms lower after a stopped worker restarted and 61.05–78.30 ms lower on the measured first search, taking 51/60, 56/60, and 58/60 restart pairs and 43/60 and 48/60 new-profile pairs. The architecture behind those states is explained in [Why Flashbang is faster](#why-is-flashbang-faster).
 
 <details>
 <summary>Full 11-category results and benchmark methodology</summary>
 
-| Chromium 151, randomized pairs                 | **Flashbang** | **Unduckified** | Paired result                                                                        |
-| ---------------------------------------------- | ------------: | --------------: | ------------------------------------------------------------------------------------ |
-| Live worker, `!gh test`                        |       0.53 ms |     **0.52 ms** | Tie at 5% (mean difference 0.01 ms, 95% CI -0.02–0.04, p = 0.5701)                  |
-| Live worker, full-catalog alias `!github test` |   **0.53 ms** |         0.54 ms | Tie at 5% (mean advantage 0.02 ms, 95% CI -0.01–0.04, p = 0.1996)                   |
-| Live worker, trailing `test !gh`               |   **0.52 ms** |         0.54 ms | **Flashbang mean advantage 0.04 ms** (95% CI 0.01–0.06, p = 0.0097)                 |
-| Live worker, suffix `test gh!`                 |   **0.53 ms** |         0.54 ms | Tie at 5% (mean advantage 0.01 ms, 95% CI -0.02–0.04, p = 0.3820)                   |
-| Live worker, empty query `!gh`                 |   **0.52 ms** |         0.53 ms | Tie at 5% (mean advantage 0.01 ms, 95% CI -0.01–0.04, p = 0.3863)                   |
-| Live worker, 256-byte query                    |   **0.54 ms** |         0.61 ms | **Flashbang mean advantage 0.05 ms** (95% CI 0.004–0.098, p = 0.0252)               |
-| Worker restart, `!gh test`                     |   **2.75 ms** |         3.59 ms | Tie at 5%; Flashbang won 51/60 pairs (p = 0.1631)                                    |
-| Worker restart, full-catalog alias             |   **2.80 ms** |         3.59 ms | Tie at 5%; Flashbang won 56/60 pairs (p = 0.3440)                                    |
-| Worker restart, 256-byte query                 |   **2.89 ms** |         3.90 ms | **Flashbang won 58/60; mean advantage 1.58 ms** (95% CI 1.00–2.54, p < 0.0001)      |
-| New profile, `!gh test`                        |  **92.15 ms** |       170.45 ms | **Flashbang mean advantage 74.35 ms** (95% CI 55.75–92.72, p < 0.0001)              |
-| New profile, full-catalog alias                | **106.55 ms** |       167.60 ms | **Flashbang mean advantage 60.10 ms** (95% CI 36.62–82.64, p < 0.0001)              |
+| Chromium 151, randomized pairs                 | **Flashbang** | **Unduckified** | Paired result                                                                   |
+| ---------------------------------------------- | ------------: | --------------: | ------------------------------------------------------------------------------- |
+| Live worker, `!gh test`                        |       0.53 ms |     **0.52 ms** | Tie — exact 30/30 split (mean difference 0.01 ms, 95% CI -0.02–0.04, p = 0.5701) |
+| Live worker, full-catalog alias `!github test` |   **0.53 ms** |         0.54 ms | **Flashbang won 31/60 pairs** (mean advantage 0.02 ms, 95% CI -0.01–0.04, p = 0.1996) |
+| Live worker, trailing `test !gh`               |   **0.52 ms** |         0.54 ms | **Flashbang won 37/60; mean advantage 0.04 ms** (95% CI 0.01–0.06, p = 0.0097)  |
+| Live worker, suffix `test gh!`                 |   **0.53 ms** |         0.54 ms | Tie — exact 30/30 split (mean advantage 0.01 ms, 95% CI -0.02–0.04, p = 0.3820) |
+| Live worker, empty query `!gh`                 |   **0.52 ms** |         0.53 ms | Tie — exact 30/30 split (mean advantage 0.01 ms, 95% CI -0.01–0.04, p = 0.3863) |
+| Live worker, 256-byte query                    |   **0.54 ms** |         0.61 ms | **Flashbang won 48/60; mean advantage 0.05 ms** (95% CI 0.004–0.098, p = 0.0252) |
+| Worker restart, `!gh test`                     |   **2.75 ms** |         3.59 ms | **Flashbang won 51/60 pairs** (p = 0.1631)                                      |
+| Worker restart, full-catalog alias             |   **2.80 ms** |         3.59 ms | **Flashbang won 56/60 pairs** (p = 0.3440)                                      |
+| Worker restart, 256-byte query                 |   **2.89 ms** |         3.90 ms | **Flashbang won 58/60; mean advantage 1.58 ms** (95% CI 1.00–2.54, p < 0.0001)  |
+| New profile, `!gh test`                        |  **92.15 ms** |       170.45 ms | **Flashbang won 48/60; mean advantage 74.35 ms** (95% CI 55.75–92.72, p < 0.0001) |
+| New profile, full-catalog alias                | **106.55 ms** |       167.60 ms | **Flashbang won 43/60; mean advantage 60.10 ms** (95% CI 36.62–82.64, p < 0.0001) |
 
-The comparison uses Unduckified's timing definition: CDP `Network.requestWillBeSent` wall time from navigation to the tool URL until the first GitHub request. It ran in Chromium 151 on an Apple M4 Max; discarded three warm-up pairs; randomized tool order; measured live workers, explicitly stopped workers, and isolated browser contexts; bootstrapped 95% confidence intervals; and used a paired sign-flip permutation test. After the local resolver stopped returning a usable IPv4 record for `s.dunkirk.sh`, the lifecycle runs pinned Chromium to the hostname's current authoritative Cloudflare IPv4 while retaining the HTTPS hostname and TLS validation.
+Categories are scored by which tool won the majority of their 60 randomized pairs; the permutation p-values above are reported per category rather than used as the scoring rule. Two live-worker rows (`!github test`, `test !gh`) had one pair tie exactly, so their decided pairs are 31/28 and 37/22.
+
+The comparison uses Unduckified's timing definition: CDP `Network.requestWillBeSent` wall time from navigation to the tool URL until the first GitHub request. It ran in Chromium 151 on an Apple M4 Max; discarded three warm-up pairs; randomized tool order; measured live workers, explicitly stopped workers, and isolated browser contexts; bootstrapped 95% confidence intervals; and used a paired sign-flip permutation test. Restart means are outlier-sensitive: `!gh test` has a negative mean difference driven by rare Flashbang scheduling spikes despite winning 51/60 pairs and holding a 0.84 ms lower median. After the local resolver stopped returning a usable IPv4 record for `s.dunkirk.sh`, the lifecycle runs pinned Chromium to the hostname's current authoritative Cloudflare IPv4 while retaining the HTTPS hostname and TLS validation.
 
 The payload audit separates critical-path behavior from total offline footprint. Flashbang's current complete worker plus warm catalog measured 230.7 KiB transferred / 612.3 KiB decoded. Its first redirect instead transfers about 8.0 KiB / 21.3 KiB decoded for a generated hot bang, or 14.2–15.0 KiB / 35.1–37.1 KiB with one routed non-hot shard. Unduckified's build produces a smaller 191.0 KiB Brotli worker-plus-catalog artifact but a larger 693.9 KiB decoded runtime. During the final campaign, `s.dunkirk.sh` served `bangs.bin` with identity encoding, so its observed transfer was 690.6 KiB; that deployment variation is not used to claim an architectural payload win. Flashbang's complete catalog continues caching only after the destination request starts.
 
