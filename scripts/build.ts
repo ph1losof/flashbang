@@ -6,6 +6,7 @@ import {
   FALLBACK_SHELL_HEADERS,
   pageHeaders,
   SW_CSP,
+  shellPreloadHeader,
 } from "../src/server/headers";
 import {
   BANG_INDEX_PACK_MAGIC,
@@ -401,9 +402,12 @@ export async function main(): Promise<void> {
     .join("\n  ");
   const pageCspHeader = `Content-Security-Policy: ${pageCsp}`;
   const swCspHeader = `Content-Security-Policy: ${SW_CSP}`;
-  const fallbackShellHeaders = Object.entries(FALLBACK_SHELL_HEADERS).map(
-    ([key, value]) => `  ${key}: ${value}`
-  );
+  const fallbackShellHeaders = [
+    ...Object.entries(FALLBACK_SHELL_HEADERS).map(
+      ([key, value]) => `  ${key}: ${value}`
+    ),
+    `  Link: ${shellPreloadHeader(coldFallbackAsset)}`,
+  ];
   const pagesEncodedBangData = isCloudflarePagesBuild();
   const bangDataHeaders = pagesEncodedBangData
     ? [

@@ -169,6 +169,19 @@ class FakeDb {
 class FakeIndexedDb {
   private readonly dbs = new Map<string, DbRecord>();
 
+  /**
+   * Mirrors `IDBFactory.databases`, which the redirect fallbacks use to tell a
+   * first visit from a returning one before touching the profile.
+   */
+  databases(): Promise<{ name: string; version: number }[]> {
+    return Promise.resolve(
+      [...this.dbs].map(([name, record]) => ({
+        name,
+        version: record.version,
+      }))
+    );
+  }
+
   open(name: string, version?: number): IDBOpenDBRequest {
     const req = {
       result: undefined as unknown as IDBDatabase,

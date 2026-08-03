@@ -329,6 +329,19 @@ describe("build cache version", () => {
       expect(buildSpy).toHaveBeenCalledTimes(7);
       const headers = await Bun.file("dist/_headers").text();
       expect(headers).toContain("/sw.js");
+      // The preload hint belongs to both shell paths and nowhere else: a
+      // stray entry would make every asset response carry it under Pages'
+      // additive header merging.
+      const preloadLines = headers
+        .split("\n")
+        .filter((line) => line.trim().startsWith("Link:"));
+      expect(preloadLines).toHaveLength(2);
+      for (const line of preloadLines) {
+        expect(line.trim()).toMatch(
+          /^Link: <\/cold-fallback-[a-z0-9_-]{8,}\.js>; rel=preload; as=script; crossorigin$/
+        );
+      }
+      expect(headers).not.toContain("fallback-damtt05n.js>; rel=preload");
       expect(headers).not.toContain("/bangs-s*");
       expect(
         headers.match(/^\/bangs-s[0-9a-z]+-[a-f0-9]{12}\.bin$/gm)

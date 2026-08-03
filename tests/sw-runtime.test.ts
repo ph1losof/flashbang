@@ -1186,6 +1186,45 @@ describe("sw runtime with real modules", () => {
     ).toBe(redirectRawUrl("!npm+router", record.settings!));
   });
 
+  test("keeps frecency work out of the redirect dispatch task", async () => {
+    const state: NavigationPreloadState = {
+      enabled: false,
+      headerValue: "true",
+    };
+    await loadSwRuntime([], false, state);
+
+    const activate = createExtendableEvent();
+    await handlers.activate?.(activate.event);
+    await Promise.all(activate.waits);
+
+    // Drop the in-memory frecency state so this redirect is the first of the
+    // worker lifetime: the case where loadFrecency() runs into an actual
+    // IndexedDB open rather than a resolved-promise short circuit.
+    const swIdb = await import("../src/sw/idb");
+    swIdb.resetIdbStateForTests();
+    expect(swIdb.getTopFrecencyRecord()).not.toHaveProperty("npm");
+
+    const fetchEvt = createFetchEvent(
+      "https://flashbang.local/?q=!npm+react",
+      "",
+      "navigate"
+    );
+    await handlers.fetch?.(fetchEvt.event);
+    const response = await fetchEvt.response();
+    expect(response.headers.get("Location")).toContain("npmjs.com");
+
+    // Drain far more microtask turns than the IndexedDB read behind
+    // loadFrecency() needs. Usage counting must still not have run: it is
+    // scheduled on a macrotask so the response reaches the browser first.
+    for (let i = 0; i < 50; i++) {
+      await Promise.resolve();
+    }
+    expect(swIdb.getTopFrecencyRecord()).not.toHaveProperty("npm");
+
+    await Promise.all(fetchEvt.waits);
+    expect(swIdb.getTopFrecencyRecord()).toHaveProperty("npm");
+  });
+
   test("keeps hot-boot metadata disabled until concurrent writes finish", async () => {
     const state: NavigationPreloadState = {
       enabled: false,

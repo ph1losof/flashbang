@@ -4,14 +4,19 @@ import {
   handleSuggestRequest,
 } from "../src/server/handlers";
 import {
+  coldFallbackAssetFromHtml,
   FALLBACK_SHELL_HEADERS,
   pageHeaders,
   SW_HEADERS,
+  shellPreloadHeader,
 } from "../src/server/headers";
 import { readPathname } from "../src/shared/raw-url";
 import { extractInlineScriptHashes } from "./inline-script-hash";
 
 let securityHeaders = pageHeaders("");
+// Resolved from the built shell at startup: the module is content-addressed,
+// so the name is only known once a build exists.
+let shellPreload: string | null = null;
 const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const REVALIDATE_CACHE_CONTROL = "public, max-age=0, must-revalidate";
 // Every content-addressed asset. Catalog binaries share one shape:
@@ -83,7 +88,12 @@ export function staticAssetHeaders(
     "Cache-Control": cacheControlForAsset(assetPath),
     Vary: "Accept-Encoding",
     ...(compressed ? { "Content-Encoding": "br" } : {}),
-    ...(assetPath === "/index.html" ? FALLBACK_SHELL_HEADERS : {}),
+    ...(assetPath === "/index.html"
+      ? {
+          ...FALLBACK_SHELL_HEADERS,
+          ...(shellPreload ? { Link: shellPreload } : {}),
+        }
+      : {}),
     ...securityHeaders,
     ...extraHeaders,
   };
@@ -217,6 +227,10 @@ async function main(): Promise<void> {
     ...new Set(pageHtml.flatMap(extractInlineScriptHashes)),
   ];
   securityHeaders = pageHeaders(scriptHashes.join(" "));
+  const coldFallbackAsset = coldFallbackAssetFromHtml(pageHtml[0]);
+  shellPreload = coldFallbackAsset
+    ? shellPreloadHeader(coldFallbackAsset)
+    : null;
   const securityHeaderEntries = Object.entries(securityHeaders);
 
   const staticManifest = buildStaticManifest();
