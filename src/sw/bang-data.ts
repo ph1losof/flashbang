@@ -233,6 +233,11 @@ function decodeBangDataInternal(
     validateFinalLength(suffixLengths, suffixCheckpoints, suffixBlob.length);
   }
 
+  const snapRows =
+    snapCount < 256 ? new Uint8Array(entryCount) : new Uint16Array(entryCount);
+  for (let i = 0; i < snapCount; i++) {
+    snapRows[snapSlots[i]] = i + 1;
+  }
   const prefixCache: string[] = [];
   const suffixCache: string[] = [];
   const snapTargetCache: Array<SnapTargetParts | undefined> = [];
@@ -313,24 +318,6 @@ function decodeBangDataInternal(
     return value;
   }
 
-  function snapTargetId(index: number, trigger: string): number {
-    let low = 0;
-    let high = snapSlots.length - 1;
-    while (low <= high) {
-      const middle = (low + high) >> 1;
-      const slot = snapSlots[middle];
-      if (slot === index) {
-        return snapTrigger(middle) === trigger ? snapTargetIds[middle] : -1;
-      }
-      if (slot < index) {
-        low = middle + 1;
-      } else {
-        high = middle - 1;
-      }
-    }
-    return -1;
-  }
-
   function tuple(index: number, trigger: string): BuiltinUrlParts {
     let value = tupleCache[index];
     if (value === undefined) {
@@ -340,13 +327,13 @@ function decodeBangDataInternal(
       value = [tuplePrefix, tupleSuffix];
       tupleCache[index] = value;
     }
-    const snapId = snapTargetId(index, trigger);
-    if (snapId === -1) {
+    const snapRow = snapRows[index] - 1;
+    if (snapRow === -1 || snapTrigger(snapRow) !== trigger) {
       return value;
     }
     let snapValue = snapTupleCache[index];
     if (snapValue === undefined) {
-      snapValue = [value[0], value[1], snapTarget(snapId)];
+      snapValue = [value[0], value[1], snapTarget(snapTargetIds[snapRow])];
       snapTupleCache[index] = snapValue;
     }
     return snapValue;
