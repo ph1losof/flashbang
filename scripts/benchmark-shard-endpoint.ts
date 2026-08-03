@@ -3,6 +3,7 @@ import { BANG_SHARD_COUNT } from "../src/shared/bang-shards";
 
 interface Sample {
   cache: string;
+  encoding: string;
   milliseconds: number;
   transferredBytes: number | null;
 }
@@ -28,7 +29,7 @@ function parsePositiveInteger(value: string | undefined, fallback: number) {
 async function measure(url: string): Promise<Sample> {
   const started = performance.now();
   const response = await fetch(url, {
-    headers: { "Accept-Encoding": "br" },
+    headers: { "Accept-Encoding": "br, gzip" },
   });
   const body = await response.arrayBuffer();
   const milliseconds = performance.now() - started;
@@ -46,6 +47,7 @@ async function measure(url: string): Promise<Sample> {
       response.headers.get("X-Flashbang-Shard-Cache") ??
       response.headers.get("CF-Cache-Status") ??
       "unknown",
+    encoding: response.headers.get("Content-Encoding") ?? "identity",
     milliseconds,
     transferredBytes: contentLength === null ? null : Number(contentLength),
   };
@@ -57,17 +59,24 @@ function summarize(label: string, samples: readonly Sample[]): void {
     .map(({ transferredBytes }) => transferredBytes)
     .filter((value): value is number => value !== null);
   const cacheCounts = new Map<string, number>();
+  const encodingCounts = new Map<string, number>();
   for (const { cache } of samples) {
     cacheCounts.set(cache, (cacheCounts.get(cache) ?? 0) + 1);
   }
+  for (const { encoding } of samples) {
+    encodingCounts.set(encoding, (encodingCounts.get(encoding) ?? 0) + 1);
+  }
   const cache = [...cacheCounts]
     .map(([status, count]) => `${status}=${count}`)
+    .join(", ");
+  const encodings = [...encodingCounts]
+    .map(([encoding, count]) => `${encoding}=${count}`)
     .join(", ");
   const bytes = transferred.length
     ? `${Math.round(transferred.reduce((sum, value) => sum + value, 0) / transferred.length)} B avg`
     : "transfer size unavailable";
   console.log(
-    `${label}: p50=${percentile(durations, 0.5).toFixed(2)} ms, p95=${percentile(durations, 0.95).toFixed(2)} ms, ${bytes}, cache ${cache}`
+    `${label}: p50=${percentile(durations, 0.5).toFixed(2)} ms, p95=${percentile(durations, 0.95).toFixed(2)} ms, ${bytes}, encoding ${encodings}, cache ${cache}`
   );
 }
 

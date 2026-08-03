@@ -11,6 +11,7 @@ import {
   serveCompressed,
   staticAssetHeaders,
 } from "../scripts/start";
+import { preferredBangShardContentEncoding } from "../src/server/bang-shard";
 import { handleCloudflareBangShard } from "../src/server/cloudflare-bang-shard";
 import {
   bangShardEndpointPath,
@@ -65,6 +66,15 @@ describe("production static caching", () => {
     expect(acceptsBrotli("br;q=bogus")).toBe(false);
     expect(acceptsBrotli("br;q=2, *;q=0")).toBe(false);
     expect(acceptsBrotli("gzip;q=0.5, *;q=0.25")).toBe(true);
+  });
+  test("prefers Brotli and falls back through gzip to identity", () => {
+    expect(preferredBangShardContentEncoding("gzip, br")).toBe("br");
+    expect(preferredBangShardContentEncoding("gzip;q=1, br;q=0.5")).toBe(
+      "gzip"
+    );
+    expect(preferredBangShardContentEncoding("br;q=0, gzip")).toBe("gzip");
+    expect(preferredBangShardContentEncoding("br;q=0, gzip;q=0")).toBeNull();
+    expect(preferredBangShardContentEncoding(null)).toBeNull();
   });
   test("only content-hashed assets are immutable", () => {
     expect(cacheControlForAsset("/chunk-abc12345.js")).toBe(
@@ -309,20 +319,29 @@ describe("production static caching", () => {
             },
           },
         },
-        request: new Request(endpoint),
+        request: new Request(endpoint, {
+          headers: { "Accept-Encoding": "br, gzip" },
+        }),
         waitUntil: (promise: Promise<unknown>) => waits.push(promise),
       };
 
       const first = await handleCloudflareBangShard(context);
       expect(first.status).toBe(200);
+      expect(first.headers.get("Content-Encoding")).toBe("br");
       expect(first.headers.get("X-Flashbang-Shard-Cache")).toBe("miss");
       expect(Array.from(new Uint8Array(await first.arrayBuffer()))).toEqual(
         Array.from(expected)
       );
       await Promise.all(waits);
 
-      const second = await handleCloudflareBangShard(context);
+      const second = await handleCloudflareBangShard({
+        ...context,
+        request: new Request(endpoint, {
+          headers: { "Accept-Encoding": "gzip" },
+        }),
+      });
       expect(second.status).toBe(200);
+      expect(second.headers.get("Content-Encoding")).toBe("gzip");
       expect(second.headers.get("X-Flashbang-Shard-Cache")).toBe("hit");
       expect(Array.from(new Uint8Array(await second.arrayBuffer()))).toEqual(
         Array.from(expected)

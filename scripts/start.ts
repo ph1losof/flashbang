@@ -1,6 +1,9 @@
 import { normalize } from "node:path";
 import { brotliCompressSync, constants } from "node:zlib";
-import { createBangShardResponse } from "../src/server/bang-shard";
+import {
+  acceptsBangShardContentEncoding,
+  createBangShardResponse,
+} from "../src/server/bang-shard";
 import {
   handleOpenSearchRequest,
   handleSuggestRequest,
@@ -39,33 +42,7 @@ interface MaterializedBangShard {
 }
 
 export function acceptsBrotli(header: string | null): boolean {
-  if (!header) {
-    return false;
-  }
-
-  let explicitQuality: number | undefined;
-  let wildcardQuality: number | undefined;
-  for (const item of header.split(",")) {
-    const [rawCoding, ...parameters] = item.split(";");
-    const coding = rawCoding.trim().toLowerCase();
-    let quality = 1;
-    for (const parameter of parameters) {
-      const [rawName, rawValue] = parameter.split("=", 2);
-      if (rawName.trim().toLowerCase() === "q") {
-        const parsed = Number(rawValue?.trim());
-        quality =
-          Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : 0;
-      }
-    }
-
-    if (coding === "br") {
-      explicitQuality = Math.max(explicitQuality ?? 0, quality);
-    } else if (coding === "*") {
-      wildcardQuality = Math.max(wildcardQuality ?? 0, quality);
-    }
-  }
-
-  return (explicitQuality ?? wildcardQuality ?? 0) > 0;
+  return acceptsBangShardContentEncoding(header, "br");
 }
 
 export function cacheControlForAsset(assetPath: string): string {
@@ -220,7 +197,7 @@ export function createStaticFetchHandler(
         const compressed = acceptsBrotli(req.headers.get("accept-encoding"));
         return createBangShardResponse(
           compressed ? shard.brotli : shard.identity,
-          compressed,
+          compressed ? "br" : null,
           [
             ...securityHeaderEntries,
             ["X-Flashbang-Shard-Cache", cacheHit ? "hit" : "miss"],

@@ -4,7 +4,11 @@ import {
   materializeBinaryShard,
   parseBangShardPath,
 } from "../shared/bang-shard-pack";
-import { createBangShardResponse } from "./bang-shard";
+import {
+  type BangShardContentEncoding,
+  createBangShardResponse,
+  preferredBangShardContentEncoding,
+} from "./bang-shard";
 
 interface AssetFetcher {
   fetch(input: Request): Promise<Response>;
@@ -36,6 +40,29 @@ function textResponse(body: string, status: number): Response {
   });
 }
 
+interface WorkersResponseInit extends ResponseInit {
+  encodeBody: "automatic";
+}
+
+function encodeForClient(
+  response: Response,
+  encoding: BangShardContentEncoding | null,
+  cacheStatus: "hit" | "miss"
+): Response {
+  const headers = new Headers(response.headers);
+  headers.delete("Content-Length");
+  headers.set("X-Flashbang-Shard-Cache", cacheStatus);
+  if (encoding) {
+    headers.set("Content-Encoding", encoding);
+  } else {
+    headers.delete("Content-Encoding");
+  }
+  return new Response(response.body, {
+    headers,
+    encodeBody: "automatic",
+  } as WorkersResponseInit);
+}
+
 export async function handleCloudflareBangShard({
   env,
   request,
@@ -45,14 +72,15 @@ export async function handleCloudflareBangShard({
   if (!requested) {
     return textResponse("Not found", 404);
   }
+  const encoding = preferredBangShardContentEncoding(
+    request.headers.get("Accept-Encoding")
+  );
 
   const cache = defaultEdgeCache();
   const cacheKey = new Request(request.url);
   const cached = await cache?.match(cacheKey);
   if (cached) {
-    const response = new Response(cached.body, cached);
-    response.headers.set("X-Flashbang-Shard-Cache", "hit");
-    return response;
+    return encodeForClient(cached, encoding, "hit");
   }
 
   const packUrl = new URL(
@@ -72,14 +100,12 @@ export async function handleCloudflareBangShard({
       return textResponse("Not found", 404);
     }
     const response = createBangShardResponse(
-      materializeBinaryShard(pack, requested.shardId),
-      false,
-      [["X-Flashbang-Shard-Cache", "miss"]]
+      materializeBinaryShard(pack, requested.shardId)
     );
     if (cache) {
       waitUntil(cache.put(cacheKey, response.clone()));
     }
-    return response;
+    return encodeForClient(response, encoding, "miss");
   } catch (error) {
     console.error("Unable to materialize bang shard", error);
     return textResponse("Invalid bang shard pack", 500);
