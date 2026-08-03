@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { brotliDecompressSync, gunzipSync } from "node:zlib";
+import { brotliDecompressSync } from "node:zlib";
 import { generateBinaryShardPack } from "../scripts/codegen";
 import { extractInlineScriptHashes } from "../scripts/inline-script-hash";
 import {
@@ -11,7 +11,6 @@ import {
   serveCompressed,
   staticAssetHeaders,
 } from "../scripts/start";
-import { preferredBangShardContentEncoding } from "../src/server/bang-shard";
 import { handleCloudflareBangShard } from "../src/server/cloudflare-bang-shard";
 import {
   bangShardEndpointPath,
@@ -66,15 +65,6 @@ describe("production static caching", () => {
     expect(acceptsBrotli("br;q=bogus")).toBe(false);
     expect(acceptsBrotli("br;q=2, *;q=0")).toBe(false);
     expect(acceptsBrotli("gzip;q=0.5, *;q=0.25")).toBe(true);
-  });
-  test("prefers Brotli and falls back through gzip to identity", () => {
-    expect(preferredBangShardContentEncoding("gzip, br")).toBe("br");
-    expect(preferredBangShardContentEncoding("gzip;q=1, br;q=0.5")).toBe(
-      "gzip"
-    );
-    expect(preferredBangShardContentEncoding("br;q=0, gzip")).toBe("gzip");
-    expect(preferredBangShardContentEncoding("br;q=0, gzip;q=0")).toBeNull();
-    expect(preferredBangShardContentEncoding(null)).toBeNull();
   });
   test("only content-hashed assets are immutable", () => {
     expect(cacheControlForAsset("/chunk-abc12345.js")).toBe(
@@ -320,7 +310,7 @@ describe("production static caching", () => {
           },
         },
         request: new Request(endpoint, {
-          headers: { "Accept-Encoding": "br, gzip" },
+          headers: { "Accept-Encoding": "br" },
         }),
         waitUntil: (promise: Promise<unknown>) => waits.push(promise),
       };
@@ -336,16 +326,14 @@ describe("production static caching", () => {
 
       const second = await handleCloudflareBangShard({
         ...context,
-        request: new Request(endpoint, {
-          headers: { "Accept-Encoding": "gzip" },
-        }),
+        request: new Request(endpoint),
       });
       expect(second.status).toBe(200);
-      expect(second.headers.get("Content-Encoding")).toBe("gzip");
+      expect(second.headers.get("Content-Encoding")).toBeNull();
       expect(second.headers.get("X-Flashbang-Shard-Cache")).toBe("hit");
-      expect(
-        Array.from(gunzipSync(new Uint8Array(await second.arrayBuffer())))
-      ).toEqual(Array.from(expected));
+      expect(Array.from(new Uint8Array(await second.arrayBuffer()))).toEqual(
+        Array.from(expected)
+      );
       expect(assetFetches).toBe(1);
     } finally {
       if (originalCaches) {

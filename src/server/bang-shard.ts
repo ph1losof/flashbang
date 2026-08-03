@@ -1,6 +1,6 @@
 export const BANG_SHARD_CACHE_CONTROL = "public, max-age=31536000, immutable";
 
-export type BangShardContentEncoding = "br" | "gzip";
+export type BangShardContentEncoding = "br";
 
 function contentEncodingQuality(
   header: string | null,
@@ -37,17 +37,6 @@ export function acceptsBangShardContentEncoding(
   target: BangShardContentEncoding
 ): boolean {
   return contentEncodingQuality(header, target) > 0;
-}
-
-export function preferredBangShardContentEncoding(
-  header: string | null
-): BangShardContentEncoding | null {
-  const brotliQuality = contentEncodingQuality(header, "br");
-  const gzipQuality = contentEncodingQuality(header, "gzip");
-  if (brotliQuality > 0 && brotliQuality >= gzipQuality) {
-    return "br";
-  }
-  return gzipQuality > 0 ? "gzip" : null;
 }
 
 export function createBangShardResponse(

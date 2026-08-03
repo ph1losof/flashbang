@@ -5,9 +5,9 @@ import {
   parseBangShardPath,
 } from "../shared/bang-shard-pack";
 import {
+  acceptsBangShardContentEncoding,
   type BangShardContentEncoding,
   createBangShardResponse,
-  preferredBangShardContentEncoding,
 } from "./bang-shard";
 
 interface AssetFetcher {
@@ -41,7 +41,7 @@ function textResponse(body: string, status: number): Response {
 }
 
 interface WorkersResponseInit extends ResponseInit {
-  encodeBody: "automatic" | "manual";
+  encodeBody: "automatic";
 }
 
 function encodeForClient(
@@ -57,13 +57,9 @@ function encodeForClient(
   } else {
     headers.delete("Content-Encoding");
   }
-  const body =
-    encoding === "gzip" && response.body
-      ? response.body.pipeThrough(new CompressionStream("gzip"))
-      : response.body;
-  return new Response(body, {
+  return new Response(response.body, {
     headers,
-    encodeBody: encoding === "gzip" ? "manual" : "automatic",
+    encodeBody: "automatic",
   } as WorkersResponseInit);
 }
 
@@ -76,9 +72,12 @@ export async function handleCloudflareBangShard({
   if (!requested) {
     return textResponse("Not found", 404);
   }
-  const encoding = preferredBangShardContentEncoding(
-    request.headers.get("Accept-Encoding")
-  );
+  const encoding = acceptsBangShardContentEncoding(
+    request.headers.get("Accept-Encoding"),
+    "br"
+  )
+    ? "br"
+    : null;
 
   const cache = defaultEdgeCache();
   const cacheKey = new Request(request.url);

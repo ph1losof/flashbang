@@ -29,7 +29,7 @@ function parsePositiveInteger(value: string | undefined, fallback: number) {
 async function measure(url: string): Promise<Sample> {
   const started = performance.now();
   const response = await fetch(url, {
-    headers: { "Accept-Encoding": "br, gzip" },
+    headers: { "Accept-Encoding": "br" },
   });
   const body = await response.arrayBuffer();
   const milliseconds = performance.now() - started;
