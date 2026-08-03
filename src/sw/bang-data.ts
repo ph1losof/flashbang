@@ -89,7 +89,10 @@ function validateFinalLength(
   }
 }
 
-export function decodeBangData(buffer: ArrayBuffer): BangLookup {
+function decodeBangDataInternal(
+  buffer: ArrayBuffer,
+  validateGeneratedTables: boolean
+): BangLookup {
   const header = new Uint32Array(buffer, 0, HEADER_WORDS);
   if (header[0] !== MAGIC || header[1] !== VERSION) {
     throw new Error("Unsupported binary bang data");
@@ -132,9 +135,11 @@ export function decodeBangData(buffer: ArrayBuffer): BangLookup {
       ? new Int16Array(buffer, offset, bucketCount)
       : new Int32Array(buffer, offset, bucketCount);
   offset += displacements.byteLength;
-  for (const displacement of displacements) {
-    if (displacement < -entryCount) {
-      throw new Error("Invalid binary bang MPHF displacement");
+  if (validateGeneratedTables) {
+    for (const displacement of displacements) {
+      if (displacement < -entryCount) {
+        throw new Error("Invalid binary bang MPHF displacement");
+      }
     }
   }
   const fingerprints = new Uint16Array(buffer, offset, entryCount);
@@ -190,40 +195,43 @@ export function decodeBangData(buffer: ArrayBuffer): BangLookup {
   offset += header[15];
   const snapTriggerBlob = new Uint8Array(buffer, offset);
 
-  let previousSnapSlot = -1;
-  for (let i = 0; i < snapCount; i++) {
-    const slot = snapSlots[i];
-    if (
-      slot <= previousSnapSlot ||
-      slot >= entryCount ||
-      snapTargetIds[i] >= snapTargetCount
-    ) {
-      throw new Error("Invalid binary bang snap index");
+  if (validateGeneratedTables) {
+    let previousSnapSlot = -1;
+    for (let i = 0; i < snapCount; i++) {
+      const slot = snapSlots[i];
+      if (
+        slot <= previousSnapSlot ||
+        slot >= entryCount ||
+        snapTargetIds[i] >= snapTargetCount
+      ) {
+        throw new Error("Invalid binary bang snap index");
+      }
+      previousSnapSlot = slot;
     }
-    previousSnapSlot = slot;
-  }
-  let snapTargetBytes = 0;
-  for (const length of snapTargetLengths) {
-    snapTargetBytes += length;
-  }
-  if (snapTargetBytes !== snapTargetBlob.length) {
-    throw new Error("Invalid binary bang snap target lengths");
-  }
-  let snapTriggerBytes = 0;
-  for (const length of snapTriggerLengths) {
-    snapTriggerBytes += length;
-  }
-  if (snapTriggerBytes !== snapTriggerBlob.length) {
-    throw new Error("Invalid binary bang snap trigger lengths");
-  }
 
-  validateFinalLength(
-    prefixLengths,
-    prefixCheckpoints,
-    prefixBlob.length,
-    PREFIX_LENGTH_MASK
-  );
-  validateFinalLength(suffixLengths, suffixCheckpoints, suffixBlob.length);
+    let snapTargetBytes = 0;
+    for (const length of snapTargetLengths) {
+      snapTargetBytes += length;
+    }
+    if (snapTargetBytes !== snapTargetBlob.length) {
+      throw new Error("Invalid binary bang snap target lengths");
+    }
+    let snapTriggerBytes = 0;
+    for (const length of snapTriggerLengths) {
+      snapTriggerBytes += length;
+    }
+    if (snapTriggerBytes !== snapTriggerBlob.length) {
+      throw new Error("Invalid binary bang snap trigger lengths");
+    }
+
+    validateFinalLength(
+      prefixLengths,
+      prefixCheckpoints,
+      prefixBlob.length,
+      PREFIX_LENGTH_MASK
+    );
+    validateFinalLength(suffixLengths, suffixCheckpoints, suffixBlob.length);
+  }
 
   const prefixCache: string[] = [];
   const suffixCache: string[] = [];
@@ -363,6 +371,14 @@ export function decodeBangData(buffer: ArrayBuffer): BangLookup {
   };
 }
 
+export function decodeBangData(buffer: ArrayBuffer): BangLookup {
+  return decodeBangDataInternal(buffer, true);
+}
+
+function decodeTrustedGeneratedBangData(buffer: ArrayBuffer): BangLookup {
+  return decodeBangDataInternal(buffer, false);
+}
+
 export function createBangShardRuntime(
   router: ArrayLike<number>,
   version: string
@@ -415,7 +431,7 @@ export function createBangShardRuntime(
             )
       )
         .then((buffer) => {
-          lookups[shardId] = decodeBangData(buffer);
+          lookups[shardId] = decodeTrustedGeneratedBangData(buffer);
         })
         .catch((error) => {
           promises[shardId] = null;

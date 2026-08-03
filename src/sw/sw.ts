@@ -324,8 +324,7 @@ async function loadBangData(): Promise<void> {
   const cache = await caches.open(CACHE_NAME);
   let response = await cache.match(request);
   if (!response) {
-    const seedCache = await caches.open(SEED_CACHE_NAME);
-    response = await seedCache.match(request);
+    response = await caches.match(request, { cacheName: SEED_CACHE_NAME });
     if (response) {
       await caches.delete(SEED_CACHE_NAME);
     }
@@ -411,6 +410,13 @@ function warmRuntime(): Promise<void> {
     runtimeWarmPromise = current;
   }
   return runtimeWarmPromise;
+}
+
+function warmRuntimeAfterResponse(e: FetchEvent): void {
+  const warming = new Promise<void>((resolve) => {
+    setTimeout(resolve, 0);
+  }).then(warmRuntime);
+  e.waitUntil(warming);
 }
 
 async function precacheAssets(
@@ -577,13 +583,31 @@ export function handleInstall(e: ExtendableEvent): void {
 }
 
 export function handleActivate(e: ExtendableEvent): void {
+  const hasRuntimeHandoff = caches
+    .keys()
+    .then((cacheNames) => cacheNames.includes(SEED_CACHE_NAME))
+    .catch(() => false);
+  const activation = queueHotBootMutation(async () => {
+    await disableHotBoot();
+    await publishHotBoot();
+  })
+    .catch(swallowError)
+    .then(() => self.clients.claim());
   e.waitUntil(
-    queueHotBootMutation(async () => {
-      await disableHotBoot();
-      await publishHotBoot();
-    })
+    Promise.all([activation, hasRuntimeHandoff])
+      .then(async ([, shouldWarm]) => {
+        if (!shouldWarm) {
+          return;
+        }
+        // Let the page initiate its redirect before the catalog competes for
+        // bandwidth. waitUntil keeps this activation alive until it is cached.
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 0);
+        });
+        await warmRuntime();
+        await caches.delete(SEED_CACHE_NAME);
+      })
       .catch(swallowError)
-      .then(() => self.clients.claim())
   );
 }
 
@@ -835,7 +859,10 @@ async function respondFromColdShard(
     const snapMarker = String.fromCharCode((settings.syntax?.[1] ?? 64) & 0xff);
     const shardIds = new Set(
       extractBangShardTriggers(query, bangMarker, snapMarker)
-        .filter((trigger) => !lookupGeneratedHotBang(trigger))
+        .filter(
+          (trigger) =>
+            !(settings.custom[trigger] || lookupGeneratedHotBang(trigger))
+        )
         .map((trigger) =>
           bangShardIndex(hashFNV1a(trigger), BANG_SHARD_ROUTER!)
         )
@@ -849,6 +876,19 @@ async function respondFromColdShard(
     // The canonical parser below remains authoritative for malformed input.
   }
   configureBangFallbackLookup(runtime.lookup);
+  if (candidateShardsReady) {
+    try {
+      await candidateShardsReady;
+    } catch {
+      try {
+        await bangDataReady;
+      } catch {
+        return null;
+      }
+    }
+  }
+  // The loop is only a correctness guard for syntax the lightweight preloader
+  // deliberately does not recognize. Generated bang and snap forms parse once.
   for (let attempt = 0; attempt <= BANG_SHARD_COUNT; attempt++) {
     try {
       return respondToRedirect(e, rawQuery, settings, hotBangLookup);
@@ -895,16 +935,19 @@ function responseForQuery(
       const settings = hotBoot?.settings;
       try {
         if (settings) {
-          return respondToRedirect(
+          const response = respondToRedirect(
             e,
             rawQuery,
             settings,
             hotBoot.hotBangLookup
           );
+          warmRuntimeAfterResponse(e);
+          return response;
         }
         if (hotBoot?.compactSettings) {
           const response = respondToCompactHotBang(e, rawQuery, hotBoot);
           if (response) {
+            warmRuntimeAfterResponse(e);
             return response;
           }
         }

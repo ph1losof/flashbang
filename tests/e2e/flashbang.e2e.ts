@@ -1466,6 +1466,12 @@ test("newly activated worker redirects from a shard while the full catalog warms
   const fullCatalogGate = new Promise<void>((resolve) => {
     releaseFullCatalog = resolve;
   });
+  let finishFullCatalog = () => {
+    // Replaced by the request-finished gate below.
+  };
+  const fullCatalogFinished = new Promise<void>((resolve) => {
+    finishFullCatalog = resolve;
+  });
   try {
     let fullCatalogStarted = false;
     const shardRequests: string[] = [];
@@ -1482,6 +1488,11 @@ test("newly activated worker redirects from a shard while the full catalog warms
       const pathname = new URL(request.url()).pathname;
       if (/^\/bangs-s[0-9a-z]+-[a-f0-9]{12}\.bin$/.test(pathname)) {
         shardRequests.push(pathname);
+      }
+    });
+    context.on("requestfinished", (request) => {
+      if (/\/bangs-[a-f0-9]{12}\.bin$/.test(new URL(request.url()).pathname)) {
+        finishFullCatalog();
       }
     });
 
@@ -1516,9 +1527,53 @@ test("newly activated worker redirects from a shard while the full catalog warms
       "/?q=%21github%20race",
       /github\.com\/search\?q=race/
     );
-    expect(fullCatalogStarted).toBe(true);
+    if (browserName === "firefox") {
+      // Playwright does not expose Firefox service-worker fetches to request
+      // routing, so verify the durable result instead of the blocked ordering.
+      releaseFullCatalog();
+      const settlingPage = await context.newPage();
+      await settlingPage.goto("/health", { waitUntil: "domcontentloaded" });
+      await expect
+        .poll(() =>
+          settlingPage.evaluate(async () => {
+            for (const cacheName of await caches.keys()) {
+              for (const request of await (
+                await caches.open(cacheName)
+              ).keys()) {
+                if (/\/bangs-[a-f0-9]{12}\.bin$/.test(request.url)) {
+                  return true;
+                }
+              }
+            }
+            return false;
+          })
+        )
+        .toBe(true);
+      await settlingPage.close();
+      return;
+    }
+    await expect.poll(() => fullCatalogStarted).toBe(true);
     expect(shardRequests).toHaveLength(1);
     expect(fullCatalogReleased).toBe(false);
+    releaseFullCatalog();
+    await fullCatalogFinished;
+    const settlingPage = await context.newPage();
+    await settlingPage.goto("/health", { waitUntil: "domcontentloaded" });
+    await expect
+      .poll(() =>
+        settlingPage.evaluate(async () => {
+          for (const cacheName of await caches.keys()) {
+            for (const request of await (await caches.open(cacheName)).keys()) {
+              if (/\/bangs-[a-f0-9]{12}\.bin$/.test(request.url)) {
+                return true;
+              }
+            }
+          }
+          return false;
+        })
+      )
+      .toBe(true);
+    await settlingPage.close();
   } finally {
     releaseFullCatalog();
     await context.close();
@@ -1805,16 +1860,28 @@ test("fresh snap-chain shards start concurrently", async ({ browser }) => {
   }
 });
 
-test("first hot redirect does not wait for the full bang catalog", async ({
+test("first hot redirect warms the full catalog without waiting", async ({
   browser,
   browserName,
 }) => {
   skipWebKitServiceWorker(browserName);
   const context = await browser.newContext();
+  let releaseFullCatalog = () => {
+    // Replaced by the gate constructor below.
+  };
+  const fullCatalogGate = new Promise<void>((resolve) => {
+    releaseFullCatalog = resolve;
+  });
+  let fullCatalogReleased = false;
   try {
     const page = await context.newPage();
     await mockGoogleSearchRoute(page);
     const bangDataRequests: string[] = [];
+    await context.route(/\/bangs-[a-f0-9]{12}\.bin$/, async (route) => {
+      await fullCatalogGate;
+      fullCatalogReleased = true;
+      await route.continue();
+    });
     context.on("request", (request) => {
       const pathname = new URL(request.url()).pathname;
       if (
@@ -1827,8 +1894,54 @@ test("first hot redirect does not wait for the full bang catalog", async ({
 
     await page.goto("/health", { waitUntil: "domcontentloaded" });
     await navigateAndWaitForRedirect(page, "/?q=%21g%20hello", GOOGLE_REDIRECT);
-    expect(bangDataRequests).toHaveLength(0);
+    if (browserName === "firefox") {
+      // Firefox service-worker requests are not observable through Playwright's
+      // routing hooks; Cache Storage still verifies completion and persistence.
+      releaseFullCatalog();
+      const settlingPage = await context.newPage();
+      await settlingPage.goto("/health", { waitUntil: "domcontentloaded" });
+      await expect
+        .poll(() =>
+          settlingPage.evaluate(async () => {
+            for (const cacheName of await caches.keys()) {
+              for (const request of await (
+                await caches.open(cacheName)
+              ).keys()) {
+                if (/\/bangs-[a-f0-9]{12}\.bin$/.test(request.url)) {
+                  return true;
+                }
+              }
+            }
+            return false;
+          })
+        )
+        .toBe(true);
+      await settlingPage.close();
+      return;
+    }
+    await expect.poll(() => bangDataRequests.length).toBe(1);
+    expect(fullCatalogReleased).toBe(false);
+
+    releaseFullCatalog();
+    const settlingPage = await context.newPage();
+    await settlingPage.goto("/health", { waitUntil: "domcontentloaded" });
+    await expect
+      .poll(() =>
+        settlingPage.evaluate(async () => {
+          for (const cacheName of await caches.keys()) {
+            for (const request of await (await caches.open(cacheName)).keys()) {
+              if (/\/bangs-[a-f0-9]{12}\.bin$/.test(request.url)) {
+                return true;
+              }
+            }
+          }
+          return false;
+        })
+      )
+      .toBe(true);
+    await settlingPage.close();
   } finally {
+    releaseFullCatalog();
     await context.close();
   }
 });

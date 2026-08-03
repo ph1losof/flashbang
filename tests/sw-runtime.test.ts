@@ -147,10 +147,13 @@ function setupSwGlobals(
     keys() {
       return Promise.resolve([...cacheEntries.keys()]);
     },
-    match(request: RequestInfo | URL) {
+    match(request: RequestInfo | URL, options?: MultiCacheQueryOptions) {
       const url = requestUrl(request);
-      for (const entries of cacheEntries.values()) {
-        const response = entries.get(url);
+      const candidates = options?.cacheName
+        ? [cacheEntries.get(options.cacheName)]
+        : cacheEntries.values();
+      for (const entries of candidates) {
+        const response = entries?.get(url);
         if (response) {
           return Promise.resolve(response.clone());
         }
@@ -518,6 +521,65 @@ describe("sw runtime with real modules", () => {
 
     expect(fetchCalls).toContain("/bangs.bin");
     expect(cachePutCalls).toContain("/bangs.bin");
+  });
+
+  test("activation consumes a query warm intent and persists the catalog", async () => {
+    resetBangDataForTests();
+    await loadSwRuntime();
+    await caches.open("flashbang-seed-handoff");
+    const bangData = await Bun.file("src/generated/bangs.bin").arrayBuffer();
+    fetchImpl = () => Promise.resolve(new Response(bangData));
+
+    const activateEvt = createExtendableEvent();
+    await handlers.activate?.(activateEvt.event);
+    await Promise.all(activateEvt.waits);
+
+    expect(claimCalls).toBe(1);
+    expect(fetchCalls).toContain("/bangs.bin");
+    expect(cachePutCalls).toContain("/bangs.bin");
+    expect(cacheDeleteCalls).toContain("flashbang-seed-handoff");
+  });
+
+  test("hot redirect responds before its background catalog warm finishes", async () => {
+    const state: NavigationPreloadState = {
+      enabled: false,
+      headerValue: "true",
+    };
+    await loadSwRuntime([], false, state);
+    const activateEvt = createExtendableEvent();
+    await handlers.activate?.(activateEvt.event);
+    await Promise.all(activateEvt.waits);
+    resetBangDataForTests();
+
+    const bangData = await Bun.file("src/generated/bangs.bin").arrayBuffer();
+    let finishCatalog = (_response: Response) => {
+      // Replaced by the blocked fetch below.
+    };
+    const blockedCatalog = new Promise<Response>((resolve) => {
+      finishCatalog = resolve;
+    });
+    fetchImpl = (input) =>
+      new URL(requestUrl(input)).pathname === "/bangs.bin"
+        ? blockedCatalog
+        : Promise.resolve(new Response("ok"));
+
+    const fetchEvt = createFetchEvent(
+      "https://flashbang.local/?q=!g+immediate",
+      "",
+      "navigate"
+    );
+    await handlers.fetch?.(fetchEvt.event);
+    const response = await fetchEvt.response();
+
+    expect(response.headers.get("Location")).toContain("google.com");
+    expect(cachePutCalls).not.toContain("/bangs.bin");
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(fetchCalls).toContain("/bangs.bin");
+
+    finishCatalog(new Response(bangData));
+    await Promise.all(fetchEvt.waits);
+    expect(cachePutCalls).toContain("/bangs.bin");
+    expect(cacheEntries.has("flashbang-seed-handoff")).toBe(false);
   });
 
   test("seeds bang data and redirect settings without a worker fetch", async () => {

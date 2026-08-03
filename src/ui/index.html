@@ -27,6 +27,13 @@
         privateQuery ||
         (hasQuery && new URLSearchParams(location.search).get("q"));
       let workerRegistrationPromise = null;
+      const markWorkerWarmIntent = () =>
+        "serviceWorker" in navigator && "caches" in globalThis
+          ? caches
+              .open("__SEED_CACHE_NAME__")
+              .then(() => undefined)
+              .catch(() => undefined)
+          : Promise.resolve();
       const registerWorker = () => {
         if (
           !("serviceWorker" in navigator) ||
@@ -34,9 +41,11 @@
         ) {
           return null;
         }
-        workerRegistrationPromise ||= navigator.serviceWorker
-          .register("/sw.js")
-          .catch(() => null);
+        if (!workerRegistrationPromise) {
+          workerRegistrationPromise = navigator.serviceWorker
+            .register("/sw.js")
+            .catch(() => null);
+        }
         return workerRegistrationPromise;
       };
 
@@ -139,35 +148,6 @@
         }
       };
 
-      const activatedWorker = async (registrationPromise) => {
-        const registration = await registrationPromise;
-        if (!registration) {
-          return null;
-        }
-        const worker =
-          registration.active ||
-          registration.waiting ||
-          registration.installing;
-        if (!worker || worker.state === "redundant") {
-          return null;
-        }
-        while (worker.state !== "activated" && worker.state !== "redundant") {
-          await new Promise((resolve) => {
-            worker.addEventListener("statechange", resolve, { once: true });
-          });
-        }
-        return worker.state === "activated" ? worker : null;
-      };
-
-      const warmWorker = async (workerPromise) => {
-        const worker = await workerPromise;
-        try {
-          worker?.postMessage({ type: "warm-runtime" });
-        } catch {
-          // Background warming must never prevent the resolved navigation.
-        }
-      };
-
       const showFallbackError = () => {
         document.body.textContent =
           "Flashbang could not resolve this query. Reload the page or enable Service Workers.";
@@ -176,7 +156,8 @@
       const runRichFallback = (
         needsCatalog,
         prefetchedData,
-        registrationPromise
+        registrationPromise,
+        redirect
       ) =>
         import("__FALLBACK_ASSET__")
           .then(async ({ resolveFallback, resolveHotFallback }) => {
@@ -186,7 +167,7 @@
                 privateQuery !== null
               );
               if (hot) {
-                location.replace(hot.url);
+                await redirect(hot.url);
                 return;
               }
             }
@@ -197,7 +178,7 @@
               privateQuery !== null
             );
             await seedWorker(data, settings, registrationPromise);
-            location.replace(url);
+            await redirect(url);
           })
           .catch(showFallbackError);
 
@@ -211,8 +192,17 @@
           location.replace("/home");
           return;
         }
-        const registrationPromise = registerWorker();
-        const workerPromise = activatedWorker(registrationPromise);
+        const warmIntentPromise = markWorkerWarmIntent();
+        const registrationPromise = warmIntentPromise.then(() =>
+          registerWorker()
+        );
+        const redirect = async (url) => {
+          await warmIntentPromise;
+          // Invoke register before leaving even if its earlier continuation has
+          // not run yet. The registration and catalog remain background work.
+          registerWorker();
+          location.replace(url);
+        };
         const needsCatalog = shouldPrefetchBangData(query);
         const prefetchedData = loadColdBangData(query);
         import("__COLD_FALLBACK_ASSET__")
@@ -226,14 +216,12 @@
               runRichFallback(
                 needsCatalog,
                 needsCatalog ? loadBangData() : null,
-                registrationPromise
+                registrationPromise,
+                redirect
               );
               return;
             }
-            if (needsCatalog) {
-              await warmWorker(workerPromise);
-            }
-            location.replace(result.url);
+            await redirect(result.url);
           })
           .catch(showFallbackError);
       };
