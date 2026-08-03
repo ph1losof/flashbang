@@ -118,8 +118,10 @@ function isMediaWikiCandidate(bang: Bang): boolean {
     name.includes("wiki") ||
     url.includes("/wiki/") ||
     url.includes("special:search") ||
-    domain.endsWith("fandom.com") ||
-    domain.endsWith("wikia.com")
+    domain === "fandom.com" ||
+    domain.endsWith(".fandom.com") ||
+    domain === "wikia.com" ||
+    domain.endsWith(".wikia.com")
   );
 }
 
