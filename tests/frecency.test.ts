@@ -43,6 +43,7 @@ describe("frecency top-k helpers", () => {
       { trigger: "yt", count: 5 },
       { trigger: "npm", count: 3 },
     ]);
+    expect(buildTopFrecency({ g: 1 }, 0)).toEqual([]);
   });
 
   test("updateTopFrecencyOnIncrement inserts and reorders incrementally", () => {

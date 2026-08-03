@@ -7,6 +7,7 @@ production = false
 save = true
 
 [test]
+preload = ["./tests/helpers/preload.ts"]
 coveragePathIgnorePatterns = [
   "scripts/**",
   "tests/**",

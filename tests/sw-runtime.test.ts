@@ -23,6 +23,7 @@ import {
 } from "../src/sw/sw";
 import { loadTestBangData } from "./helpers/bang-data";
 import { installFakeIndexedDb } from "./helpers/fake-indexeddb";
+import { TEST_BANG_SHARDS } from "./helpers/preload";
 import {
   redirectSettings,
   redirectSettingsSnapshot,
@@ -582,6 +583,62 @@ describe("sw runtime with real modules", () => {
     expect(cacheEntries.has("flashbang-seed-handoff")).toBe(false);
   });
 
+  test("cold worker retries the canonical redirect from an exact shard", async () => {
+    const state: NavigationPreloadState = {
+      enabled: false,
+      headerValue: "true",
+    };
+    await loadSwRuntime([], false, state);
+    const activate = createExtendableEvent();
+    await handlers.activate?.(activate.event);
+    await Promise.all(activate.waits);
+    resetBangDataForTests();
+
+    const bangData = await Bun.file("src/generated/bangs.bin").arrayBuffer();
+    let finishCatalog = (_response: Response) => {
+      // Replaced by the blocked fetch below.
+    };
+    const blockedCatalog = new Promise<Response>((resolve) => {
+      finishCatalog = resolve;
+    });
+    fetchImpl = (input) => {
+      const path = new URL(requestUrl(input)).pathname;
+      if (path === "/bangs.bin") {
+        return blockedCatalog;
+      }
+      const shardMatch = /^\/bangs-s([0-9a-z]+)-test\.bin$/.exec(path);
+      if (shardMatch) {
+        const shard = TEST_BANG_SHARDS[Number.parseInt(shardMatch[1], 36)];
+        const body = shard.buffer.slice(
+          shard.byteOffset,
+          shard.byteOffset + shard.byteLength
+        ) as ArrayBuffer;
+        return Promise.resolve(new Response(body));
+      }
+      return Promise.resolve(new Response("ok"));
+    };
+
+    // A leading bang takes the optimized path: extract its trigger, preload
+    // the routed shard, then invoke the canonical parser only once.
+    const fetchEvt = createFetchEvent(
+      "https://flashbang.local/?q=!hn+coverage",
+      "",
+      "navigate"
+    );
+    await handlers.fetch?.(fetchEvt.event);
+    const response = await fetchEvt.response();
+
+    expect(response.headers.get("Location")).toContain("hn.algolia.com");
+    expect(
+      fetchCalls.filter((path) => path.startsWith("/bangs-s"))
+    ).toHaveLength(1);
+    expect(cachePutCalls).not.toContain("/bangs.bin");
+
+    finishCatalog(new Response(bangData));
+    await Promise.all(fetchEvt.waits);
+    expect(cachePutCalls).toContain("/bangs.bin");
+  });
+
   test("seeds bang data and redirect settings without a worker fetch", async () => {
     await loadSwRuntime();
     const bangData = await Bun.file("src/generated/bangs.bin").arrayBuffer();
@@ -687,6 +744,22 @@ describe("sw runtime with real modules", () => {
     await handlers.fetch?.(health.event);
     expect(health.waits).toHaveLength(0);
     expect(fetchCalls).toEqual([]);
+  });
+
+  test("ignores development-only requests before starting worker work", async () => {
+    await loadSwRuntime();
+    (globalThis as unknown as Record<string, unknown>).__IS_DEV__ = true;
+    try {
+      const devRequest = createFetchEvent(
+        "https://flashbang.local/__dev/reload"
+      );
+      await handlers.fetch?.(devRequest.event);
+      expect(devRequest.waits).toHaveLength(0);
+      expect(() => devRequest.response()).toThrow("respondWith was not called");
+      expect(fetchCalls).toEqual([]);
+    } finally {
+      (globalThis as unknown as Record<string, unknown>).__IS_DEV__ = false;
+    }
   });
 
   test("shares one runtime warm operation across concurrent asset requests", async () => {

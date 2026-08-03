@@ -202,9 +202,34 @@ describe("codegen round-trip", () => {
       ) as ArrayBuffer
     );
     expect(runtime.lookup(trigger, hash)?.[0]).toContain("github.com");
+    await runtime.ensure(shardId);
 
     runtime.reset();
     expect(() => runtime.lookup(trigger, hash)).toThrow();
+  });
+
+  test("retries a shard after a failed network response", async () => {
+    const runtime = createBangShardRuntime(new Uint8Array(256), "missing");
+    const globals = globalThis as unknown as {
+      fetch: (input: RequestInfo | URL) => Promise<Response>;
+    };
+    const originalFetch = globals.fetch;
+    let attempts = 0;
+    globals.fetch = () => {
+      attempts++;
+      return Promise.resolve(new Response(null, { status: 503 }));
+    };
+    try {
+      await expect(runtime.ensure(0)).rejects.toThrow(
+        "Failed to load bang shard: 503"
+      );
+      await expect(runtime.ensure(0)).rejects.toThrow(
+        "Failed to load bang shard: 503"
+      );
+    } finally {
+      globals.fetch = originalFetch;
+    }
+    expect(attempts).toBe(2);
   });
 
   test("rejects sampled unknown triggers with fingerprint verification", () => {

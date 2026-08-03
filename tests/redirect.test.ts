@@ -12,6 +12,7 @@ import {
   redirectRaw as redirectRawTuple,
   redirectUrl,
 } from "../src/sw/redirect";
+import { compileTriggerMarker, markerWidthAt } from "../src/sw/redirect-prefix";
 import { loadTestBangData } from "./helpers/bang-data";
 import {
   DEFAULT_LUCKY_URL,
@@ -70,6 +71,15 @@ function expectRedirect(r: Response, location: string): void {
   expect(r.status).toBe(302);
   expect(loc(r)).toBe(location);
 }
+
+test("markerWidthAt recognizes literal and percent-encoded trigger markers", () => {
+  const marker = compileTriggerMarker("!".charCodeAt(0));
+  expect(markerWidthAt("!g", 0, 2, marker)).toBe(1);
+  expect(markerWidthAt("%21g", 0, 4, marker)).toBe(3);
+  expect(markerWidthAt("%2", 0, 2, marker)).toBe(0);
+  expect(markerWidthAt("g", 0, 1, marker)).toBe(0);
+  expect(markerWidthAt("%40g", 0, 4, marker)).toBe(0);
+});
 
 describe("parse — bang syntax patterns", () => {
   test('"!g cats" → prefix bang with term', () => {
