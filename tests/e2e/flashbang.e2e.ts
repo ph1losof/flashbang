@@ -578,8 +578,9 @@ test("compact address-bar setup exposes browser instructions and copyable URLs",
     `${new URL(page.url()).origin}?q=%s`
   );
   const baseSuggestUrl = `${new URL(page.url()).origin}/suggest?q=%s`;
+  const firefoxSuggestUrl = `${baseSuggestUrl}&sp=google&site_specific_forward=1`;
   await expect(page.locator("#setup-suggest-url")).toHaveValue(
-    browserName === "firefox" ? `${baseSuggestUrl}&sp=google` : baseSuggestUrl
+    browserName === "firefox" ? firefoxSuggestUrl : baseSuggestUrl
   );
   const expectedBrowser = {
     chromium: {
@@ -654,7 +655,7 @@ test("compact address-bar setup exposes browser instructions and copyable URLs",
     "setup-browser-tab-firefox"
   );
   await expect(page.locator("#setup-suggest-url")).toHaveValue(
-    `${baseSuggestUrl}&sp=google`
+    firefoxSuggestUrl
   );
 
   await page.click("#copy-search-url");
