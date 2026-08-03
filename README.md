@@ -261,15 +261,32 @@ An optional snap target such as `docs.example.com/api` makes `@mybang query` sea
 The redirect path is deliberately separate from the website UI and from the suggestion server:
 
 ```mermaid
-flowchart LR
-    address[Address bar navigation] --> worker[Service Worker fetch handler]
-    worker --> parser[Raw query parser]
-    parser --> custom{Custom bang?}
-    custom -->|Yes| redirect[302 redirect]
-    custom -->|No| builtin[Packed built-in lookup]
-    builtin --> redirect
-    redirect -. waitUntil .-> sideEffects[Frecency and persistence]
+flowchart TB
+    address[Address-bar ?q= navigation] --> controlled{Controlled by the Service Worker?}
+
+    controlled -->|Yes| worker[Service Worker fetch handler]
+    worker --> fast[Live runtime or persisted hot boot]
+    fast --> resolver[Canonical raw parser and redirect resolver]
+    resolver -->|Hot-boot miss| storage[Packed catalog from cache or network and IndexedDB settings]
+    storage --> resolver
+    resolver --> response[302 destination redirect]
+    response -. after response .-> sideEffects[waitUntil: frecency and deferred persistence]
+
+    controlled -->|No| page[Minimal page fallback]
+    page --> cold[Cold resolver module and generated hot table]
+    page -. prefetch for a non-hot bang .-> shard[Deterministic catalog shard]
+    cold -->|Generated hot bang| clientRedirect[location.replace destination]
+    cold -->|Other fresh-profile bang| shard
+    shard --> clientRedirect
+    cold -->|Existing profile or unsupported cold path| fullFallback[Full page fallback: catalog and IndexedDB]
+    fullFallback --> clientRedirect
+
+    page -. in parallel .-> registration[Register Service Worker]
+    fullFallback -. hand off catalog and settings .-> registration
+    registration -. after activation .-> later[Control later Flashbang navigations]
 ```
+
+Installed profiles stay on the upper path and redirect without rendering Flashbang. A first or otherwise uncontrolled navigation uses the minimal page path while Service Worker registration proceeds independently; it does not wait for installation before redirecting. The private `#q=` path differs slightly and is described below.
 
 ### Redirect before render
 
@@ -293,7 +310,7 @@ For the redirect index, codegen splits every URL template around its query place
 
 Service Workers can be stopped whenever the browser considers them idle, so in-memory state cannot be assumed to survive. The full binary index is cached in Cache Storage, while settings, custom bangs, and compact frecency snapshots live in IndexedDB.
 
-Flashbang also keeps a compact **hot-boot record** in the Service Worker's persisted navigation-preload configuration while leaving navigation preload itself disabled. That record can contain redirect settings and the user's top frecent bang URLs. Together with the generated hot-bang table, it lets a newly started worker answer common navigations before IndexedDB and the full binary catalog have finished loading. A miss falls through to the cached full index, so this optimization never changes redirect semantics. Browsers without the required API simply use the normal cache and IndexedDB path.
+Flashbang also keeps a compact **hot-boot record** in the Service Worker's persisted navigation-preload configuration while leaving navigation preload itself disabled. That record can contain redirect settings and the user's top frecent bang URLs. Together with the generated hot-bang table, it lets a newly started worker answer common navigations before IndexedDB and the full binary catalog have finished loading. A miss falls through to the full index, preferring Cache Storage and caching a network response when necessary, so this optimization never changes redirect semantics. Browsers without the required API simply use the normal cache and IndexedDB path.
 
 ### No storage work on the response path
 
@@ -411,7 +428,7 @@ Flashbang works differently. A [Service Worker](https://developer.mozilla.org/en
 
 Unduckified now uses the same broad warm-path architecture: an installed Service Worker, a packed binary catalog, and a page fallback for the first uncontrolled navigation. Its steady-state redirect time is therefore comparable to Flashbang's. The restart path is different: Unduckified rebuilds its in-memory lookup from the full cached catalog, while Flashbang's persisted hot-boot record and generated hot-bang table can answer common searches before its full runtime is ready. Flashbang also has a larger merged catalog, codegen-validated 16-bit trigger fingerprints, a configurable parser, snaps and snap chains, advanced custom bangs, private fragment mode, and frecency-aware suggestions.
 
-For a first-ever search, Flashbang starts its cold resolver module (~7.4 KiB transferred / ~20.5 KiB decoded). Generated hot bangs such as `!gh` resolve from the module's embedded table without fetching a catalog shard. Other built-ins such as `!github` start a deterministic routed shard in parallel with the module; across the current deployed 43-shard catalog, each shard is ~6.9–7.8 KiB transferred / ~13.8–15.8 KiB decoded (`!github`: ~7.7 KiB / ~15.4 KiB). Flashbang redirects as soon as the required state resolves while Service Worker registration proceeds independently; after activation, the worker caches and initializes the complete catalog for later local and offline redirects.
+For a first-ever search, Flashbang starts its cold resolver module (~7.4 KiB transferred / ~20.5 KiB decoded). Generated hot bangs such as `!gh` resolve from the module's embedded table without fetching a catalog shard. Other built-ins such as `!github` start a deterministic routed shard in parallel with the module; across the current deployed 43-shard catalog, each shard is ~6.9–7.8 KiB transferred / ~13.8–15.8 KiB decoded (`!github`: ~7.7 KiB / ~15.4 KiB). Flashbang redirects as soon as the required state resolves while Service Worker registration proceeds independently. Activation establishes the persisted hot-boot state and control of later Flashbang navigations; the worker loads and caches the complete catalog on the first lookup that cannot be answered by hot state. A rich page fallback can instead hand its already-loaded catalog and settings to the installing worker.
 
 The new-profile benchmark is therefore network-sensitive end to end: it includes initial document delivery, first-page fallback execution, cold-module loading, any required shard transfer and decoding, and the outbound redirect. Worker installation starts concurrently but is not awaited. The current campaign favored Flashbang for both the hot `!gh` query and full-catalog `!github` alias. Unduckified publishes the runner and methodology for its earlier cold `p < 0.001` claim, but not that run's raw samples or environment, so the exact claim cannot be independently reproduced from published artifacts.
 
