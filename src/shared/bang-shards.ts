@@ -1,5 +1,7 @@
-// The measured size/latency knee for the current packed catalog. This is
-// deliberately data-specific and need not be a power of two.
+// The measured size/latency knee for the current packed catalog. Data-specific;
+// need not be a power of two. 64 would cut the cold shard ~30% and a daily delta
+// ~33% at no cost in index bytes, but every shard is fetched after the first
+// redirect for offline coverage, so 43 buys 21 fewer requests instead.
 export const BANG_SHARD_COUNT = 43;
 export const BANG_SHARD_ROUTER_SIZE = 256;
 

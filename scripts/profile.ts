@@ -10,7 +10,7 @@ import type { RedirectSettings } from "../src/sw/redirect";
 import { decodeBangCatalog } from "../src/ui/bang-catalog";
 import { ensureGeneratedBangData, GENERATED_BANG_DATA_FILES } from "./codegen";
 
-const [binaryPath, sparsePath, metaPath, trieLoaderPath, , trieBinaryPath] =
+const [binaryPath, , , sparsePath, metaPath, trieLoaderPath, , trieBinaryPath] =
   GENERATED_BANG_DATA_FILES;
 
 interface ProfileOptions {

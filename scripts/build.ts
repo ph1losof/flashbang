@@ -7,7 +7,8 @@ import {
   pageHeaders,
   SW_CSP,
 } from "../src/server/headers";
-import { ensureGeneratedBangData, generateBinaryShards } from "./codegen";
+import { loadStringIdMap } from "./bang-strings-build";
+import { ensureGeneratedBangData, generateCatalog } from "./codegen";
 import { extractInlineScriptHashes } from "./inline-script-hash";
 import {
   assembleUIAssets,
@@ -110,7 +111,9 @@ export async function bundleServiceWorker(
   bangDataAsset: string,
   fallbackAsset: string,
   bangShardRouter: ArrayLike<number> = [],
-  bangShardVersion = ""
+  bangShardAssets: readonly string[] = [],
+  bangIndexAssets: readonly string[] = [],
+  bangStoreAssets: readonly string[] = []
 ): Promise<void> {
   const result = await Bun.build({
     entrypoints: ["src/sw/sw.ts"],
@@ -122,7 +125,9 @@ export async function bundleServiceWorker(
     define: {
       __BANG_DATA_ASSET__: JSON.stringify(bangDataAsset),
       __BANG_SHARD_ROUTER__: JSON.stringify(Array.from(bangShardRouter)),
-      __BANG_SHARD_VERSION__: JSON.stringify(bangShardVersion),
+      __BANG_SHARD_ASSETS__: JSON.stringify(bangShardAssets),
+      __BANG_INDEX_ASSETS__: JSON.stringify(bangIndexAssets),
+      __BANG_STORE_ASSETS__: JSON.stringify(bangStoreAssets),
       __FALLBACK_ASSET__: JSON.stringify(fallbackAsset),
       __CACHE_VERSION__: JSON.stringify(cacheVersion),
       __REQUIRED_APP_ASSETS__: JSON.stringify(requiredAppAssets),
@@ -173,22 +178,37 @@ export async function main(): Promise<void> {
     .slice(0, 12);
   const bangDataAsset = `/bangs-${bangDataHash}.bin`;
   await Bun.write(`${DIST_DIR}${bangDataAsset}`, bangDataBytes);
-  const { router: bangShardRouter, shards: bangShardBytes } =
-    generateBinaryShards(await Bun.file("data/bangs.json").json());
-  const bangShardHash = createHash("sha256").update(bangShardRouter);
-  for (const bytes of bangShardBytes) {
-    bangShardHash.update(`${bytes.byteLength}:`);
-    bangShardHash.update(bytes);
-  }
-  const bangShardVersion = bangShardHash.digest("hex").slice(0, 12);
-  const bangShardAssets = bangShardBytes.map(
-    (_, shard) => `/bangs-s${shard.toString(36)}-${bangShardVersion}.bin`
+  const catalog = generateCatalog(
+    await Bun.file("data/bangs.json").json(),
+    loadStringIdMap()
   );
-  await Promise.all(
-    bangShardBytes.map((bytes, shard) =>
+  const bangShardRouter = catalog.router;
+  // Per-shard content hash, so only the shards whose bytes changed get a new
+  // URL. A version shared across shards rotates all 43 on any catalog change.
+  const contentAsset = (bytes: Uint8Array, name: string): string => {
+    const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 12);
+    return `/${name}-${hash}.bin`;
+  };
+  const bangShardAssets = catalog.cold.map((bytes, shard) =>
+    contentAsset(bytes, `bangs-s${shard.toString(36)}`)
+  );
+  const bangIndexAssets = catalog.index.map((bytes, shard) =>
+    contentAsset(bytes, `bangs-i${shard.toString(36)}`)
+  );
+  const bangStoreAssets = [
+    contentAsset(catalog.storeBase, "bangs-str"),
+    contentAsset(catalog.storeTail, "bangs-str"),
+  ];
+  await Promise.all([
+    ...catalog.cold.map((bytes, shard) =>
       Bun.write(`${DIST_DIR}${bangShardAssets[shard]}`, bytes)
-    )
-  );
+    ),
+    ...catalog.index.map((bytes, shard) =>
+      Bun.write(`${DIST_DIR}${bangIndexAssets[shard]}`, bytes)
+    ),
+    Bun.write(`${DIST_DIR}${bangStoreAssets[0]}`, catalog.storeBase),
+    Bun.write(`${DIST_DIR}${bangStoreAssets[1]}`, catalog.storeTail),
+  ]);
   const bangMetaBytes = await Bun.file("src/generated/bangs-meta.bin").bytes();
   const bangMetaHash = createHash("sha256")
     .update(bangMetaBytes)
@@ -204,7 +224,7 @@ export async function main(): Promise<void> {
     "fallback-[hash].[ext]",
     bangDataAsset,
     bangShardRouter,
-    bangShardVersion
+    bangShardAssets
   );
   const requiredAppAssets = [
     ...requiredAppAssetPaths(appOutputs),
@@ -226,7 +246,7 @@ export async function main(): Promise<void> {
     fallbackAsset,
     coldFallbackAsset,
     bangShardRouter,
-    bangShardVersion
+    bangShardAssets
   );
   await rm(`${DIST_DIR}/styles.css`);
 
@@ -248,7 +268,9 @@ export async function main(): Promise<void> {
     bangDataAsset,
     fallbackAsset,
     bangShardRouter,
-    bangShardVersion
+    bangShardAssets,
+    bangIndexAssets,
+    bangStoreAssets
   );
   const cacheInputs: CacheVersionInput[] = await Promise.all(
     precacheFileInputs(requiredAppAssets, bangDataAsset, fallbackAsset).map(
@@ -274,7 +296,9 @@ export async function main(): Promise<void> {
     bangDataAsset,
     fallbackAsset,
     bangShardRouter,
-    bangShardVersion
+    bangShardAssets,
+    bangIndexAssets,
+    bangStoreAssets
   );
 
   console.log("=== Bundle production server ===");
@@ -333,7 +357,22 @@ export async function main(): Promise<void> {
       bangMetaAsset,
       "  Cache-Control: public, max-age=31536000, immutable",
       "",
+      // Shards carry their hash in the name, so one wildcard covers the set.
+      // They sit on the first-search path, so on Pages they get the same
+      // hand-rolled Brotli as the catalog rather than Pages' quality-4 pass.
+      "/bangs-s*",
+      ...bangDataHeaders,
+      "",
+      "/bangs-i*",
+      ...bangDataHeaders,
+      "",
+      "/bangs-str-*",
+      ...bangDataHeaders,
+      "",
       fallbackAsset,
+      "  Cache-Control: public, max-age=31536000, immutable",
+      "",
+      coldFallbackAsset,
       "  Cache-Control: public, max-age=31536000, immutable",
       "",
       "/opensearch.xml",
@@ -361,6 +400,19 @@ export async function main(): Promise<void> {
   ) {
     console.log(
       `Embedded Brotli catalog for Cloudflare Pages: ${bangDataAsset}`
+    );
+  }
+  if (pagesEncodedBangData) {
+    const promoted = [
+      ...bangShardAssets,
+      ...bangIndexAssets,
+      ...bangStoreAssets,
+    ];
+    for (const asset of promoted) {
+      await promoteBrotliForCloudflarePages(asset, true);
+    }
+    console.log(
+      `Embedded Brotli catalog artifacts for Cloudflare Pages: ${promoted.length}`
     );
   }
 

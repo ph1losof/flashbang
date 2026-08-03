@@ -8,6 +8,7 @@ import {
 } from "../src/server/handlers";
 import { pageHeaders, SW_HEADERS } from "../src/server/headers";
 import { readPathname } from "../src/shared/raw-url";
+import { generateBinaryShards } from "./codegen";
 import {
   assembleUIAssets,
   bundleUI,
@@ -50,6 +51,19 @@ __es.onmessage = async () => {
 addEventListener("beforeunload", () => __es.close());
 </script>`;
 
+const BANG_SHARD_VERSION = "dev";
+
+// Sharding walks every router cell through the real packer, so it is far too
+// slow to redo on each file-watch rebuild. The catalog does not change during a
+// dev session — editing it means re-running codegen — so compute it once.
+let bangShards: ReturnType<typeof generateBinaryShards> | null = null;
+async function ensureBangShards() {
+  if (!bangShards) {
+    bangShards = generateBinaryShards(await Bun.file("data/bangs.json").json());
+  }
+  return bangShards;
+}
+
 async function build() {
   const t = performance.now();
   const allowUnsafeCustomSuggestUrls = customSuggestUrlsEnabled();
@@ -58,17 +72,35 @@ async function build() {
   );
   await mkdir("dist", { recursive: true });
 
+  const { router: bangShardRouter, shards: bangShardBytes } =
+    await ensureBangShards();
+  const bangShardAssets = bangShardBytes.map(
+    (_, shard) => `/bangs-s${shard.toString(36)}-${BANG_SHARD_VERSION}.bin`
+  );
   const [, , uiBuild] = await Promise.all([
     Bun.write("dist/bangs.bin", Bun.file("src/generated/bangs.bin")),
     Bun.write("dist/bangs-meta.bin", Bun.file("src/generated/bangs-meta.bin")),
-    bundleUI(allowUnsafeCustomSuggestUrls, "/bangs-meta.bin", "fallback.js"),
+    bundleUI(
+      allowUnsafeCustomSuggestUrls,
+      "/bangs-meta.bin",
+      "fallback.js",
+      "/bangs.bin",
+      bangShardRouter,
+      bangShardAssets
+    ),
+    ...bangShardBytes.map((bytes, shard) =>
+      Bun.write(`dist${bangShardAssets[shard]}`, bytes)
+    ),
   ]);
 
   await generateCSS();
   await assembleUIAssets(
     allowUnsafeCustomSuggestUrls,
     "/bangs.bin",
-    uiBuild.fallbackAsset
+    uiBuild.fallbackAsset,
+    uiBuild.coldFallbackAsset,
+    bangShardRouter,
+    bangShardAssets
   );
   await Bun.build({
     entrypoints: ["src/sw/sw.ts"],
@@ -79,6 +111,8 @@ async function build() {
     format: "esm",
     define: {
       __BANG_DATA_ASSET__: '"/bangs.bin"',
+      __BANG_SHARD_ROUTER__: JSON.stringify(Array.from(bangShardRouter)),
+      __BANG_SHARD_ASSETS__: JSON.stringify(bangShardAssets),
       __FALLBACK_ASSET__: JSON.stringify(uiBuild.fallbackAsset),
       __CACHE_VERSION__: '"flashbang-dev"',
       __REQUIRED_APP_ASSETS__: '["/bangs-meta.bin"]',

@@ -14,11 +14,11 @@ import { lookupGeneratedHotBang } from "../sw/hot-redirect";
 import { redirectUrl } from "../sw/redirect";
 
 declare const __BANG_SHARD_ROUTER__: readonly number[];
-declare const __BANG_SHARD_VERSION__: string;
+declare const __BANG_SHARD_ASSETS__: readonly string[];
 
 const shardRuntime = createBangShardRuntime(
   __BANG_SHARD_ROUTER__,
-  __BANG_SHARD_VERSION__
+  __BANG_SHARD_ASSETS__
 );
 const freshProfile =
   typeof indexedDB.databases === "function"

@@ -8,4 +8,6 @@ export const TEST_BANG_SHARDS = generated.shards;
 
 const globals = globalThis as unknown as Record<string, unknown>;
 globals.__BANG_SHARD_ROUTER__ = Array.from(generated.router);
-globals.__BANG_SHARD_VERSION__ = "test";
+globals.__BANG_SHARD_ASSETS__ = generated.shards.map(
+  (_, shard) => `/bangs-s${shard.toString(36)}-test.bin`
+);

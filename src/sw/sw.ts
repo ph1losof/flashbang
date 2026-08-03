@@ -16,11 +16,14 @@ import {
 import {
   type BangShardRuntime,
   configureBangFallbackLookup,
+  createBangIndexRuntime,
   createBangShardRuntime,
   initializeBangData,
   isBangDataInitialized,
   isBangDataUnavailable,
+  isBangStringStoreStale,
 } from "./bang-data";
+import { type BangStrings, createBangStrings } from "./bang-strings";
 import {
   createHotBootState,
   decodeHotBootRecord,
@@ -59,7 +62,9 @@ import {
 declare const __CACHE_VERSION__: string;
 declare const __BANG_DATA_ASSET__: string;
 declare const __BANG_SHARD_ROUTER__: readonly number[];
-declare const __BANG_SHARD_VERSION__: string;
+declare const __BANG_SHARD_ASSETS__: readonly string[];
+declare const __BANG_INDEX_ASSETS__: readonly string[];
+declare const __BANG_STORE_ASSETS__: readonly string[];
 declare const __FALLBACK_ASSET__: string;
 declare const __REQUIRED_APP_ASSETS__: string[];
 declare const __IS_DEV__: boolean;
@@ -77,11 +82,28 @@ const BANG_DATA_ASSET =
     : __BANG_DATA_ASSET__;
 const BANG_SHARD_ROUTER =
   typeof __BANG_SHARD_ROUTER__ === "undefined" ? null : __BANG_SHARD_ROUTER__;
-const BANG_SHARD_VERSION =
-  typeof __BANG_SHARD_VERSION__ === "undefined" ? "" : __BANG_SHARD_VERSION__;
+const BANG_SHARD_ASSETS =
+  typeof __BANG_SHARD_ASSETS__ === "undefined" ? [] : __BANG_SHARD_ASSETS__;
+const BANG_INDEX_ASSETS =
+  typeof __BANG_INDEX_ASSETS__ === "undefined" ? [] : __BANG_INDEX_ASSETS__;
+const BANG_STORE_ASSETS =
+  typeof __BANG_STORE_ASSETS__ === "undefined" ? [] : __BANG_STORE_ASSETS__;
 const workerShardRuntime: BangShardRuntime | null =
-  BANG_SHARD_ROUTER?.length && BANG_SHARD_VERSION
-    ? createBangShardRuntime(BANG_SHARD_ROUTER, BANG_SHARD_VERSION)
+  BANG_SHARD_ROUTER?.length && BANG_SHARD_ASSETS.length
+    ? createBangShardRuntime(BANG_SHARD_ROUTER, BANG_SHARD_ASSETS)
+    : null;
+// The warm catalog. Index shards are fetched and decoded only when a query
+// routes to them, so a worker that only ever sees a handful of bangs never
+// materializes the rest of the catalog.
+let bangStrings: BangStrings | null = null;
+const workerIndexRuntime: BangShardRuntime | null =
+  BANG_SHARD_ROUTER?.length && BANG_INDEX_ASSETS.length
+    ? createBangIndexRuntime(
+        BANG_SHARD_ROUTER,
+        BANG_INDEX_ASSETS,
+        () => bangStrings,
+        loadCatalogAsset
+      )
     : null;
 const BASE_APP_ASSETS = [
   "/home",
@@ -104,7 +126,9 @@ function appAssets(): string[] {
 const PRECACHE_CONCURRENCY = 4;
 let deferredPrecachePromise: Promise<void> | null = null;
 let bangDataPromise: Promise<void> | null = null;
+let bangStringReloadPromise: Promise<void> | null = null;
 let runtimeWarmPromise: Promise<void> | null = null;
+const catalogCachePromises = new Map<string, Promise<void>>();
 const BENCHMARK_SETTINGS: RedirectSettings = {
   custom: Object.assign(Object.create(null), {
     custom: ["https://benchmark.example/search?q=", ""],
@@ -184,10 +208,32 @@ function readCurrentRedirectSettings(
       seedRedirectSettings(record.settings);
       return record.settings;
     }
+    const catalogReady = bangDataReady ?? ensureBangData();
+    const preparedForCatalog = (
+      prepared ?? prepareRedirectSettings(BANG_DATA_ASSET)
+    ).then(async (value) => {
+      if (!value.settings) {
+        await catalogReady;
+      }
+      const defaultTrigger = value.snapshot.defaultBang;
+      if (
+        !value.settings &&
+        bangStrings &&
+        workerIndexRuntime &&
+        !value.snapshot.custom[defaultTrigger]
+      ) {
+        await ensureRuntimeShard(
+          workerIndexRuntime,
+          bangShardIndex(hashFNV1a(defaultTrigger), BANG_SHARD_ROUTER!)
+        );
+        configureBangFallbackLookup(workerIndexRuntime.lookup);
+      }
+      return value;
+    });
     return readRedirectSettings(
-      prepared,
+      preparedForCatalog,
       BANG_DATA_ASSET,
-      bangDataReady ?? ensureBangData()
+      catalogReady
     );
   });
 }
@@ -222,7 +268,7 @@ async function publishHotBoot(includeSettings = false): Promise<void> {
   }
   const navigationPreload = currentNavigationPreload();
   if (!(navigationPreload && hotBootAvailable)) {
-    if (includeSettings && isBangDataInitialized() && !getCachedSettings()) {
+    if (includeSettings && workerCatalogReady() && !getCachedSettings()) {
       await readCurrentRedirectSettings();
     }
     return;
@@ -231,7 +277,7 @@ async function publishHotBoot(includeSettings = false): Promise<void> {
   const snapshot = prepared.snapshot;
   const state = createHotBootState(snapshot);
   let settings: RedirectSettings | undefined;
-  if (includeSettings && isBangDataInitialized()) {
+  if (includeSettings && workerCatalogReady()) {
     await loadFrecency();
     settings =
       getCachedSettings() ??
@@ -319,41 +365,120 @@ function rawPrivateQuery(rawUrl: string): string | null {
     : rawUrl.substring(valueStart, end);
 }
 
+/**
+ * Load the global string store, then hand the catalog to the lazily-decoding
+ * index runtime.
+ *
+ * The store is the only mandatory catalog download; individual index shards
+ * follow on demand. When no index artifacts are configured (dev, tests) this
+ * falls back to the monolithic catalog.
+ */
 async function loadBangData(): Promise<void> {
-  const request = new Request(BANG_DATA_ASSET);
-  const cache = await caches.open(CACHE_NAME);
-  let response = await cache.match(request);
-  if (!response) {
-    response = await caches.match(request, { cacheName: SEED_CACHE_NAME });
-    if (response) {
-      await caches.delete(SEED_CACHE_NAME);
+  if (workerIndexRuntime && BANG_STORE_ASSETS.length > 0) {
+    try {
+      const chunks = await Promise.all(
+        BANG_STORE_ASSETS.map((asset) => loadCatalogAsset(asset))
+      );
+      bangStrings = createBangStrings(chunks);
+      configureBangFallbackLookup(workerIndexRuntime.lookup);
+      return;
+    } catch (storeError) {
+      // A worker update may activate while the client is offline with only the
+      // previous monolithic catalog cached. Keep redirects working through that
+      // transition; the next worker lifetime can adopt the v11 store.
+      try {
+        initializeBangData(await loadCatalogAsset(BANG_DATA_ASSET));
+        return;
+      } catch {
+        throw storeError;
+      }
     }
   }
+  initializeBangData(await loadCatalogAsset(BANG_DATA_ASSET));
+}
+
+function workerCatalogReady(): boolean {
+  return (
+    isBangDataInitialized() ||
+    (bangStrings !== null && workerIndexRuntime !== null)
+  );
+}
+
+async function populateCatalogCache(
+  asset: string,
+  forceNetwork = false
+): Promise<void> {
+  const request = new Request(asset);
+  const cache = await caches.open(CACHE_NAME);
+  let response = forceNetwork ? undefined : await cache.match(request);
   if (!response) {
-    for (const cacheName of await caches.keys()) {
-      if (cacheName === CACHE_NAME || !isManagedCache(cacheName)) {
-        continue;
-      }
-      response = await (await caches.open(cacheName)).match(request);
-      if (response) {
-        break;
+    if (!forceNetwork) {
+      for (const cacheName of await caches.keys()) {
+        if (cacheName === CACHE_NAME || !isManagedCache(cacheName)) {
+          continue;
+        }
+        response = await (await caches.open(cacheName)).match(request);
+        if (response) {
+          break;
+        }
       }
     }
     if (!response) {
-      response = await fetch(request);
+      response = await fetch(
+        forceNetwork ? new Request(asset, { cache: "reload" }) : request
+      );
       if (!response.ok) {
         throw new Error(
-          `Failed to load ${BANG_DATA_ASSET}: ${response.status} ${response.statusText}`
+          `Failed to load ${asset}: ${response.status} ${response.statusText}`
         );
       }
     }
-    await cache.put(request, response.clone());
+    await cache.put(request, response);
   }
-  initializeBangData(await response.arrayBuffer());
+}
+
+function ensureCatalogAssetCached(
+  asset: string,
+  forceNetwork = false
+): Promise<void> {
+  const existing = catalogCachePromises.get(asset);
+  if (existing && !forceNetwork) {
+    return existing;
+  }
+  let current: Promise<void>;
+  const populate = () => populateCatalogCache(asset, forceNetwork);
+  current = (
+    existing ? existing.catch(swallowError).then(populate) : populate()
+  ).finally(() => {
+    if (catalogCachePromises.get(asset) === current) {
+      catalogCachePromises.delete(asset);
+    }
+  });
+  catalogCachePromises.set(asset, current);
+  return current;
+}
+
+async function loadCatalogAsset(
+  asset: string,
+  forceNetwork = false
+): Promise<ArrayBuffer> {
+  const cache = await caches.open(CACHE_NAME);
+  if (!forceNetwork) {
+    const cached = await cache.match(new Request(asset));
+    if (cached) {
+      return cached.arrayBuffer();
+    }
+  }
+  await ensureCatalogAssetCached(asset, forceNetwork);
+  const response = await cache.match(new Request(asset));
+  if (!response) {
+    throw new Error(`Catalog asset disappeared from cache: ${asset}`);
+  }
+  return response.arrayBuffer();
 }
 
 function ensureBangData(): Promise<void> {
-  if (isBangDataInitialized()) {
+  if (workerCatalogReady()) {
     return RESOLVED_PROMISE;
   }
   if (!bangDataPromise) {
@@ -386,7 +511,7 @@ function seedRuntime(
 }
 
 function warmRuntime(): Promise<void> {
-  if (isBangDataInitialized() && getCachedSettings()) {
+  if (workerCatalogReady() && getCachedSettings()) {
     return RESOLVED_PROMISE;
   }
   if (!runtimeWarmPromise) {
@@ -396,6 +521,11 @@ function warmRuntime(): Promise<void> {
       readCurrentRedirectSettings(undefined, bangDataReady),
       loadFrecency(),
     ]).then(async () => {
+      // Offline coverage: pull every index shard into Cache Storage once the
+      // store is loaded. Bytes only — decoding stays lazy.
+      if (workerIndexRuntime) {
+        await warmAllCatalogShards().catch(swallowError);
+      }
       await waitForRedirectSettingsPersistence();
       if (hotBootSettingsNeedPublish(currentHotBoot)) {
         await queueHotBootMutation(() => publishHotBoot(true));
@@ -410,6 +540,35 @@ function warmRuntime(): Promise<void> {
     runtimeWarmPromise = current;
   }
   return runtimeWarmPromise;
+}
+
+// Pull every index shard into Cache Storage so the catalog resolves offline.
+// Fetch-only and run once after a response has been sent: nothing is decoded,
+// so the redirect path pays no CPU and per-shard decode stays lazy.
+let catalogWarmPromise: Promise<void> | null = null;
+function warmAllCatalogShards(): Promise<void> {
+  if (!catalogWarmPromise) {
+    catalogWarmPromise = (async () => {
+      const pending = [...BANG_INDEX_ASSETS];
+      const workers = Array.from(
+        { length: Math.min(PRECACHE_CONCURRENCY, pending.length) },
+        async () => {
+          for (;;) {
+            const asset = pending.pop();
+            if (!asset) {
+              return;
+            }
+            await ensureCatalogAssetCached(asset);
+          }
+        }
+      );
+      await Promise.all(workers);
+    })().catch((error) => {
+      catalogWarmPromise = null;
+      throw error;
+    });
+  }
+  return catalogWarmPromise;
 }
 
 function warmRuntimeAfterResponse(e: FetchEvent): void {
@@ -475,9 +634,17 @@ function ensureDeferredPrecache(): Promise<void> {
   if (deferredPrecachePromise) {
     return deferredPrecachePromise;
   }
-  const warming = precacheAssets(CACHE_NAME, appAssets()).then(() =>
-    deleteOldCaches(CACHE_NAME)
-  );
+  const warming = precacheAssets(CACHE_NAME, appAssets())
+    .then(async () => {
+      // Content-addressed catalog assets are copied from an older managed cache
+      // before it is deleted. This preserves offline coverage across updates and
+      // avoids issuing 43 nominal fetches for byte-identical index shards.
+      if (workerIndexRuntime) {
+        await ensureBangData();
+        await warmAllCatalogShards();
+      }
+    })
+    .then(() => deleteOldCaches(CACHE_NAME));
   let current: Promise<void>;
   current = warming.catch(() => {
     if (deferredPrecachePromise === current) {
@@ -529,7 +696,7 @@ function queueBangSideEffects(e: FetchEvent, trigger: string): void {
       .then(() => {
         const usage = trackBangUsage(trigger);
         const hotBootSync =
-          usage.topMembershipChanged && isBangDataInitialized()
+          usage.topMembershipChanged && workerCatalogReady()
             ? queueHotBootMutation(() => publishHotBoot(true)).catch(
                 swallowError
               )
@@ -650,7 +817,7 @@ export function handleMessage(e: ExtendableMessageEvent): void {
     }
     const reply = () => {
       e.ports[0]?.postMessage({
-        bangDataReady: isBangDataInitialized(),
+        bangDataReady: workerCatalogReady(),
         enabled:
           benchmarkState?.clientId === sourceId &&
           benchmarkState.token === token,
@@ -659,7 +826,7 @@ export function handleMessage(e: ExtendableMessageEvent): void {
         token: benchmarkState?.token ?? null,
       });
     };
-    if (enable && !isBangDataInitialized()) {
+    if (enable && !workerCatalogReady()) {
       e.waitUntil(ensureBangData().then(reply, reply));
     } else {
       reply();
@@ -760,10 +927,11 @@ export function handleMessage(e: ExtendableMessageEvent): void {
     messageQuery = e.data.query;
   }
   if (e.data?.type === "redirect" && messageQuery) {
-    const resolve = (s: RedirectSettings) => {
-      const url = hasRawQuery
-        ? redirectRawUrl(messageQuery, s)
-        : redirectUrl(messageQuery, s);
+    const resolve = (settings: RedirectSettings): string =>
+      hasRawQuery
+        ? redirectRawUrl(messageQuery, settings)
+        : redirectUrl(messageQuery, settings);
+    const reply = (url: string) => {
       if (e.ports[0]) {
         e.ports[0].postMessage(url);
       } else {
@@ -773,26 +941,37 @@ export function handleMessage(e: ExtendableMessageEvent): void {
     const cached = getCachedSettings();
     if (isBangDataInitialized()) {
       if (cached) {
-        resolve(cached);
+        reply(resolve(cached));
       } else {
-        e.waitUntil(readCurrentRedirectSettings().then(resolve));
+        e.waitUntil(readCurrentRedirectSettings().then(resolve).then(reply));
       }
     } else {
       const bangDataReady = ensureBangData();
       e.waitUntil(
-        readCurrentRedirectSettings(undefined, bangDataReady).then(
-          async (settings) => {
+        readCurrentRedirectSettings(undefined, bangDataReady)
+          .then(async (settings) => {
             try {
-              resolve(settings);
+              return resolve(settings);
             } catch (error) {
-              if (!isBangDataUnavailable(error)) {
+              if (
+                !(
+                  isBangDataUnavailable(error) ||
+                  (workerIndexRuntime !== null &&
+                    workerIndexRuntime.unavailableShardId(error) !== null)
+                )
+              ) {
                 throw error;
               }
               await bangDataReady;
-              resolve(settings);
+              if (bangStrings && workerIndexRuntime) {
+                return runWithShardRuntime(workerIndexRuntime, () =>
+                  resolve(settings)
+                );
+              }
+              return resolve(settings);
             }
-          }
-        )
+          })
+          .then(reply)
       );
     }
   }
@@ -841,6 +1020,117 @@ function respondToCompactHotBang(
   return response;
 }
 
+function candidateBangShardIds(
+  rawQuery: string,
+  settings: RedirectSettings
+): number[] {
+  try {
+    const query = decodeURIComponent(rawQuery.replaceAll("+", " "));
+    const bangMarker = String.fromCharCode((settings.syntax?.[0] ?? 33) & 0xff);
+    const snapMarker = String.fromCharCode((settings.syntax?.[1] ?? 64) & 0xff);
+    return [
+      ...new Set(
+        extractBangShardTriggers(query, bangMarker, snapMarker)
+          .filter(
+            (trigger) =>
+              !(settings.custom[trigger] || lookupGeneratedHotBang(trigger))
+          )
+          .map((trigger) =>
+            bangShardIndex(hashFNV1a(trigger), BANG_SHARD_ROUTER!)
+          )
+      ),
+    ];
+  } catch {
+    // The canonical parser remains authoritative for malformed input.
+    return [];
+  }
+}
+
+function reloadBangStringStore(): Promise<void> {
+  if (!(workerIndexRuntime && BANG_STORE_ASSETS.length > 0)) {
+    return Promise.reject(new Error("Bang string store is not configured"));
+  }
+  if (!bangStringReloadPromise) {
+    let current: Promise<void>;
+    current = Promise.all(
+      BANG_STORE_ASSETS.map((asset) => loadCatalogAsset(asset, true))
+    )
+      .then((chunks) => {
+        const replacement = createBangStrings(chunks);
+        bangStrings = replacement;
+        workerIndexRuntime.reset();
+        configureBangFallbackLookup(workerIndexRuntime.lookup);
+      })
+      .finally(() => {
+        if (bangStringReloadPromise === current) {
+          bangStringReloadPromise = null;
+        }
+      });
+    bangStringReloadPromise = current;
+  }
+  return bangStringReloadPromise;
+}
+
+async function ensureRuntimeShard(
+  runtime: BangShardRuntime,
+  shardId: number
+): Promise<void> {
+  try {
+    await runtime.ensure(shardId);
+  } catch (error) {
+    if (!(runtime === workerIndexRuntime && isBangStringStoreStale(error))) {
+      throw error;
+    }
+    // A stale pair can only be recovered by replacing both sides: otherwise a
+    // poisoned response under either content-addressed URL would be reused.
+    await reloadBangStringStore();
+    await runtime.ensure(
+      shardId,
+      loadCatalogAsset(BANG_INDEX_ASSETS[shardId], true)
+    );
+  }
+}
+
+async function runWithShardRuntime<T>(
+  runtime: BangShardRuntime,
+  operation: () => T
+): Promise<T> {
+  for (let attempt = 0; attempt <= BANG_SHARD_COUNT; attempt++) {
+    // The fallback lookup is shared by the redirect core. Re-publish it after
+    // every await so concurrent cold and warm requests cannot leave the other
+    // runtime selected.
+    configureBangFallbackLookup(runtime.lookup);
+    try {
+      return operation();
+    } catch (error) {
+      const shardId = runtime.unavailableShardId(error);
+      if (shardId === null) {
+        throw error;
+      }
+      await ensureRuntimeShard(runtime, shardId);
+    }
+  }
+  throw new Error("Bang shard resolution exceeded the catalog shard count");
+}
+
+async function respondFromShardRuntime(
+  runtime: BangShardRuntime,
+  e: FetchEvent,
+  rawQuery: string,
+  settings: RedirectSettings,
+  hotBangLookup?: HotBangLookup | null
+): Promise<Response> {
+  const shardIds = candidateBangShardIds(rawQuery, settings);
+  if (shardIds.length > 0) {
+    await Promise.all(
+      shardIds.map((shardId) => ensureRuntimeShard(runtime, shardId))
+    );
+  }
+  return runWithShardRuntime(runtime, () =>
+    respondToRedirect(e, rawQuery, settings, hotBangLookup)
+  );
+}
+
 async function respondFromColdShard(
   e: FetchEvent,
   rawQuery: string,
@@ -852,69 +1142,35 @@ async function respondFromColdShard(
   if (!runtime) {
     return null;
   }
-  let candidateShardsReady: Promise<void> | null = null;
-  try {
-    const query = decodeURIComponent(rawQuery.replaceAll("+", " "));
-    const bangMarker = String.fromCharCode((settings.syntax?.[0] ?? 33) & 0xff);
-    const snapMarker = String.fromCharCode((settings.syntax?.[1] ?? 64) & 0xff);
-    const shardIds = new Set(
-      extractBangShardTriggers(query, bangMarker, snapMarker)
-        .filter(
-          (trigger) =>
-            !(settings.custom[trigger] || lookupGeneratedHotBang(trigger))
-        )
-        .map((trigger) =>
-          bangShardIndex(hashFNV1a(trigger), BANG_SHARD_ROUTER!)
-        )
-    );
-    if (shardIds.size > 0) {
-      candidateShardsReady = Promise.all(
-        [...shardIds].map((shardId) => runtime.ensure(shardId))
-      ).then(() => undefined);
-    }
-  } catch {
-    // The canonical parser below remains authoritative for malformed input.
-  }
-  configureBangFallbackLookup(runtime.lookup);
-  if (candidateShardsReady) {
+  const shardIds = candidateBangShardIds(rawQuery, settings);
+  if (shardIds.length > 0) {
+    const candidateShardsReady = Promise.all(
+      shardIds.map((shardId) => ensureRuntimeShard(runtime, shardId))
+    ).then(() => true as const);
     try {
-      await candidateShardsReady;
+      const coldWon = await Promise.any([
+        candidateShardsReady,
+        bangDataReady.then(() => false as const),
+      ]);
+      if (!coldWon) {
+        return null;
+      }
     } catch {
-      try {
-        await bangDataReady;
-      } catch {
-        return null;
-      }
+      return null;
     }
   }
-  // The loop is only a correctness guard for syntax the lightweight preloader
-  // deliberately does not recognize. Generated bang and snap forms parse once.
-  for (let attempt = 0; attempt <= BANG_SHARD_COUNT; attempt++) {
-    try {
-      return respondToRedirect(e, rawQuery, settings, hotBangLookup);
-    } catch (error) {
-      if (isHotBangLookupBlocked(error)) {
-        return null;
-      }
-      const shardId = runtime.unavailableShardId(error);
-      if (shardId === null) {
-        if (!isBangDataUnavailable(error)) {
-          throw error;
-        }
-        return null;
-      }
-      try {
-        await Promise.any([
-          runtime.ensure(shardId),
-          ...(candidateShardsReady ? [candidateShardsReady] : []),
-          bangDataReady,
-        ]);
-      } catch {
-        return null;
-      }
+  try {
+    return await runWithShardRuntime(runtime, () =>
+      respondToRedirect(e, rawQuery, settings, hotBangLookup)
+    );
+  } catch (error) {
+    if (isHotBangLookupBlocked(error)) {
+      return null;
     }
+    // The warm index runtime remains the authoritative fallback if a cold-shard
+    // request fails or the lightweight parser misses an unusual syntax form.
+    return null;
   }
-  return null;
 }
 
 function responseForQuery(
@@ -929,6 +1185,26 @@ function responseForQuery(
     return readCurrentRedirectSettings().then((settings) =>
       respondToRedirect(e, rawQuery, settings)
     );
+  }
+  if (bangStrings && workerIndexRuntime) {
+    const cached = getCachedSettings();
+    return cached
+      ? respondFromShardRuntime(
+          workerIndexRuntime,
+          e,
+          rawQuery,
+          cached,
+          lookupGeneratedHotBang
+        )
+      : readCurrentRedirectSettings().then((settings) =>
+          respondFromShardRuntime(
+            workerIndexRuntime,
+            e,
+            rawQuery,
+            settings,
+            lookupGeneratedHotBang
+          )
+        );
   }
   return hotBootPromise.then((hotBoot) => {
     if (e.request.mode === "navigate") {
@@ -952,7 +1228,14 @@ function responseForQuery(
           }
         }
       } catch (error) {
-        if (!(isBangDataUnavailable(error) || isHotBangLookupBlocked(error))) {
+        if (
+          !(
+            isBangDataUnavailable(error) ||
+            isHotBangLookupBlocked(error) ||
+            (workerIndexRuntime !== null &&
+              workerIndexRuntime.unavailableShardId(error) !== null)
+          )
+        ) {
           throw error;
         }
       }
@@ -973,26 +1256,30 @@ function responseForQuery(
     const resolveWithFullCatalog = () =>
       readCurrentRedirectSettings(undefined, bangDataReady).then(
         async (settings) => {
+          const hotLookup = hotBoot?.hotBangLookup ?? lookupGeneratedHotBang;
           try {
-            return respondToRedirect(
-              e,
-              rawQuery,
-              settings,
-              hotBoot?.hotBangLookup ?? lookupGeneratedHotBang
-            );
+            return respondToRedirect(e, rawQuery, settings, hotLookup);
           } catch (error) {
             if (
-              !(isBangDataUnavailable(error) || isHotBangLookupBlocked(error))
+              !(
+                isBangDataUnavailable(error) ||
+                (workerIndexRuntime !== null &&
+                  workerIndexRuntime.unavailableShardId(error) !== null)
+              )
             ) {
               throw error;
             }
             await bangDataReady;
-            return respondToRedirect(
-              e,
-              rawQuery,
-              settings,
-              hotBoot?.hotBangLookup ?? lookupGeneratedHotBang
-            );
+            if (bangStrings && workerIndexRuntime) {
+              return respondFromShardRuntime(
+                workerIndexRuntime,
+                e,
+                rawQuery,
+                settings,
+                hotLookup
+              );
+            }
+            return respondToRedirect(e, rawQuery, settings, hotLookup);
           }
         }
       );
@@ -1145,7 +1432,7 @@ export function handleFetch(e: FetchEvent): void {
   }
 
   // Private redirects should not install or compete with UI assets.
-  if (!(isBangDataInitialized() && getCachedSettings())) {
+  if (!(workerCatalogReady() && getCachedSettings())) {
     e.waitUntil(warmRuntime());
   }
   if (!deferredPrecachePromise) {
@@ -1211,7 +1498,10 @@ export function registerServiceWorker(): void {
 export function resetSwStateForTests(): void {
   deferredPrecachePromise = null;
   bangDataPromise = null;
+  bangStringReloadPromise = null;
   runtimeWarmPromise = null;
+  catalogWarmPromise = null;
+  catalogCachePromises.clear();
   benchmarkState = null;
   hotBootAvailable = currentNavigationPreload() !== undefined;
   hotBootGeneration = 0;
@@ -1220,7 +1510,9 @@ export function resetSwStateForTests(): void {
   hotBootPromise = readInitialHotBoot();
   hotBootMutation = RESOLVED_PROMISE;
   hotBootUpdateTokens.clear();
+  bangStrings = null;
   workerShardRuntime?.reset();
+  workerIndexRuntime?.reset();
 }
 
 registerServiceWorker();

@@ -1,6 +1,11 @@
+import { readFileSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { brotliCompressSync, constants as zlibConstants } from "node:zlib";
 import { $ } from "bun";
+import {
+  BANG_BINARY_HEADER_WORDS,
+  BANG_BINARY_VERSION_INDEX,
+} from "../src/shared/bang-binary-format";
 import {
   BANG_SHARD_COUNT,
   BANG_SHARD_ROUTER_SIZE,
@@ -24,6 +29,18 @@ import {
   type SnapTargetParts,
 } from "../src/shared/snap-target";
 import { type BuildNode, buildRadixTrie } from "../src/shared/trie";
+import { decodeBangData, decodeIndexBangData } from "../src/sw/bang-data";
+import { createBangStrings } from "../src/sw/bang-strings";
+import {
+  assignGlobalStringIds,
+  encodeStringStore,
+  loadStringIdMap,
+  PREFIX_IDS_PATH,
+  STRING_META_PATH,
+  type StringIdMap,
+  SUFFIX_IDS_PATH,
+  serializeStringIdMap,
+} from "./bang-strings-build";
 
 interface Bang {
   captureEncoding?: number;
@@ -68,6 +85,8 @@ interface RawKagiEntry {
 
 export const GENERATED_BANG_DATA_FILES = [
   "src/generated/bangs.bin",
+  "src/generated/bangs-str-base.bin",
+  "src/generated/bangs-str-tail.bin",
   "src/generated/bangs-sparse.js",
   "src/generated/bangs-meta.bin",
   "src/generated/bangs-trie-loader.js",
@@ -1192,9 +1211,151 @@ function estimateBangBinaryByteLength(bangs: readonly Bang[]): number {
   );
 }
 
-export function generateBinaryShards(
-  bangs: readonly Bang[]
-): GeneratedBinaryShards {
+/**
+ * A v11 index shard: MPHF, fingerprints and snap tables, with store IDs in
+ * place of local string tables. IDs are global and append-only, so a shard's
+ * bytes depend only on the bangs routed to it.
+ *
+ * IDs are stored direct rather than via a local translation table: prefix dedup
+ * is ~1.29 entries per prefix catalog-wide, so a ~340-entry shard has nearly
+ * nothing to dedup and the indirection costs bytes and a hop on the fill path.
+ */
+export function generateIndexShardBinary(
+  bangs: readonly Bang[],
+  idMap: StringIdMap
+): Uint8Array {
+  const entries = bangs.filter((bang) => !bang.regex);
+  const entryCount = entries.length;
+  const triggers = new Array<string>(entryCount);
+  const globalPrefixIds = new Array<number>(entryCount);
+  const globalSuffixIdsPlusOne = new Array<number>(entryCount);
+  const snapTargets = new Array<SnapTargetParts | null>(entryCount);
+  let requiredPrefixCount = 0;
+  let requiredSuffixCount = 0;
+
+  for (let i = 0; i < entryCount; i++) {
+    const bang = entries[i];
+    const [prefix, suffix] = splitTemplate(bang.url);
+    const prefixId = idMap.prefixIds.get(prefix);
+    if (prefixId === undefined) {
+      throw new Error(`Prefix missing from the string ID map: ${prefix}`);
+    }
+    triggers[i] = bang.trigger;
+    globalPrefixIds[i] = prefixId;
+    requiredPrefixCount = Math.max(requiredPrefixCount, prefixId + 1);
+    if (suffix === null) {
+      globalSuffixIdsPlusOne[i] = 0;
+    } else {
+      const suffixId = idMap.suffixIds.get(suffix);
+      if (suffixId === undefined) {
+        throw new Error(`Suffix missing from the string ID map: ${suffix}`);
+      }
+      globalSuffixIdsPlusOne[i] = suffixId + 1;
+      requiredSuffixCount = Math.max(requiredSuffixCount, suffixId + 1);
+    }
+    snapTargets[i] = snapOverrideParts(bang);
+  }
+
+  let bucketLoad = 4;
+  let mph: MinimalPerfectHash;
+  for (;;) {
+    try {
+      mph = buildMinimalPerfectHash(triggers, bucketLoad);
+      break;
+    } catch (error) {
+      const placementFailed =
+        error instanceof Error &&
+        error.message.startsWith("Unable to build binary bang MPHF bucket ");
+      if (!placementFailed || bucketLoad <= 0.25) {
+        throw error;
+      }
+      bucketLoad /= 2;
+    }
+  }
+
+  const fingerprints = Uint16Array.from(mph.slotToEntry, (entry) => {
+    const hash = hashFNV1a(triggers[entry]);
+    return (hash >>> 16) & 0xffff;
+  });
+  // ~11k prefixes today, so u16 halves the two largest sections. The width is
+  // recorded in the header and widens on its own past 65535, which tombstones
+  // guarantee is reached monotonically.
+  const idWidth =
+    Math.max(requiredPrefixCount, requiredSuffixCount + 1) > 0xffff ? 4 : 2;
+  const orderedPrefixIds = Array.from(
+    mph.slotToEntry,
+    (entry) => globalPrefixIds[entry]
+  );
+  const orderedSuffixIds = Array.from(
+    mph.slotToEntry,
+    (entry) => globalSuffixIdsPlusOne[entry]
+  );
+  const prefixIds: Uint16Array | Uint32Array =
+    idWidth === 2
+      ? Uint16Array.from(orderedPrefixIds)
+      : Uint32Array.from(orderedPrefixIds);
+  const suffixIds: Uint16Array | Uint32Array =
+    idWidth === 2
+      ? Uint16Array.from(orderedSuffixIds)
+      : Uint32Array.from(orderedSuffixIds);
+  const snapData = packSnapData(snapTargets, triggers, mph.slotToEntry);
+
+  const headerBytes = BANG_BINARY_HEADER_WORDS * Uint32Array.BYTES_PER_ELEMENT;
+  let numericEnd = headerBytes + mph.displacements.byteLength;
+  numericEnd += fingerprints.byteLength;
+  numericEnd = idWidth === 4 ? align4(numericEnd) : align2(numericEnd);
+  numericEnd += prefixIds.byteLength + suffixIds.byteLength;
+  numericEnd +=
+    snapData.slots.byteLength +
+    snapData.targetIds.byteLength +
+    snapData.lengths.byteLength +
+    snapData.triggerLengths.byteLength;
+  const totalBytes =
+    numericEnd + snapData.blob.byteLength + snapData.triggerBlob.byteLength;
+
+  const output = new Uint8Array(new ArrayBuffer(totalBytes));
+  new Uint32Array(output.buffer, 0, BANG_BINARY_HEADER_WORDS).set([
+    BANG_BINARY_MAGIC,
+    BANG_BINARY_VERSION_INDEX,
+    entryCount,
+    mph.displacements.length,
+    fingerprints.BYTES_PER_ELEMENT,
+    requiredPrefixCount,
+    requiredSuffixCount,
+    idMap.meta.epoch,
+    idWidth,
+    0,
+    numericEnd,
+    totalBytes,
+    mph.displacements.BYTES_PER_ELEMENT,
+    snapData.slots.length,
+    snapData.targetCount,
+    snapData.blob.byteLength,
+  ]);
+
+  let offset = headerBytes;
+  offset = copyTypedArray(output, offset, mph.displacements);
+  offset = copyTypedArray(output, offset, fingerprints);
+  offset = idWidth === 4 ? align4(offset) : align2(offset);
+  offset = copyTypedArray(output, offset, prefixIds);
+  offset = copyTypedArray(output, offset, suffixIds);
+  offset = copyTypedArray(output, offset, snapData.slots);
+  offset = copyTypedArray(output, offset, snapData.targetIds);
+  offset = copyTypedArray(output, offset, snapData.lengths);
+  offset = copyTypedArray(output, offset, snapData.triggerLengths);
+  output.set(snapData.blob, offset);
+  offset += snapData.blob.byteLength;
+  output.set(snapData.triggerBlob, offset);
+  return output;
+}
+
+export const BANG_ROUTER_PATH = "data/bang-router.json";
+
+// Greedy longest-processing-time pack of the 256 hash cells into shards,
+// weighted by each cell's packed size. Run only under --rebalance-router: cell
+// weight depends on whole-cell membership and the pack is global, so one added
+// bang perturbs the sort and reassigns 42 of 43 shards.
+export function rebalanceBangShardRouter(bangs: readonly Bang[]): Uint8Array {
   const cells = Array.from({ length: BANG_SHARD_ROUTER_SIZE }, (_, id) => ({
     bangs: [] as Bang[],
     byteWeight: 0,
@@ -1213,7 +1374,6 @@ export function generateBinaryShards(
     cell.byteWeight = estimateBangBinaryByteLength(cell.bangs);
   }
   const bins = Array.from({ length: BANG_SHARD_COUNT }, () => ({
-    bangs: [] as Bang[],
     byteWeight: 0,
     cells: [] as number[],
   }));
@@ -1226,7 +1386,6 @@ export function generateBinaryShards(
         target = bins[i];
       }
     }
-    target.bangs.push(...cell.bangs);
     target.byteWeight += cell.byteWeight;
     target.cells.push(cell.id);
   }
@@ -1236,11 +1395,100 @@ export function generateBinaryShards(
       router[cell] = shard;
     }
   }
+  return router;
+}
+
+export function parseBangShardRouter(source: string): Uint8Array {
+  const parsed: unknown = JSON.parse(source);
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length !== BANG_SHARD_ROUTER_SIZE ||
+    !parsed.every(
+      (value) =>
+        Number.isInteger(value) && value >= 0 && value < BANG_SHARD_COUNT
+    )
+  ) {
+    throw new Error(
+      `Invalid ${BANG_ROUTER_PATH}: expected ${BANG_SHARD_ROUTER_SIZE} integers in [0, ${BANG_SHARD_COUNT})`
+    );
+  }
+  return Uint8Array.from(parsed as number[]);
+}
+
+let frozenRouter: Uint8Array | null = null;
+
+export function loadFrozenBangShardRouter(): Uint8Array {
+  if (!frozenRouter) {
+    frozenRouter = parseBangShardRouter(readFileSync(BANG_ROUTER_PATH, "utf8"));
+  }
+  return frozenRouter;
+}
+
+export interface GeneratedCatalog {
+  /** Self-contained v10 shards; one is enough to answer a first search. */
+  cold: Uint8Array[];
+  /** v11 shards referencing the global store; the warm catalog. */
+  index: Uint8Array[];
+  router: Uint8Array;
+  storeBase: Uint8Array;
+  storeTail: Uint8Array;
+}
+
+function shardBins(bangs: readonly Bang[], router: Uint8Array): Bang[][] {
+  const bins = Array.from({ length: BANG_SHARD_COUNT }, () => [] as Bang[]);
+  for (const bang of bangs) {
+    if (!bang.regex) {
+      bins[router[bangShardCell(hashFNV1a(bang.trigger))]].push(bang);
+    }
+  }
+  return bins;
+}
+
+// The string store, the index shards referencing it, and the self-contained
+// cold shards. Syncs the ID map so callers get one consistent with the
+// artifacts returned.
+export function generateCatalog(
+  bangs: readonly Bang[],
+  idMap: StringIdMap,
+  router: Uint8Array = loadFrozenBangShardRouter()
+): GeneratedCatalog {
+  const prefixes: string[] = [];
+  const suffixes: string[] = [];
+  for (const bang of bangs) {
+    if (bang.regex) {
+      continue;
+    }
+    const [prefix, suffix] = splitTemplate(bang.url);
+    prefixes.push(prefix);
+    if (suffix !== null) {
+      suffixes.push(suffix);
+    }
+  }
+  assignGlobalStringIds(idMap, prefixes, suffixes);
+  const { base, tail } = encodeStringStore(idMap);
+  const bins = shardBins(bangs, router);
+  return {
+    cold: bins.map((shard) => generateBinaryWithBucketLoad(shard, 4)),
+    index: bins.map((shard) => generateIndexShardBinary(shard, idMap)),
+    router,
+    storeBase: base,
+    storeTail: tail,
+  };
+}
+
+export function generateBinaryShards(
+  bangs: readonly Bang[],
+  router: Uint8Array = loadFrozenBangShardRouter()
+): GeneratedBinaryShards {
+  const bins = Array.from({ length: BANG_SHARD_COUNT }, () => [] as Bang[]);
+  for (const bang of bangs) {
+    if (!bang.regex) {
+      bins[router[bangShardCell(hashFNV1a(bang.trigger))]].push(bang);
+    }
+  }
   return {
     router,
-    shards: bins.map(({ bangs: shard }) =>
-      generateBinaryWithBucketLoad(shard, 4)
-    ),
+    shards: bins.map((shard) => generateBinaryWithBucketLoad(shard, 4)),
   };
 }
 
@@ -2027,6 +2275,70 @@ async function writeGeneratedDeclarations(outDir: string): Promise<void> {
   ]);
 }
 
+// Decode every shard against the freshly built store and assert each trigger
+// resolves to the URL in data/bangs.json. Only a full round-trip catches IDs
+// that are internally consistent but point at the wrong strings: that passes
+// every structural check and then redirects users to the wrong site.
+export function verifyCatalogRoundTrip(
+  bangs: readonly Bang[],
+  catalog: GeneratedCatalog,
+  idMap: StringIdMap
+): void {
+  const detach = (chunk: Uint8Array): ArrayBuffer =>
+    chunk.slice().buffer as ArrayBuffer;
+  const strings = createBangStrings([
+    detach(catalog.storeBase),
+    detach(catalog.storeTail),
+  ]);
+  const lookups = catalog.index.map((shard) =>
+    decodeIndexBangData(detach(shard), strings)
+  );
+  const coldLookups = catalog.cold.map((shard) =>
+    decodeBangData(detach(shard))
+  );
+
+  const failures: string[] = [];
+  let checked = 0;
+  for (const bang of bangs) {
+    if (bang.regex) {
+      continue;
+    }
+    const hash = hashFNV1a(bang.trigger);
+    const shardId = catalog.router[bangShardCell(hash)];
+    checked++;
+    for (const [kind, lookup] of [
+      ["index", lookups[shardId]],
+      ["cold", coldLookups[shardId]],
+    ] as const) {
+      const parts = lookup(bang.trigger, hash);
+      if (!parts) {
+        failures.push(
+          `${bang.trigger}: ${kind} shard ${shardId} returned null`
+        );
+        continue;
+      }
+      const url = parts[1] === null ? parts[0] : `${parts[0]}{}${parts[1]}`;
+      if (url !== bang.url) {
+        failures.push(
+          `${bang.trigger}: ${kind} shard ${shardId} resolved ${JSON.stringify(url)}, expected ${JSON.stringify(bang.url)}`
+        );
+      }
+    }
+    if (failures.length > 8) {
+      break;
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(
+      `Catalog round-trip failed for ${failures.length}+ bangs:\n  ${failures.join("\n  ")}`
+    );
+  }
+  console.log(
+    `  round-trip: ${checked} triggers verified through index + cold shards`
+  );
+  void idMap;
+}
+
 export async function runCodegen(options: CodegenOptions = {}): Promise<void> {
   const bangs = await loadBangs(options);
   const suggestionSites: SuggestionSiteRegistry =
@@ -2053,12 +2365,55 @@ export async function runCodegen(options: CodegenOptions = {}): Promise<void> {
   const artifacts = buildGeneratedArtifacts(bangs, suggestionSites);
   await writeGeneratedArtifacts(GENERATED_OUT_DIR, artifacts);
   await writeGeneratedDeclarations(GENERATED_OUT_DIR);
+
+  console.log("=== Catalog: string store + shards ===");
+  const idMap = loadStringIdMap();
+  const beforePrefixes = idMap.prefixes.length;
+  const beforeSuffixes = idMap.suffixes.length;
+  const catalog = generateCatalog(bangs, idMap);
+  verifyCatalogRoundTrip(bangs, catalog, idMap);
+
+  const serialized = serializeStringIdMap(idMap);
+  await Bun.write(PREFIX_IDS_PATH, serialized.prefixes);
+  await Bun.write(SUFFIX_IDS_PATH, serialized.suffixes);
+  await Bun.write(STRING_META_PATH, serialized.meta);
+  await Bun.write(`${GENERATED_OUT_DIR}/bangs-str-base.bin`, catalog.storeBase);
+  await Bun.write(`${GENERATED_OUT_DIR}/bangs-str-tail.bin`, catalog.storeTail);
+  const indexBytes = catalog.index.reduce(
+    (total, shard) => total + shard.byteLength,
+    0
+  );
+  console.log(
+    `  strings: +${idMap.prefixes.length - beforePrefixes} prefixes, +${idMap.suffixes.length - beforeSuffixes} suffixes (epoch ${idMap.meta.epoch})`
+  );
+  console.log(
+    `  store: base ${catalog.storeBase.byteLength} B, tail ${catalog.storeTail.byteLength} B`
+  );
+  console.log(
+    `  index shards: ${catalog.index.length} totalling ${indexBytes} B`
+  );
+
   console.log(`Generated ${bangs.length} bangs in ${GENERATED_OUT_DIR}/`);
 }
 
 async function main(): Promise<void> {
   const noFetch = process.argv.includes("--no-fetch");
   const fromMerged = process.argv.includes("--from-merged");
+  if (process.argv.includes("--rebalance-router")) {
+    // Separate command: rebalancing reassigns cells to shards, rewriting every
+    // shard and forcing a full re-download for every installed client. An epoch
+    // event, not something a daily build may do.
+    const bangs = await loadBangs({ fromMerged: true, noFetch: true });
+    const router = rebalanceBangShardRouter(bangs);
+    await Bun.write(BANG_ROUTER_PATH, JSON.stringify(Array.from(router)));
+    const { shards } = generateBinaryShards(bangs, router);
+    const sizes = shards.map((shard) => shard.byteLength);
+    const mean = sizes.reduce((total, size) => total + size, 0) / sizes.length;
+    console.log(
+      `Rebalanced ${BANG_ROUTER_PATH}: max/mean ${(Math.max(...sizes) / mean).toFixed(3)}, min/mean ${(Math.min(...sizes) / mean).toFixed(3)}`
+    );
+    return;
+  }
   await runCodegen({ fromMerged, noFetch });
 }
 

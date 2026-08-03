@@ -20,7 +20,10 @@ import {
   configureSeedCacheName,
   customSuggestUrlsEnabled,
 } from "../scripts/shared";
-import { BANG_SHARD_ROUTER_SIZE } from "../src/shared/bang-shards";
+import {
+  BANG_SHARD_COUNT,
+  BANG_SHARD_ROUTER_SIZE,
+} from "../src/shared/bang-shards";
 
 interface BuildOutputFixture {
   logs?: Array<Error>;
@@ -118,7 +121,7 @@ describe("build cache version", () => {
         "/bangs-a.bin",
         "/fallback-a.js",
         [2, 1],
-        "shards-a"
+        ["/bangs-s0-a.bin"]
       );
 
       expect(buildSpy).toHaveBeenCalledWith(
@@ -130,7 +133,7 @@ describe("build cache version", () => {
           define: expect.objectContaining({
             __BANG_DATA_ASSET__: '"/bangs-a.bin"',
             __BANG_SHARD_ROUTER__: "[2,1]",
-            __BANG_SHARD_VERSION__: '"shards-a"',
+            __BANG_SHARD_ASSETS__: '["/bangs-s0-a.bin"]',
             __FALLBACK_ASSET__: '"/fallback-a.js"',
             __CACHE_VERSION__: '"fb-test"',
             __REQUIRED_APP_ASSETS__: '["/chunk-a.js"]',
@@ -363,20 +366,24 @@ describe("bang data asset injection", () => {
 
   test("replaces the generated bang shard layout markers", () => {
     const router = new Uint8Array(BANG_SHARD_ROUTER_SIZE);
+    const shardAssets = Array.from(
+      { length: BANG_SHARD_COUNT },
+      (_, shard) => `/bangs-s${shard.toString(36)}-0123456789ab.bin`
+    );
     expect(
       configureBangShardLayout(
-        'const router="__BANG_SHARD_ROUTER_JSON__",version="__BANG_SHARD_VERSION__"',
+        'const router="__BANG_SHARD_ROUTER_JSON__",assets="__BANG_SHARD_ASSETS_JSON__"',
         router,
-        "0123456789ab"
+        shardAssets
       )
     ).toBe(
-      `const router=${JSON.stringify(Array.from(router))},version="0123456789ab"`
+      `const router=${JSON.stringify(Array.from(router))},assets=${JSON.stringify(shardAssets)}`
     );
     expect(() =>
       configureBangShardLayout(
         'const router="__BANG_SHARD_ROUTER_JSON__"',
         router.slice(1),
-        "0123456789ab"
+        shardAssets
       )
     ).toThrow(`Expected ${BANG_SHARD_ROUTER_SIZE} bang shard routes`);
   });

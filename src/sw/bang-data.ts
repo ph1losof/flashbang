@@ -1,5 +1,31 @@
+import { BANG_BINARY_VERSION_INDEX } from "../shared/bang-binary-format";
 import { BANG_SHARD_COUNT, bangShardIndex } from "../shared/bang-shards";
 import type { SnapTargetParts } from "../shared/snap-target";
+import type { BangStrings } from "./bang-strings";
+
+/**
+ * Thrown when an index shard needs string IDs the loaded store does not have
+ * yet. Distinct from a decode failure: the caller refetches the store and
+ * retries rather than failing the redirect.
+ */
+export class BangStringStoreStaleError extends Error {
+  constructor(
+    readonly epoch: number,
+    readonly requiredPrefixCount: number,
+    readonly requiredSuffixCount: number
+  ) {
+    super("Bang string store is stale for this index shard");
+    this.name = "BangStringStoreStaleError";
+  }
+}
+
+export function isBangStringStoreStale(
+  error: unknown
+): error is BangStringStoreStaleError {
+  return error instanceof BangStringStoreStaleError;
+}
+
+const VERSION_INDEX = BANG_BINARY_VERSION_INDEX;
 
 export type BuiltinUrlParts =
   | readonly [string, string | null]
@@ -362,13 +388,197 @@ export function decodeBangData(buffer: ArrayBuffer): BangLookup {
   return decodeBangDataInternal(buffer, true);
 }
 
+/**
+ * Decode a v11 index shard against the global string store.
+ *
+ * Hot path is identical in shape to the self-contained decoder: one MPH probe,
+ * one fingerprint compare, one dense `tupleCache` hit. The store is only touched
+ * on an entry's *first* resolution, so warm lookups never leave this shard's
+ * typed arrays.
+ *
+ * Skew is checked exactly once, here, before the closure is published. Carrying
+ * `requiredPrefixCount`/`requiredSuffixCount` in the header lets that be an O(1)
+ * range check instead of a per-string bounds test on the fill path. The epoch is
+ * an equality check rather than a content hash because an index shard built at
+ * generation N against a store at generation N+1 is the normal, correct steady
+ * state under append-only IDs — a hash pin would reject it.
+ */
+export function decodeIndexBangData(
+  buffer: ArrayBuffer,
+  strings: BangStrings
+): BangLookup {
+  const header = new Uint32Array(buffer, 0, HEADER_WORDS);
+  if (header[0] !== MAGIC || header[1] !== VERSION_INDEX) {
+    throw new Error("Unsupported binary bang index shard");
+  }
+  if (header[11] !== buffer.byteLength) {
+    throw new Error("Truncated binary bang index shard");
+  }
+  const entryCount = header[2];
+  const bucketCount = header[3];
+  if (bucketCount === 0 || (bucketCount & (bucketCount - 1)) !== 0) {
+    throw new Error("Invalid binary bang MPHF bucket count");
+  }
+  if (header[7] !== strings.epoch) {
+    throw new BangStringStoreStaleError(header[7], header[5], header[6]);
+  }
+  if (header[5] > strings.prefixCount || header[6] > strings.suffixCount) {
+    throw new BangStringStoreStaleError(header[7], header[5], header[6]);
+  }
+
+  const displacementWidth = header[12];
+  const idWidth = header[8];
+  if (idWidth !== 2 && idWidth !== 4) {
+    throw new Error("Invalid binary bang index shard id width");
+  }
+  const snapCount = header[13];
+  const snapTargetCount = header[14];
+  let offset = HEADER_BYTES;
+  const displacements =
+    displacementWidth === 2
+      ? new Int16Array(buffer, offset, bucketCount)
+      : new Int32Array(buffer, offset, bucketCount);
+  offset += displacements.byteLength;
+  const fingerprints = new Uint16Array(buffer, offset, entryCount);
+  offset += fingerprints.byteLength;
+  offset = idWidth === 4 ? (offset + 3) & ~3 : (offset + 1) & ~1;
+  const prefixIds =
+    idWidth === 2
+      ? new Uint16Array(buffer, offset, entryCount)
+      : new Uint32Array(buffer, offset, entryCount);
+  offset += prefixIds.byteLength;
+  const suffixIds =
+    idWidth === 2
+      ? new Uint16Array(buffer, offset, entryCount)
+      : new Uint32Array(buffer, offset, entryCount);
+  offset += suffixIds.byteLength;
+  const snapSlots = new Uint16Array(buffer, offset, snapCount);
+  offset += snapSlots.byteLength;
+  const snapTargetIds = new Uint16Array(buffer, offset, snapCount);
+  offset += snapTargetIds.byteLength;
+  const snapTargetLengths = new Uint16Array(
+    buffer,
+    offset,
+    snapTargetCount * 2
+  );
+  offset += snapTargetLengths.byteLength;
+  const snapTriggerLengths = new Uint16Array(buffer, offset, snapCount);
+  offset += snapTriggerLengths.byteLength;
+  if (offset !== header[10]) {
+    throw new Error("Invalid binary bang index shard layout");
+  }
+  const snapTargetBlob = new Uint8Array(buffer, offset, header[15]);
+  offset += header[15];
+  const snapTriggerBlob = new Uint8Array(buffer, offset);
+
+  const snapRows =
+    snapCount < 256 ? new Uint8Array(entryCount) : new Uint16Array(entryCount);
+  for (let i = 0; i < snapCount; i++) {
+    snapRows[snapSlots[i]] = i + 1;
+  }
+  const decoder = new TextDecoder();
+  const snapTargetCache: Array<SnapTargetParts | undefined> = [];
+  const snapTriggerCache: Array<string | undefined> = [];
+  const tupleCache: Array<readonly [string, string | null] | undefined> = [];
+  const snapTupleCache: Array<BuiltinUrlParts | undefined> = [];
+  const bucketMask = bucketCount - 1;
+
+  function snapTarget(id: number): SnapTargetParts {
+    let value = snapTargetCache[id];
+    if (value === undefined) {
+      const lengthIndex = id * 2;
+      let start = 0;
+      for (let i = 0; i < lengthIndex; i++) {
+        start += snapTargetLengths[i];
+      }
+      const siteFilterLength = snapTargetLengths[lengthIndex];
+      const originLength = snapTargetLengths[lengthIndex + 1];
+      const originStart = start + siteFilterLength;
+      value = [
+        decoder.decode(
+          snapTargetBlob.subarray(start, start + siteFilterLength)
+        ),
+        decoder.decode(
+          snapTargetBlob.subarray(originStart, originStart + originLength)
+        ),
+      ];
+      snapTargetCache[id] = value;
+    }
+    return value;
+  }
+
+  function snapTrigger(id: number): string {
+    let value = snapTriggerCache[id];
+    if (value === undefined) {
+      let start = 0;
+      for (let i = 0; i < id; i++) {
+        start += snapTriggerLengths[i];
+      }
+      value = decoder.decode(
+        snapTriggerBlob.subarray(start, start + snapTriggerLengths[id])
+      );
+      snapTriggerCache[id] = value;
+    }
+    return value;
+  }
+
+  function tuple(index: number, trigger: string): BuiltinUrlParts {
+    let value = tupleCache[index];
+    if (value === undefined) {
+      const suffixId = suffixIds[index];
+      value = [
+        strings.prefix(prefixIds[index]),
+        suffixId === 0 ? null : strings.suffix(suffixId - 1),
+      ];
+      tupleCache[index] = value;
+    }
+    const snapRow = snapRows[index] - 1;
+    if (snapRow === -1 || snapTrigger(snapRow) !== trigger) {
+      return value;
+    }
+    let snapValue = snapTupleCache[index];
+    if (snapValue === undefined) {
+      snapValue = [value[0], value[1], snapTarget(snapTargetIds[snapRow])];
+      snapTupleCache[index] = snapValue;
+    }
+    return snapValue;
+  }
+
+  return (trigger, hash) => {
+    const unsignedHash = hash >>> 0;
+    let bucketHash = unsignedHash ^ (unsignedHash >>> 16);
+    bucketHash = Math.imul(bucketHash, MPH_BUCKET_MULTIPLIER);
+    bucketHash ^= bucketHash >>> 15;
+    const displacement = displacements[bucketHash & bucketMask];
+    const index =
+      displacement < 0
+        ? -displacement - 1
+        : (Math.imul(unsignedHash ^ (displacement + 1), MPH_SLOT_MULTIPLIER) >>>
+            0) %
+          entryCount;
+    return fingerprints[index] === unsignedHash >>> 16
+      ? tuple(index, trigger)
+      : null;
+  };
+}
+
 function decodeTrustedGeneratedBangData(buffer: ArrayBuffer): BangLookup {
   return decodeBangDataInternal(buffer, false);
 }
 
-export function createBangShardRuntime(
+async function defaultShardRead(asset: string): Promise<ArrayBuffer> {
+  const response = await fetch(asset);
+  if (!response.ok) {
+    throw new Error(`Failed to load bang shard: ${response.status}`);
+  }
+  return response.arrayBuffer();
+}
+
+function createShardRuntime(
   router: ArrayLike<number>,
-  version: string
+  assets: readonly string[],
+  decode: (buffer: ArrayBuffer) => BangLookup,
+  read: (asset: string) => Promise<ArrayBuffer> = defaultShardRead
 ): BangShardRuntime {
   const lookups: Array<BangLookup | null> = Array.from(
     { length: BANG_SHARD_COUNT },
@@ -404,21 +614,10 @@ export function createBangShardRuntime(
     let promise = promises[shardId];
     if (!promise) {
       promise = (
-        prefetched
-          ? Promise.resolve(prefetched)
-          : fetch(`/bangs-s${shardId.toString(36)}-${version}.bin`).then(
-              (response) => {
-                if (!response.ok) {
-                  throw new Error(
-                    `Failed to load bang shard: ${response.status}`
-                  );
-                }
-                return response.arrayBuffer();
-              }
-            )
+        prefetched ? Promise.resolve(prefetched) : read(assets[shardId])
       )
         .then((buffer) => {
-          lookups[shardId] = decodeTrustedGeneratedBangData(buffer);
+          lookups[shardId] = decode(buffer);
         })
         .catch((error) => {
           promises[shardId] = null;
@@ -446,6 +645,45 @@ export function createBangShardRuntime(
         : null;
     },
   };
+}
+
+/** Self-contained v10 shards used by the minimal first-redirect fallback. */
+export function createBangShardRuntime(
+  router: ArrayLike<number>,
+  // One content-addressed URL per shard, so a catalog change rotates only the
+  // shards whose bytes moved.
+  assets: readonly string[],
+  read: (asset: string) => Promise<ArrayBuffer> = defaultShardRead
+): BangShardRuntime {
+  return createShardRuntime(
+    router,
+    assets,
+    decodeTrustedGeneratedBangData,
+    read
+  );
+}
+
+/** v11 index shards resolved lazily against the append-only global store. */
+export function createBangIndexRuntime(
+  router: ArrayLike<number>,
+  assets: readonly string[],
+  // A getter lets the runtime be constructed before the store has loaded.
+  strings: () => BangStrings | null,
+  // The Service Worker supplies a cache-first reader for offline resolution.
+  read: (asset: string) => Promise<ArrayBuffer> = defaultShardRead
+): BangShardRuntime {
+  return createShardRuntime(
+    router,
+    assets,
+    (buffer) => {
+      const store = strings();
+      if (!store) {
+        throw new Error("Bang string store is not initialized");
+      }
+      return decodeIndexBangData(buffer, store);
+    },
+    read
+  );
 }
 
 export function initializeBangData(buffer: ArrayBuffer): void {

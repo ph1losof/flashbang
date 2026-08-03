@@ -8,6 +8,9 @@ import { closeServiceWorkerTarget, disableServiceWorkers } from "./helpers";
 const GOOGLE_REDIRECT = /google\.com\/search\?q=hello/;
 const GOOGLE_HOST = "https://www.google.com";
 const CUSTOM_HOST = "https://example.com";
+const BANG_COLD_ASSET_RE = /^\/bangs-s(?:[0-9a-z]|1[0-6])-[a-f0-9]{12}\.bin$/;
+const BANG_INDEX_ASSET_RE = /^\/bangs-i(?:[0-9a-z]|1[0-6])-[a-f0-9]{12}\.bin$/;
+const BANG_STORE_ASSET_RE = /\/bangs-str-[a-f0-9]{12}\.bin$/;
 const WEBKIT_SERVICE_WORKER_SKIP =
   "Playwright WebKit does not support service worker lifecycle testing";
 
@@ -1474,8 +1477,9 @@ test("newly activated worker redirects from a shard while the full catalog warms
   });
   try {
     let fullCatalogStarted = false;
+    let finishedStoreAssets = 0;
     const shardRequests: string[] = [];
-    await context.route(/\/bangs-[a-f0-9]{12}\.bin$/, async (route) => {
+    await context.route(BANG_STORE_ASSET_RE, async (route) => {
       fullCatalogStarted = true;
       await fullCatalogGate;
       fullCatalogReleased = true;
@@ -1486,13 +1490,16 @@ test("newly activated worker redirects from a shard while the full catalog warms
     );
     context.on("request", (request) => {
       const pathname = new URL(request.url()).pathname;
-      if (/^\/bangs-s[0-9a-z]+-[a-f0-9]{12}\.bin$/.test(pathname)) {
+      if (BANG_COLD_ASSET_RE.test(pathname)) {
         shardRequests.push(pathname);
       }
     });
     context.on("requestfinished", (request) => {
-      if (/\/bangs-[a-f0-9]{12}\.bin$/.test(new URL(request.url()).pathname)) {
-        finishFullCatalog();
+      if (BANG_STORE_ASSET_RE.test(new URL(request.url()).pathname)) {
+        finishedStoreAssets++;
+        if (finishedStoreAssets === 2) {
+          finishFullCatalog();
+        }
       }
     });
 
@@ -1540,7 +1547,7 @@ test("newly activated worker redirects from a shard while the full catalog warms
               for (const request of await (
                 await caches.open(cacheName)
               ).keys()) {
-                if (/\/bangs-[a-f0-9]{12}\.bin$/.test(request.url)) {
+                if (/\/bangs-str-[a-f0-9]{12}\.bin$/.test(request.url)) {
                   return true;
                 }
               }
@@ -1564,7 +1571,7 @@ test("newly activated worker redirects from a shard while the full catalog warms
         settlingPage.evaluate(async () => {
           for (const cacheName of await caches.keys()) {
             for (const request of await (await caches.open(cacheName)).keys()) {
-              if (/\/bangs-[a-f0-9]{12}\.bin$/.test(request.url)) {
+              if (/\/bangs-str-[a-f0-9]{12}\.bin$/.test(request.url)) {
                 return true;
               }
             }
@@ -1877,7 +1884,7 @@ test("first hot redirect warms the full catalog without waiting", async ({
     const page = await context.newPage();
     await mockGoogleSearchRoute(page);
     const bangDataRequests: string[] = [];
-    await context.route(/\/bangs-[a-f0-9]{12}\.bin$/, async (route) => {
+    await context.route(BANG_STORE_ASSET_RE, async (route) => {
       await fullCatalogGate;
       fullCatalogReleased = true;
       await route.continue();
@@ -1907,7 +1914,7 @@ test("first hot redirect warms the full catalog without waiting", async ({
               for (const request of await (
                 await caches.open(cacheName)
               ).keys()) {
-                if (/\/bangs-[a-f0-9]{12}\.bin$/.test(request.url)) {
+                if (/\/bangs-str-[a-f0-9]{12}\.bin$/.test(request.url)) {
                   return true;
                 }
               }
@@ -1919,7 +1926,13 @@ test("first hot redirect warms the full catalog without waiting", async ({
       await settlingPage.close();
       return;
     }
-    await expect.poll(() => bangDataRequests.length).toBe(1);
+    await expect
+      .poll(
+        () =>
+          bangDataRequests.filter((path) => BANG_STORE_ASSET_RE.test(path))
+            .length
+      )
+      .toBe(2);
     expect(fullCatalogReleased).toBe(false);
 
     releaseFullCatalog();
@@ -1930,7 +1943,7 @@ test("first hot redirect warms the full catalog without waiting", async ({
         settlingPage.evaluate(async () => {
           for (const cacheName of await caches.keys()) {
             for (const request of await (await caches.open(cacheName)).keys()) {
-              if (/\/bangs-[a-f0-9]{12}\.bin$/.test(request.url)) {
+              if (/\/bangs-str-[a-f0-9]{12}\.bin$/.test(request.url)) {
                 return true;
               }
             }
@@ -1962,10 +1975,7 @@ test("first fallback seeds the worker for the next offline redirect", async ({
     let shardStartedBeforeColdFallbackFinished = false;
     context.on("request", (request) => {
       const pathname = new URL(request.url()).pathname;
-      if (
-        /^\/bangs-s[0-9a-z]+-[a-f0-9]{12}\.bin$/.test(pathname) &&
-        !coldFallbackFinished
-      ) {
+      if (BANG_COLD_ASSET_RE.test(pathname) && !coldFallbackFinished) {
         shardStartedBeforeColdFallbackFinished = true;
       }
       if (
@@ -2035,7 +2045,7 @@ test("first fallback seeds the worker for the next offline redirect", async ({
                 const pathname = new URL(url).pathname;
                 return (
                   pathname === "/bangs.bin" ||
-                  /^\/bangs-[a-f0-9]{12}\.bin$/.test(pathname)
+                  /^\/bangs-str-[a-f0-9]{12}\.bin$/.test(pathname)
                 );
               })
             ) {
@@ -2047,9 +2057,7 @@ test("first fallback seeds the worker for the next offline redirect", async ({
       )
       .toBe(true);
     expect(
-      bangDataRequests.some((pathname) =>
-        /^\/bangs-s[0-9a-z]+-[a-f0-9]{12}\.bin$/.test(pathname)
-      )
+      bangDataRequests.some((pathname) => BANG_COLD_ASSET_RE.test(pathname))
     ).toBe(true);
     expect(shardStartedBeforeColdFallbackFinished).toBe(true);
 
@@ -2467,6 +2475,150 @@ test("controlled redirect works while offline", async ({
   } finally {
     await context.unroute(`${origin}/**`);
   }
+});
+
+test("warm redirect repairs a stale string store exactly once", async ({
+  browser,
+  browserName,
+  context,
+  page,
+}) => {
+  test.skip(
+    browserName !== "chromium",
+    "Service worker restart and fetch coverage runs in Chromium"
+  );
+  await mockGoogleSearchRoute(page);
+  await ensureWarmController(page);
+  await waitForAppReady(page);
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        let count = 0;
+        for (const cacheName of await caches.keys()) {
+          for (const request of await (await caches.open(cacheName)).keys()) {
+            if (/\/bangs-str-[a-f0-9]{12}\.bin$/.test(request.url)) {
+              count++;
+            }
+          }
+        }
+        return count;
+      })
+    )
+    .toBeGreaterThanOrEqual(2);
+
+  await page.evaluate(async () => {
+    for (const cacheName of await caches.keys()) {
+      const cache = await caches.open(cacheName);
+      for (const request of await cache.keys()) {
+        if (!/\/bangs-str-[a-f0-9]{12}\.bin$/.test(request.url)) {
+          continue;
+        }
+        const response = await cache.match(request);
+        if (!response) {
+          continue;
+        }
+        const buffer = await response.arrayBuffer();
+        new Uint32Array(buffer, 0, 12)[2]++;
+        await cache.put(request, new Response(buffer));
+      }
+    }
+  });
+
+  let storeRefetches = 0;
+  context.on("request", (request) => {
+    if (BANG_STORE_ASSET_RE.test(new URL(request.url()).pathname)) {
+      storeRefetches++;
+    }
+  });
+  const cdp = await browser.newBrowserCDPSession();
+  await closeServiceWorkerTarget(cdp, (url) => url.endsWith("/sw.js"));
+  await cdp.detach();
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(resolveRedirectViaWorker(page, "!g hello")).resolves.toMatch(
+    GOOGLE_REDIRECT
+  );
+  expect(storeRefetches).toBeGreaterThanOrEqual(2);
+});
+
+test("worker migrates unchanged index shards without refetching", async ({
+  browser,
+  browserName,
+  context,
+  page,
+}) => {
+  test.skip(
+    browserName !== "chromium",
+    "Service worker restart and request coverage runs in Chromium"
+  );
+  await mockGoogleSearchRoute(page);
+  await ensureWarmController(page);
+  await waitForAppReady(page);
+  const workerSource = await readFile(
+    `${process.env.DIST_DIR || "dist"}/sw.js`,
+    "utf8"
+  );
+  const cacheName = workerSource.match(/fb-[a-f0-9]{8}/)?.[0];
+  expect(cacheName).toBeDefined();
+  await expect
+    .poll(() =>
+      page.evaluate(async (currentCacheName) => {
+        const cache = await caches.open(currentCacheName);
+        return (await cache.keys()).filter((request) =>
+          /\/bangs-i(?:[0-9a-z]|1[0-6])-[a-f0-9]{12}\.bin$/.test(request.url)
+        ).length;
+      }, cacheName!)
+    )
+    .toBe(43);
+
+  const oldCacheName = "fb-e2e-index-migration";
+  await page.evaluate(
+    async ({ currentCacheName, previousCacheName }) => {
+      const current = await caches.open(currentCacheName);
+      const previous = await caches.open(previousCacheName);
+      for (const request of await current.keys()) {
+        if (
+          !/\/bangs-i(?:[0-9a-z]|1[0-6])-[a-f0-9]{12}\.bin$/.test(request.url)
+        ) {
+          continue;
+        }
+        const response = await current.match(request);
+        if (response) {
+          await previous.put(request, response);
+          await current.delete(request);
+        }
+      }
+    },
+    { currentCacheName: cacheName!, previousCacheName: oldCacheName }
+  );
+
+  let indexRefetches = 0;
+  context.on("request", (request) => {
+    if (BANG_INDEX_ASSET_RE.test(new URL(request.url()).pathname)) {
+      indexRefetches++;
+    }
+  });
+  const cdp = await browser.newBrowserCDPSession();
+  await closeServiceWorkerTarget(cdp, (url) => url.endsWith("/sw.js"));
+  await cdp.detach();
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(resolveRedirectViaWorker(page, "!g hello")).resolves.toMatch(
+    GOOGLE_REDIRECT
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(async (currentCacheName) => {
+        const cache = await caches.open(currentCacheName);
+        return (await cache.keys()).filter((request) =>
+          /\/bangs-i(?:[0-9a-z]|1[0-6])-[a-f0-9]{12}\.bin$/.test(request.url)
+        ).length;
+      }, cacheName!)
+    )
+    .toBe(43);
+  expect(indexRefetches).toBe(0);
+  await expect
+    .poll(() => page.evaluate(() => caches.keys()))
+    .not.toContain(oldCacheName);
 });
 
 test("settings catalog works on its first offline open", async ({

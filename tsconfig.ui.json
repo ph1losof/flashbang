@@ -7,6 +7,7 @@
   "include": [
     "src/shared/**/*.ts",
     "src/sw/bang-data.ts",
+    "src/sw/bang-strings.ts",
     "src/sw/default-redirect-settings.ts",
     "src/sw/hot-redirect.ts",
     "src/sw/redirect-core.ts",

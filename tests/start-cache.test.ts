@@ -55,6 +55,19 @@ describe("production static caching", () => {
     expect(cacheControlForAsset("/fallback-0123456789ab.js")).toBe(
       "public, max-age=31536000, immutable"
     );
+    expect(cacheControlForAsset("/cold-fallback-0123456789ab.js")).toBe(
+      "public, max-age=31536000, immutable"
+    );
+    // Shards carry a base36 id between the prefix and the version hash, so both
+    // the single- and double-digit forms have to match.
+    expect(cacheControlForAsset("/bangs-str-0123456789ab.bin")).toBe(
+      "public, max-age=31536000, immutable"
+    );
+    for (const shard of ["s0", "s9", "sw", "s10", "s16", "i0", "iw", "i13"]) {
+      expect(cacheControlForAsset(`/bangs-${shard}-0123456789ab.bin`)).toBe(
+        "public, max-age=31536000, immutable"
+      );
+    }
     for (const path of [
       "/app.js",
       "/bench.js",

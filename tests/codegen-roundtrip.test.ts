@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { generateBinaryShards } from "../scripts/codegen";
+import { loadStringIdMap } from "../scripts/bang-strings-build";
+import { generateBinaryShards, generateCatalog } from "../scripts/codegen";
 import { lookupAdvancedBang } from "../src/generated/bangs-sparse.js";
 import {
   BANG_SHARD_COUNT,
@@ -9,12 +10,22 @@ import {
 } from "../src/shared/bang-shards";
 import { hashFNV1a } from "../src/shared/hash";
 import {
+  createBangIndexRuntime,
   createBangShardRuntime,
   initializeBangData,
+  isBangStringStoreStale,
   lookupBang,
 } from "../src/sw/bang-data";
+import { createBangStrings } from "../src/sw/bang-strings";
 import { redirectRawUrl } from "../src/sw/redirect";
 import { decodeBangCatalog } from "../src/ui/bang-catalog";
+
+const testShardAssets = () =>
+  Array.from(
+    { length: BANG_SHARD_COUNT },
+    (_, shard) => `/bangs-s${shard.toString(36)}-test.bin`
+  );
+
 import {
   BANG_BINARY_HEADER_WORDS,
   BANG_BINARY_MAGIC,
@@ -166,8 +177,24 @@ describe("codegen round-trip", () => {
   test("routes every regular bang through its deterministic cold shard", async () => {
     const { router, shards } = generateBinaryShards(bangs);
     const repeated = generateBinaryShards(bangs);
-    expect(BANG_SHARD_COUNT % 2).toBe(1);
     expect(router).toHaveLength(BANG_SHARD_ROUTER_SIZE);
+    // The router is frozen in data/bang-router.json, so adding a bang must not
+    // move any existing bang between shards.
+    const grown = generateBinaryShards([
+      ...bangs,
+      {
+        domain: "shard-stability.example",
+        name: "Shard stability probe",
+        relevance: 1,
+        trigger: "zzshardstabilityprobe",
+        url: "https://shard-stability.example/?q={}",
+      },
+    ]);
+    expect(Array.from(grown.router)).toEqual(Array.from(router));
+    const churned = grown.shards.filter(
+      (shard, id) => Bun.hash(shard) !== Bun.hash(shards[id])
+    ).length;
+    expect(churned).toBe(1);
     expect(shards).toHaveLength(BANG_SHARD_COUNT);
     expect(Array.from(repeated.router)).toEqual(Array.from(router));
     expect(repeated.shards.map((shard) => Bun.hash(shard))).toEqual(
@@ -198,7 +225,7 @@ describe("codegen round-trip", () => {
 
   test("loads and resets an exact shard through the shared runtime", async () => {
     const { router, shards } = generateBinaryShards(bangs);
-    const runtime = createBangShardRuntime(router, "test");
+    const runtime = createBangShardRuntime(router, testShardAssets());
     const trigger = "github";
     const hash = hashFNV1a(trigger);
     const shardId = bangShardIndex(hash, router);
@@ -226,8 +253,60 @@ describe("codegen round-trip", () => {
     expect(() => runtime.lookup(trigger, hash)).toThrow();
   });
 
+  test("loads a v11 shard against the global store and detects stale pairs", async () => {
+    const catalog = generateCatalog(bangs, loadStringIdMap());
+    const detach = (bytes: Uint8Array): ArrayBuffer =>
+      bytes.buffer.slice(
+        bytes.byteOffset,
+        bytes.byteOffset + bytes.byteLength
+      ) as ArrayBuffer;
+    const strings = createBangStrings([
+      detach(catalog.storeBase),
+      detach(catalog.storeTail),
+    ]);
+    const assets = catalog.index.map(
+      (_, shard) => `/bangs-i${shard.toString(36)}-test.bin`
+    );
+    const reads: string[] = [];
+    const runtime = createBangIndexRuntime(
+      catalog.router,
+      assets,
+      () => strings,
+      (asset) => {
+        reads.push(asset);
+        const shard = Number.parseInt(
+          /^\/bangs-i([0-9a-z]+)-/.exec(asset)![1],
+          36
+        );
+        return Promise.resolve(detach(catalog.index[shard]));
+      }
+    );
+    const trigger = "github";
+    const hash = hashFNV1a(trigger);
+    const shardId = bangShardIndex(hash, catalog.router);
+    await runtime.ensure(shardId);
+    expect(runtime.lookup(trigger, hash)?.[0]).toContain("github.com");
+    await runtime.ensure(shardId);
+    expect(reads).toEqual([assets[shardId]]);
+
+    const staleRuntime = createBangIndexRuntime(catalog.router, assets, () => ({
+      ...strings,
+      epoch: strings.epoch + 1,
+    }));
+    let staleError: unknown;
+    try {
+      await staleRuntime.ensure(shardId, detach(catalog.index[shardId]));
+    } catch (error) {
+      staleError = error;
+    }
+    expect(isBangStringStoreStale(staleError)).toBe(true);
+  });
+
   test("retries a shard after a failed network response", async () => {
-    const runtime = createBangShardRuntime(new Uint8Array(256), "missing");
+    const runtime = createBangShardRuntime(
+      new Uint8Array(256),
+      testShardAssets()
+    );
     const globals = globalThis as unknown as {
       fetch: (input: RequestInfo | URL) => Promise<Response>;
     };

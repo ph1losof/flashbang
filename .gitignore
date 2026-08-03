@@ -6,6 +6,10 @@ test-results/
 profiles/
 benchmark-results/
 !data/bangs.json
+!data/bang-router.json
+!data/bang-prefixes.txt
+!data/bang-suffixes.txt
+!data/bang-strings-meta.json
 !data/custom-bangs.json
 !data/suggest-sites.json
 node_modules/

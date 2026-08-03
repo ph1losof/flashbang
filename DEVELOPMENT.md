@@ -52,6 +52,7 @@ flashbang/
 │   └── opensearch.xml.ts     # Cloudflare Pages Function for /opensearch.xml
 ├── scripts/
 │   ├── codegen.ts            # Fetch sources, parse, merge, generate bang artifacts
+│   ├── bang-strings-build.ts # Append-only global string ID map and store encoder
 │   ├── build.ts              # Bundle + minify pipeline
 │   ├── dev.ts                # Dev server with file watching, rebuild & live reload
 │   ├── inline-script-hash.ts # Shared inline-script CSP hash extraction
@@ -62,6 +63,10 @@ flashbang/
 │   └── summarize-bang-update.ts # Daily bang-update change summary generator
 ├── data/
 │   ├── bangs.json            # Merged bang data (committed, updated by daily automation)
+│   ├── bang-router.json      # Frozen cell-to-shard table; rebuilt only by codegen --rebalance-router
+│   ├── bang-prefixes.txt     # Append-only global prefix ID map (line index = ID)
+│   ├── bang-suffixes.txt     # Append-only global suffix ID map (line index = ID)
+│   ├── bang-strings-meta.json # String store epoch and base/tail split point
 │   ├── custom-bangs.json     # Custom bang definitions
 │   └── suggest-sites.json # Committed domain-level autocomplete capabilities
 ├── src/
@@ -73,6 +78,7 @@ flashbang/
 │   │   └── headers.ts        # CSP and security headers (shared across all targets)
 │   ├── shared/
 │   │   ├── bang-shards.ts      # Deterministic binary bang shard selection
+│   │   ├── bang-binary-format.ts # Shared packed-catalog layout constants
 │   │   ├── capture-template.ts # Capture template compilation and regex safety
 │   │   ├── chars.ts           # Character classification helpers
 │   │   ├── constants.ts       # Shared constants
@@ -92,6 +98,8 @@ flashbang/
 │   │   └── trie.ts            # Radix trie lookup
 │   ├── generated/             # Output of codegen (gitignored, generated from data/bangs.json)
 │   │   ├── bangs.bin          # packed trigger→URL data for Service Worker
+│   │   ├── bangs-str-base.bin # global append-only string store (base chunk)
+│   │   ├── bangs-str-tail.bin # global string store tail appended since the base
 │   │   ├── bangs-hot.js       # generated top-relevance cold-start redirect tier
 │   │   ├── bangs-sparse.js    # advanced bang and snap override lookups
 │   │   ├── bangs-meta.bin     # packed trigger/name/domain catalog for UI
@@ -100,6 +108,7 @@ flashbang/
 │   │   └── *.d.ts             # TypeScript declarations for each generated .js file
 │   ├── sw/
 │   │   ├── bang-data.ts       # Binary bang decoder and regular lookup
+│   │   ├── bang-strings.ts    # Global string store decoder shared by index shards
 │   │   ├── default-redirect-settings.ts # I/O-free default redirect settings
 │   │   ├── redirect-core.ts    # Shared allocation-free redirect resolver
 │   │   ├── redirect-prefix.ts  # Shared prefix parsing and URL assembly
