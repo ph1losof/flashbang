@@ -22,7 +22,7 @@
     "profile:private": "DIST_DIR=dist-e2e ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=true bun run build && PROFILE_PRIVATE_REDIRECT=true DIST_DIR=dist-e2e ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=true bunx playwright test tests/e2e/private-perf.e2e.ts --workers=1",
     "profile:quick": "bun scripts/profile.ts --quick",
     "profile:cpu": "bun --cpu-prof --cpu-prof-md --cpu-prof-dir profiles scripts/profile.ts",
-    "clean": "bun -e \"import{rmSync}from'fs';for(const path of ['dist','dist-server'])rmSync(path,{recursive:true,force:true})\"",
+    "clean": "bun scripts/clean.ts",
     "test": "bun test",
     "test:e2e": "DIST_DIR=dist-e2e ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=true bun run build && DIST_DIR=dist-e2e ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=true bunx playwright test --workers=1"
   },

@@ -27,7 +27,7 @@ bun run profile:cpu   # write Bun CPU profiles under profiles/
 bun audit          # audit dependencies for known vulnerabilities
 bun test           # run unit, integration, performance, and docs tests
 bun run test:e2e   # run Playwright end-to-end tests (build + browser run)
-bun run clean      # remove dist/ and dist-server/
+bun run clean      # remove every dist*/ build tree and profiles/*.cpuprofile leftovers (--dry-run to preview)
 ```
 
 ## Project structure
@@ -54,6 +54,7 @@ flashbang/
 │   ├── codegen.ts            # Fetch sources, parse, merge, generate bang artifacts
 │   ├── bang-strings-build.ts # Append-only global string ID map and store encoder
 │   ├── build.ts              # Bundle + minify pipeline
+│   ├── clean.ts              # Remove build trees and CPU profile leftovers
 │   ├── dev.ts                # Dev server with file watching, rebuild & live reload
 │   ├── inline-script-hash.ts # Shared inline-script CSP hash extraction
 │   ├── profile.ts            # Profiling script
