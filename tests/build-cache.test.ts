@@ -344,7 +344,7 @@ describe("build cache version", () => {
       expect(headers).not.toContain("fallback-damtt05n.js>; rel=preload");
       expect(headers).not.toContain("/bangs-s*");
       expect(
-        headers.match(/^\/bangs-s[0-9a-z]+-[a-f0-9]{12}\.bin$/gm)
+        headers.match(/^\/bangs-s[0-9a-z]+-[a-f0-9]{8}\.bin$/gm)
       ).toHaveLength(BANG_SHARD_COUNT);
       expect([...new Bun.Glob("*.br").scanSync("dist")].length).toBeGreaterThan(
         0

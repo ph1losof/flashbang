@@ -27,6 +27,27 @@ import {
 const PRELIMINARY_SW_PATH = `${DIST_DIR}/sw-cache-input.js`;
 const SERVER_DIST_DIR = `${DIST_DIR}-server`;
 
+/**
+ * Hex digits of SHA-256 kept in a content-addressed asset URL.
+ *
+ * These digests are incompressible by construction, and both the cold fallback
+ * and the service worker inline the whole asset manifest — 43 shard URLs and 62
+ * URLs respectively. Every hex digit therefore costs ~29 B of Brotli payload in
+ * a bundle measured against an absolute transfer budget, and re-hashing on a
+ * catalog update re-rolls that payload by ~100 B either way. At 12 digits both
+ * bundles sat inside that swing (the cold fallback failed ~4 builds in 5 purely
+ * on digest luck), so keep this only as long as cache correctness needs.
+ *
+ * 32 bits is ample: a collision is harmful only between two consecutive
+ * versions of the *same* asset, since the shard id is part of the name and only
+ * one version is live at a time. That is ~2^-32 per asset per catalog update.
+ *
+ * Encoding denser than hex does not help — base64url carries 48 bits in 8 chars
+ * but compresses no smaller than 12 hex chars, because the flatter alphabet
+ * costs Brotli more per symbol than the shorter string saves.
+ */
+const CONTENT_HASH_LENGTH = 8;
+
 export function isCloudflarePagesBuild(value = process.env.CF_PAGES): boolean {
   return value === "1";
 }
@@ -260,7 +281,7 @@ export async function main(): Promise<void> {
   const bangDataHash = createHash("sha256")
     .update(bangDataBytes)
     .digest("hex")
-    .slice(0, 12);
+    .slice(0, CONTENT_HASH_LENGTH);
   const bangDataAsset = `/bangs-${bangDataHash}.bin`;
   await Bun.write(`${DIST_DIR}${bangDataAsset}`, bangDataBytes);
   const catalog = generateCatalog(
@@ -271,7 +292,10 @@ export async function main(): Promise<void> {
   // Per-shard content hash, so only the shards whose bytes changed get a new
   // URL. A version shared across shards rotates all 43 on any catalog change.
   const contentAsset = (bytes: Uint8Array, name: string): string => {
-    const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 12);
+    const hash = createHash("sha256")
+      .update(bytes)
+      .digest("hex")
+      .slice(0, CONTENT_HASH_LENGTH);
     return `/${name}-${hash}.bin`;
   };
   const bangShardAssets = catalog.cold.map((bytes, shard) =>
@@ -299,7 +323,7 @@ export async function main(): Promise<void> {
   const bangMetaHash = createHash("sha256")
     .update(bangMetaBytes)
     .digest("hex")
-    .slice(0, 12);
+    .slice(0, CONTENT_HASH_LENGTH);
   const bangMetaAsset = `/bangs-meta-${bangMetaHash}.bin`;
   await Bun.write(`${DIST_DIR}${bangMetaAsset}`, bangMetaBytes);
 
