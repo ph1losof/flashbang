@@ -320,14 +320,21 @@ describe("codegen round-trip", () => {
     expect(() => decodeBangIndexPack(new ArrayBuffer(4), 0)).toThrow(
       "Truncated"
     );
-    const invalidMagic = detach(packs[0]).slice(0);
-    new Uint32Array(invalidMagic)[0] = 0;
+    // A pack is a 4-aligned header followed by raw shard bytes, so its total
+    // length is a multiple of 4 only by chance — most packs are not. Corrupt a
+    // misaligned one so the decoder stays exercised against unaligned tails and
+    // these assertions cannot start depending on the day's bang data.
+    const misaligned = packs.find((pack) => pack.byteLength % 4 !== 0);
+    expect(misaligned).toBeDefined();
+    const invalidMagic = detach(misaligned!).slice(0);
+    // Bounded views only: `new Uint32Array(buffer)` throws on an unaligned tail.
+    new Uint32Array(invalidMagic, 0, 1)[0] = 0;
     expect(() => decodeBangIndexPack(invalidMagic, 0)).toThrow("Unsupported");
-    const invalidOffsets = detach(packs[0]).slice(0);
-    const offsetHeader = new Uint32Array(invalidOffsets);
+    const invalidOffsets = detach(misaligned!).slice(0);
+    const offsetHeader = new Uint32Array(invalidOffsets, 0, 5);
     offsetHeader[4] = offsetHeader[3];
     expect(() => decodeBangIndexPack(invalidOffsets, 0)).toThrow("offsets");
-    expect(() => decodeBangIndexPack(detach(packs[0]), 3)).toThrow("layout");
+    expect(() => decodeBangIndexPack(detach(misaligned!), 3)).toThrow("layout");
   });
 
   test("retries a shard after a failed network response", async () => {
