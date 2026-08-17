@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { brotliCompressSync, constants as zlibConstants } from "node:zlib";
@@ -109,42 +110,160 @@ const DDG_SOURCE_URL = "https://duckduckgo.com/bang.js";
 const KAGI_SOURCE_URL =
   "https://raw.githubusercontent.com/kagisearch/bangs/main/data/bangs.json";
 
-async function generatedBangDataIsCurrent(): Promise<boolean> {
-  const header = await Bun.file(GENERATED_BANG_DATA_FILES[0])
-    .slice(0, 8)
-    .arrayBuffer();
-  if (header.byteLength !== 8) {
-    return false;
-  }
-  const words = new Uint32Array(header);
-  if (words[0] !== BANG_BINARY_MAGIC || words[1] !== BANG_BINARY_VERSION) {
-    return false;
-  }
-  const trie = Bun.file("src/generated/bangs-trie-loader.js");
-  const tail = await trie
-    .slice(Math.max(0, trie.size - 2048), trie.size)
-    .text();
-  return tail.includes("export const TRIE_SCHEMA=4;");
+export interface GeneratedInputStamp {
+  /** Input path -> content digest, or `MISSING_INPUT_DIGEST` when absent. */
+  inputs: Record<string, string>;
+  version: number;
 }
 
-export async function ensureGeneratedBangData(
-  fromMerged = true
-): Promise<void> {
+export const GENERATED_INPUT_STAMP_PATH = `${GENERATED_OUT_DIR}/bangs-inputs.json`;
+const GENERATED_INPUT_STAMP_VERSION = 1;
+const MISSING_INPUT_DIGEST = "missing";
+
+/**
+ * Files whose bytes decide what codegen emits. `data/bangs.json` covers both
+ * modes: `--from-merged` reads it directly, and the fetching mode writes it
+ * before generating, so it is the effective catalog input either way. The
+ * string-ID map is an input as well as an output — IDs are append-only across
+ * runs — so the stamp is written after codegen rewrites it.
+ *
+ * `data/custom-bangs.json` is deliberately absent. It only feeds the merge step
+ * that produces `data/bangs.json`, and the guard below regenerates with
+ * `--from-merged`, which would clear the mismatch without picking the edit up.
+ * Editing it means re-running the full `bun run codegen`, which rewrites
+ * `data/bangs.json` and invalidates the stamp through that file instead.
+ *
+ * Declared as a function because `BANG_ROUTER_PATH` is defined further down.
+ */
+function codegenInputFiles(): readonly string[] {
+  return [
+    MERGED_BANGS_PATH,
+    SUGGEST_SITES_PATH,
+    BANG_ROUTER_PATH,
+    PREFIX_IDS_PATH,
+    SUFFIX_IDS_PATH,
+    STRING_META_PATH,
+  ];
+}
+
+async function digestInputFile(path: string): Promise<string> {
+  const file = Bun.file(path);
+  if (!(await file.exists())) {
+    return MISSING_INPUT_DIGEST;
+  }
+  return createHash("sha256")
+    .update(await file.bytes())
+    .digest("hex");
+}
+
+export async function computeGeneratedInputStamp(): Promise<GeneratedInputStamp> {
+  const inputs: Record<string, string> = {};
+  for (const path of codegenInputFiles()) {
+    inputs[path] = await digestInputFile(path);
+  }
+  return { inputs, version: GENERATED_INPUT_STAMP_VERSION };
+}
+
+/**
+ * Why `recorded` no longer describes `current`, or null when they agree.
+ * Schema checks alone cannot see this: stale artifacts built from an older
+ * `data/bangs.json` carry the current magic, version, and trie schema, so a
+ * build after `git pull` would otherwise ship yesterday's catalog silently.
+ */
+export function generatedInputStampMismatch(
+  recorded: GeneratedInputStamp | null,
+  current: GeneratedInputStamp
+): string | null {
+  if (!recorded || recorded.version !== current.version) {
+    return "predates input tracking or was written by another codegen version";
+  }
+  const changed = new Set<string>();
+  for (const [path, digest] of Object.entries(current.inputs)) {
+    if (recorded.inputs[path] !== digest) {
+      changed.add(path);
+    }
+  }
+  for (const path of Object.keys(recorded.inputs)) {
+    if (!(path in current.inputs)) {
+      changed.add(path);
+    }
+  }
+  if (changed.size === 0) {
+    return null;
+  }
+  return `is stale: ${[...changed].sort().join(", ")} changed since codegen ran`;
+}
+
+async function readGeneratedInputStamp(): Promise<GeneratedInputStamp | null> {
+  let parsed: unknown;
+  try {
+    parsed = await Bun.file(GENERATED_INPUT_STAMP_PATH).json();
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return null;
+  }
+  const { inputs, version } = parsed as Partial<GeneratedInputStamp>;
+  if (typeof version !== "number" || !inputs || typeof inputs !== "object") {
+    return null;
+  }
+  return { inputs, version };
+}
+
+async function writeGeneratedInputStamp(): Promise<void> {
+  const stamp = await computeGeneratedInputStamp();
+  await Bun.write(
+    GENERATED_INPUT_STAMP_PATH,
+    `${JSON.stringify(stamp, null, 2)}\n`
+  );
+}
+
+/** Why the generated tree needs rebuilding, or null when it is usable as is. */
+async function generatedBangDataStaleReason(): Promise<string | null> {
   const missing: string[] = [];
   for (const file of GENERATED_BANG_DATA_FILES) {
     if (!(await Bun.file(file).exists())) {
       missing.push(file);
     }
   }
+  if (missing.length > 0) {
+    return `is missing (${missing.join(", ")})`;
+  }
 
-  if (missing.length === 0 && (await generatedBangDataIsCurrent())) {
+  const header = await Bun.file(GENERATED_BANG_DATA_FILES[0])
+    .slice(0, 8)
+    .arrayBuffer();
+  if (header.byteLength !== 8) {
+    return "uses an outdated generated-data schema";
+  }
+  const words = new Uint32Array(header);
+  if (words[0] !== BANG_BINARY_MAGIC || words[1] !== BANG_BINARY_VERSION) {
+    return "uses an outdated generated-data schema";
+  }
+  const trie = Bun.file("src/generated/bangs-trie-loader.js");
+  const tail = await trie
+    .slice(Math.max(0, trie.size - 2048), trie.size)
+    .text();
+  if (!tail.includes("export const TRIE_SCHEMA=4;")) {
+    return "uses an outdated generated-data schema";
+  }
+
+  return generatedInputStampMismatch(
+    await readGeneratedInputStamp(),
+    await computeGeneratedInputStamp()
+  );
+}
+
+export async function ensureGeneratedBangData(
+  fromMerged = true
+): Promise<void> {
+  const reason = await generatedBangDataStaleReason();
+  if (!reason) {
     return;
   }
 
   const mode = fromMerged ? " --from-merged" : "";
-  const reason = missing.length
-    ? `missing (${missing.join(", ")})`
-    : "uses an outdated generated-data schema";
   console.warn(`Generated bang data ${reason}. Running codegen${mode}...`);
 
   if (fromMerged) {
@@ -153,15 +272,9 @@ export async function ensureGeneratedBangData(
     await $`bun run codegen`;
   }
 
-  for (const file of GENERATED_BANG_DATA_FILES) {
-    if (!(await Bun.file(file).exists())) {
-      throw new Error(
-        `Missing generated bang data after codegen: ${GENERATED_BANG_DATA_FILES.join(", ")}`
-      );
-    }
-  }
-  if (!(await generatedBangDataIsCurrent())) {
-    throw new Error("Generated bang data schema is outdated");
+  const remaining = await generatedBangDataStaleReason();
+  if (remaining) {
+    throw new Error(`Generated bang data still ${remaining} after codegen`);
   }
 }
 
@@ -2392,6 +2505,10 @@ export async function runCodegen(options: CodegenOptions = {}): Promise<void> {
   console.log(
     `  index shards: ${catalog.index.length} totalling ${indexBytes} B`
   );
+
+  // Written last: the string-ID map above is both an input and an output, so
+  // the stamp has to describe the tree as it stands once every write is done.
+  await writeGeneratedInputStamp();
 
   console.log(`Generated ${bangs.length} bangs in ${GENERATED_OUT_DIR}/`);
 }

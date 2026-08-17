@@ -1,14 +1,13 @@
 import { watch } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { normalize } from "node:path";
-import { $ } from "bun";
 import {
   handleOpenSearchRequest,
   handleSuggestRequest,
 } from "../src/server/handlers";
 import { pageHeaders, SW_HEADERS } from "../src/server/headers";
 import { readPathname } from "../src/shared/raw-url";
-import { generateBinaryShards } from "./codegen";
+import { ensureGeneratedBangData, generateBinaryShards } from "./codegen";
 import {
   assembleUIAssets,
   bundleUI,
@@ -123,20 +122,7 @@ async function build() {
   console.log(`Build done in ${(performance.now() - t).toFixed(0)}ms`);
 }
 
-const generated = [
-  Bun.file("src/generated/bangs.bin"),
-  Bun.file("src/generated/bangs-sparse.js"),
-  Bun.file("src/generated/bangs-meta.bin"),
-  Bun.file("src/generated/bangs-trie-loader.js"),
-  Bun.file("src/generated/bangs-trie.bin"),
-  Bun.file("src/generated/bangs-hot.js"),
-];
-if (
-  !(await Promise.all(generated.map((file) => file.exists()))).every(Boolean)
-) {
-  console.warn("Generated bang data not found. Running codegen...");
-  await $`bun run codegen`;
-}
+await ensureGeneratedBangData(true);
 
 await build();
 
