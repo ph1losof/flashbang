@@ -15,17 +15,17 @@ bun run check      # format + lint check (fails on issues)
 bun run fix        # auto-fix format + lint issues
 bun run codegen    # fetch DDG/Kagi sources, merge, and generate bang artifacts
 bun run resolve:suggestions # refresh the committed site-specific autocomplete endpoint map
-bun run build      # bundle, minify + pre-compress with Brotli (auto-runs codegen --from-merged if generated bang files are missing)
-bun run dev        # bundle + dev server with file watching & live reload (auto-runs codegen if needed)
+bun run build      # bundle, minify + pre-compress with Brotli (auto-runs codegen --from-merged if generated bang files are missing or stale)
+bun run dev        # bundle + dev server with file watching & live reload (auto-runs codegen --from-merged if generated bang files are missing or stale)
 bun run start      # serve pre-built dist/ (run `bun run build` first)
 bun run start:bundled # serve dist/ with the bundled production server
 bun run typecheck  # type-check with tsc (no emit)
-bun run profile    # run performance profile benchmarks (auto-runs codegen --from-merged if generated bang files are missing)
+bun run profile    # run performance profile benchmarks (auto-runs codegen --from-merged if generated bang files are missing or stale)
 bun run profile:private # build and profile private hash redirects in Chromium, Firefox, and WebKit
 bun run profile:quick  # run a shorter profiling pass
 bun run profile:cpu   # write Bun CPU profiles under profiles/
 bun audit          # audit dependencies for known vulnerabilities
-bun test           # run unit, integration, performance, and docs tests
+bun test           # run unit, integration, performance, and docs tests (auto-runs codegen --from-merged if generated bang files are missing or stale)
 bun run test:e2e   # run Playwright end-to-end tests (build + browser run)
 bun run clean      # remove every dist*/ build tree and profiles/*.cpuprofile leftovers (--dry-run to preview)
 ```
@@ -106,6 +106,7 @@ flashbang/
 │   │   ├── bangs-meta.bin     # packed trigger/name/domain catalog for UI
 │   │   ├── bangs-trie-loader.js # lightweight radix-trie module loader
 │   │   ├── bangs-trie.bin     # packed prefix-matched suggestion trie
+│   │   ├── bangs-inputs.json  # digests of the data files this tree was generated from
 │   │   └── *.d.ts             # TypeScript declarations for each generated .js file
 │   ├── sw/
 │   │   ├── bang-data.ts       # Binary bang decoder and regular lookup
@@ -213,6 +214,7 @@ Unit, integration, performance, and docs tests:
 - `tests/suggest.test.ts` — Cookie parsing, bang/snap suggestions, and provider proxying
 - `tests/codegen-transform.test.ts` — Codegen transformation and domain extraction
 - `tests/codegen-roundtrip.test.ts` — Generated lookup round trips
+- `tests/codegen-input-stamp.test.ts` — Generated-data staleness detection against the recorded input digests
 - `tests/build-cache.test.ts` — Deterministic Service Worker cache version inputs
 - `tests/custom-trigger.test.ts` — Custom trigger validation and reserved names
 - `tests/development-docs.test.ts` — Project-tree syntax, paths, file types, and tracked-file completeness
@@ -256,6 +258,8 @@ bunx playwright install
 
 The `--from-merged` flag skips steps 1–2 and generates directly from the committed `data/bangs.json`. This is what CI builds use — no network fetch needed. The generated directory is gitignored; `data/bangs.json` is the committed build input.
 
+Codegen also writes `src/generated/bangs-inputs.json`, recording a SHA-256 digest of every file the artifacts were generated from: `data/bangs.json`, `data/suggest-sites.json`, `data/bang-router.json`, and the three string-ID map files. `bun run build`, `bun run dev`, `bun run profile`, and `bun test` compare that stamp against the files on disk and re-run `codegen --from-merged` when they disagree, naming the input that changed. Schema magic and version numbers cannot catch this on their own: artifacts built from an older `data/bangs.json` carry the current schema, so without the stamp a build after `git pull` would ship the previous catalog with no warning. `data/custom-bangs.json` is not stamped — it feeds only the merge step that produces `data/bangs.json`, so editing it means re-running the full `bun run codegen`.
+
 The generated data is split by consumer. The Service Worker loads the regular lookup binary plus sparse executable capture/snap lookups, the UI fetches metadata only when its catalog is first needed, and the suggestion endpoint uses the generated radix trie. `data/suggest-sites.json` is a committed, reproducible domain registry: `bun run resolve:suggestions` gets Wikimedia domains from SiteMatrix, discovers NuGet's current autocomplete service from its V3 service index, and probes only the remaining likely wiki domains with a bounded worker pool. Transient probe failures retain previously verified capabilities. Codegen assigns every alias from its canonical domain, represents MediaWiki with a two-value capability tag, and pre-splits the small curated endpoint table so request handling does no template scan. Site-specific requests share conservative global query-length, timeout, and response-size limits; upstream result parameters keep provider payloads small.
 
 `bangs.bin` stores regular records directly in deterministic CHD-style minimal-perfect-hash slot order. Codegen derives the table from each trigger's FNV-1a hash, rejects known-key hash collisions, and emits 16- or 32-bit bucket displacements. Runtime lookup computes one slot without probing, verifies the selected trigger so unknown keys cannot produce false matches, and lazily materializes and caches URL tuples.
@@ -293,7 +297,7 @@ On **self-hosted** (Docker/Railway via `start.ts`), the Bun server sets headers 
 6. **Generate static-host headers** — Writes `dist/_headers` with shared security headers, per-page inline-script hashes, the stricter Service Worker CSP, and the OpenSearch content type
 7. **Pre-compress** — Eligible static assets, including the full bang catalogs and first-page shards, are compressed with Brotli (max quality) and written as `.br` files alongside the originals. The production server serves these automatically when the client supports it, falling back to uncompressed. Cloudflare Pages builds (`CF_PAGES=1`) instead promote the redirect catalog's Brotli bytes to its canonical content-hashed path and declare `Content-Encoding: br` plus `no-transform` in `_headers`; this prevents the platform from replacing the max-quality artifact with a larger dynamic encoding. Other static and self-hosted builds retain the ordinary identity file and `.br` sidecar.
 
-If generated bang artifacts are missing, both `bun run build` and `bun run profile` automatically run `bun run codegen --from-merged` first.
+If generated bang artifacts are missing, carry an outdated schema, or no longer match the data files recorded in `src/generated/bangs-inputs.json`, `bun run build`, `bun run dev`, `bun run profile`, and `bun test` automatically run `bun run codegen --from-merged` first.
 
 ## Profiling
 
@@ -326,7 +330,7 @@ The in-memory state (`frecencyCounts` plus `topFrecency` in `idb.ts`) is hydrate
 
 `bun run dev` runs the dev server with `bun --hot` for soft module reloading:
 
-- **Codegen guard** — If a required artifact under `src/generated/` is missing, automatically runs `bun run codegen` before the first build
+- **Codegen guard** — If a required artifact under `src/generated/` is missing, outdated, or stale against `src/generated/bangs-inputs.json`, automatically runs `bun run codegen --from-merged` before the first build
 - **Inline builds** — Uses `Bun.build()` API directly instead of shelling out to build scripts
 - **File watching** — Watches `src/` recursively via `fs.watch` with 200ms debounce. Any source change triggers a full rebuild
 - **Live reload** — SSE endpoint at `/__dev/events` pushes reload events to the browser. A small script is injected into HTML responses that unregisters the Service Worker, clears all caches, and reloads the page on each rebuild

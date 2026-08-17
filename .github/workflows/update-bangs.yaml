@@ -69,6 +69,11 @@ jobs:
       - name: Commit update
         if: steps.diff.outputs.changed == 'true'
         run: |
+          # Codegen appends any new strings to the append-only ID map. Leaving
+          # those edits behind makes the committed map lag data/bangs.json, so
+          # every later codegen run re-appends them and dirties the tree.
+          git add data/bang-prefixes.txt data/bang-suffixes.txt \
+            data/bang-strings-meta.json
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git commit -m "chore: update bangs"
