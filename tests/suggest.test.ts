@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import { TOP_K } from "../src/shared/constants";
+import { localeChain } from "../src/shared/locale-table";
 import {
   readQueryParam,
   readSuggestQueryParams,
@@ -314,6 +315,16 @@ const TEST_BANGS: TestBang[] = [
     r: 700,
     e: { shape: 0, url: "https://shape.test/opensearch?q={}" },
   },
+  {
+    k: "wl",
+    s: "Wikipedia",
+    d: "wikipedia.org",
+    r: 650,
+    e: {
+      shape: 0,
+      url: "https://{lang}.wikipedia.org/w/api.php?action=opensearch&search={}&format=json&limit=8",
+    },
+  },
 ];
 
 const TEST_TRIE = buildTestTrie(TEST_BANGS);
@@ -364,6 +375,7 @@ const defaultSettings = {
   snapPrefix: "@" as const,
   trigger: "g",
   customUrl: null,
+  lang: null,
   frecent: {},
   custom: [],
 };
@@ -405,6 +417,7 @@ describe("suggest cookie codec", () => {
       snapPrefix: "~",
       trigger: "gh",
       customUrl: "https://example.com/?q={}",
+      lang: null,
       frecent: { g: 1, gh: 3 },
       custom: ["a", "z"],
     });
@@ -501,6 +514,7 @@ describe("suggest cookie codec", () => {
       provider: "google",
       trigger: "g",
       customUrl: "https://example.com",
+      lang: null,
     });
   });
 });
@@ -647,6 +661,7 @@ describe("parseCookie", () => {
       snapPrefix: "@",
       trigger: "g",
       customUrl: null,
+      lang: null,
       frecent: {},
       custom: [],
     });
@@ -660,6 +675,7 @@ describe("parseCookie", () => {
       snapPrefix: "@",
       trigger: "ddg",
       customUrl: "https://example.com",
+      lang: null,
       frecent: {},
       custom: [],
     });
@@ -673,6 +689,7 @@ describe("parseCookie", () => {
       snapPrefix: "@",
       trigger: "g",
       customUrl: null,
+      lang: null,
       frecent: {},
       custom: [],
     });
@@ -702,6 +719,7 @@ describe("parseCookie", () => {
       snapPrefix: "@",
       trigger: "b",
       customUrl: null,
+      lang: null,
       frecent: {},
       custom: [],
     });
@@ -715,6 +733,7 @@ describe("parseCookie", () => {
       snapPrefix: "@",
       trigger: "g",
       customUrl: null,
+      lang: null,
       frecent: {},
       custom: [],
     });
@@ -2239,5 +2258,103 @@ describe("snap JSON serialization", () => {
     const response = responseFromCandidates("@gh", "", candidates, "@");
     const data = await response.json();
     expect(data[1][0]).toBe("@gh");
+  });
+});
+
+describe("suggest content language", () => {
+  const markedTerminal = () => findBangSuggestionTerminal("wl");
+
+  test("cookie carries an explicit language and drops junk", () => {
+    const encode = (lang: string | null) =>
+      encodeSuggestCookieValue("default", "g", "", [], null, "!", "@", lang);
+
+    expect(encode(null)).toBe("default,g,");
+    expect(encode("de-AT")).toBe("default,g,|l:de-at");
+    expect(encode("none")).toBe("default,g,|l:none");
+    expect(encode("../../etc/passwd")).toBe("default,g,");
+
+    expect(
+      parseSuggestCookieValueWithValidation(encode("de-AT"), false, false)
+        .settings.lang
+    ).toBe("de-at");
+    expect(
+      parseSuggestCookieValueWithValidation("default,g,|l:%%%", false, false)
+        .settings.lang
+    ).toBeNull();
+  });
+
+  test("language is read even when bang context is skipped", () => {
+    const s = parseCookie(req("suggest=default,g,|l:fr|f:gh~9"));
+    expect(s.lang).toBe("fr");
+  });
+
+  test("site-forwarded suggestions use the reader's edition", () => {
+    const terminal = markedTerminal();
+    const at = (lang: string) =>
+      resolveSiteSuggestionUrl(terminal, "test", localeChain([lang]));
+
+    expect(at("de")).toContain("https://de.wikipedia.org/");
+    expect(at("de-at")).toContain("https://de.wikipedia.org/");
+    expect(at("ace")).toContain("https://ace.wikipedia.org/");
+  });
+
+  test("an unsupported or disabled language falls back to the site default", () => {
+    const terminal = markedTerminal();
+    expect(
+      resolveSiteSuggestionUrl(terminal, "test", localeChain(["xx"]))
+    ).toContain("https://en.wikipedia.org/");
+    expect(resolveSiteSuggestionUrl(terminal, "test", [])).toContain(
+      "https://en.wikipedia.org/"
+    );
+  });
+
+  test("a reused chain resolves the same edition every time", () => {
+    const terminal = markedTerminal();
+    const unmarked = findBangSuggestionTerminal("yt");
+    const de = localeChain(["de"]);
+    const ace = localeChain(["ace"]);
+
+    for (let i = 0; i < 3; i++) {
+      expect(resolveSiteSuggestionUrl(terminal, "test", de)).toContain(
+        "https://de.wikipedia.org/"
+      );
+      expect(resolveSiteSuggestionUrl(terminal, "test", ace)).toContain(
+        "https://ace.wikipedia.org/"
+      );
+      expect(resolveSiteSuggestionUrl(unmarked, "test", de)).toContain(
+        "https://shape.test/opensearch?q=test"
+      );
+    }
+  });
+
+  test("unmarked endpoints are untouched by the language", () => {
+    const url = resolveSiteSuggestionUrl(
+      findBangSuggestionTerminal("yt"),
+      "test",
+      localeChain(["de"])
+    );
+    expect(url).toContain("https://shape.test/opensearch?q=test");
+    expect(url).not.toContain("{lang}");
+  });
+
+  test("the lang param stands in for the cookie Firefox withholds", () => {
+    const settings = parseSettingsFromRawUrl(
+      "http://localhost/suggest?q=x&lang=fr",
+      req()
+    );
+    expect(settings.lang).toBe("fr");
+
+    const withCookie = parseSettingsFromRawUrl(
+      "http://localhost/suggest?q=x&lang=fr",
+      req("suggest=default,g,|l:de")
+    );
+    expect(withCookie.lang).toBe("de");
+
+    expect(
+      parseSettingsFromRawUrl(
+        "http://localhost/suggest?q=x&lang=%2Fevil",
+        req()
+      ).lang
+    ).toBeNull();
   });
 });

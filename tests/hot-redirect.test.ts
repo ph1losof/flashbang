@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { HOT_PREFIXES, HOT_TRIGGERS } from "../src/generated/bangs-hot.js";
 import { compileCaptureUrl } from "../src/shared/capture-template";
+import { HOT_BOOT_VERSION } from "../src/shared/hot-boot";
 import { TRIGGER_PREFIXES } from "../src/shared/trigger-prefix";
 import {
   createHotBootState,
@@ -57,12 +58,20 @@ function recordWithCustomEntry(entry: unknown): string {
       [59, 64],
       [["advanced", entry]],
       [],
+      null,
     ])
   )
     .replaceAll("+", "-")
     .replaceAll("/", "_")
     .replace(/=+$/, "");
-  return `h1|fb-test|${state.toString(36)}|${payload}`;
+  return `${HOT_BOOT_VERSION}|fb-test|${state.toString(36)}|${payload}`;
+}
+
+function encodePayload(fields: readonly unknown[]): string {
+  return btoa(JSON.stringify(fields))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
 }
 
 beforeAll(loadTestBangData);
@@ -71,7 +80,7 @@ describe("service worker hot redirects", () => {
   test("round-trips a versioned build-specific boot record", () => {
     const state = createHotBootState(snapshot());
     const record = encodeHotBootRecord("fb-test", state);
-    expect(record.startsWith("h1|fb-test|")).toBe(true);
+    expect(record.startsWith(`${HOT_BOOT_VERSION}|fb-test|`)).toBe(true);
     expect(record.length).toBeLessThan(32);
     expect(parseHotBootRecord(record, "fb-test")).toBe(state);
     const decoded = decodeHotBootRecord(record, "fb-test")!;
@@ -490,5 +499,85 @@ describe("service worker hot redirects", () => {
     expect(resolve("test+;gh")).toContain("q=test");
     expect(resolve("%3Bgh")).toBe("https://github.com");
     expect(resolve("@gh+test")).toContain("site:github.com");
+  });
+
+  test("rejects hot-boot records written by an earlier wire format", () => {
+    const sourceSnapshot = snapshot();
+    const state = createHotBootState(sourceSnapshot);
+    const legacy = `h1|fb-test|${state.toString(36)}|${encodePayload([
+      "g",
+      ["https://www.google.com/search?q=", ""],
+      null,
+      [59, 64],
+      [],
+      [],
+    ])}`;
+    expect(decodeHotBootRecord(legacy, "fb-test")).toBeNull();
+    expect(parseHotBootRecord(legacy, "fb-test")).toBe(NO_HOT_BOOT);
+
+    const shortPayload = `${HOT_BOOT_VERSION}|fb-test|${state.toString(
+      36
+    )}|${encodePayload([
+      "g",
+      ["https://www.google.com/search?q=", ""],
+      null,
+      [59, 64],
+      [],
+      [],
+    ])}`;
+    expect(decodeHotBootRecord(shortPayload, "fb-test")).toBeNull();
+  });
+
+  test("round-trips the locale through both payload forms", () => {
+    const localized = { ...snapshot(), locale: "de-de" };
+    const full = decodeHotBootRecord(
+      encodeHotBootRecord(
+        "fb-test",
+        createHotBootState(localized),
+        localized,
+        settings(),
+        []
+      ),
+      "fb-test"
+    );
+    expect(full?.locale).toBe("de-de");
+
+    const compact = decodeHotBootRecord(
+      encodeHotBootRecord(
+        "fb-test",
+        createHotBootState(localized),
+        undefined,
+        materializeCompactBaseSettings(localized)!,
+        [],
+        "de-de"
+      ),
+      "fb-test"
+    );
+    expect(compact?.locale).toBe("de-de");
+
+    const bare = decodeHotBootRecord(
+      encodeHotBootRecord("fb-test", createHotBootState(localized)),
+      "fb-test"
+    );
+    expect(bare?.locale).toBeNull();
+  });
+
+  test("rejects a malformed locale in an untrusted record", () => {
+    const sourceSnapshot = snapshot();
+    const state = createHotBootState(sourceSnapshot);
+    for (const bad of ["de/evil.com", "../x", "d".repeat(200), 7, {}]) {
+      const raw = `${HOT_BOOT_VERSION}|fb-test|${state.toString(
+        36
+      )}|${encodePayload([
+        "g",
+        ["https://www.google.com/search?q=", ""],
+        null,
+        [59, 64],
+        [],
+        [],
+        bad,
+      ])}`;
+      expect(decodeHotBootRecord(raw, "fb-test")).toBeNull();
+    }
   });
 });

@@ -6,6 +6,7 @@ import {
 
 export interface FirefoxSuggestionConfig {
   bangPrefix: TriggerPrefix;
+  contentLanguage?: string;
   provider: string;
   snapPrefix: TriggerPrefix;
 }
@@ -17,11 +18,14 @@ export function isFirefoxUserAgent(userAgent: string): boolean {
 
 export function firefoxSuggestionUrl(
   origin: string,
-  { bangPrefix, provider, snapPrefix }: FirefoxSuggestionConfig
+  { bangPrefix, contentLanguage, provider, snapPrefix }: FirefoxSuggestionConfig
 ): string {
   const syntax =
     bangPrefix === DEFAULT_BANG_PREFIX && snapPrefix === DEFAULT_SNAP_PREFIX
       ? ""
       : `&bp=${encodeURIComponent(bangPrefix)}&np=${encodeURIComponent(snapPrefix)}`;
-  return `${origin}/suggest?q=%s&sp=${provider}${syntax}&site_specific_forward=1`;
+  const lang = contentLanguage
+    ? `&lang=${encodeURIComponent(contentLanguage)}`
+    : "";
+  return `${origin}/suggest?q=%s&sp=${provider}${syntax}${lang}&site_specific_forward=1`;
 }

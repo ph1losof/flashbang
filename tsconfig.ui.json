@@ -10,6 +10,7 @@
     "src/sw/bang-strings.ts",
     "src/sw/default-redirect-settings.ts",
     "src/sw/hot-redirect.ts",
+    "src/sw/locale.ts",
     "src/sw/redirect-core.ts",
     "src/sw/redirect-prefix.ts",
     "src/sw/redirect-settings.ts",

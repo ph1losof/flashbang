@@ -11,10 +11,13 @@ import {
 } from "../sw/bang-data";
 import { defaultRedirectSettings } from "../sw/default-redirect-settings";
 import { lookupGeneratedHotBang } from "../sw/hot-redirect";
+import { setActiveLocale } from "../sw/locale";
 import { redirectUrl } from "../sw/redirect";
 
 declare const __BANG_SHARD_ROUTER__: readonly number[];
 declare const __BANG_SHARD_ASSETS__: readonly string[];
+
+setActiveLocale(null);
 
 const shardRuntime = createBangShardRuntime(
   __BANG_SHARD_ROUTER__,

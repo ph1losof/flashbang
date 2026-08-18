@@ -12,10 +12,12 @@ import {
 } from "../shared/constants";
 import { hashFNV1a } from "../shared/hash";
 import { idbWrap, openDB } from "../shared/idb";
+import { normalizeLocaleSetting } from "../shared/locale-table";
 import { compileSnapTarget, type SnapTargetParts } from "../shared/snap-target";
 import { resolveTriggerPrefixes } from "../shared/trigger-prefix";
 import { lookupBang } from "./bang-data";
 import { defaultRedirectSettings as createDefaultRedirectSettings } from "./default-redirect-settings";
+import { setActiveLocale, substituteLocale } from "./locale";
 import {
   type CustomUrlParts,
   compileTriggerSyntax,
@@ -28,7 +30,7 @@ export function defaultRedirectSettings(): RedirectSettings {
   return createDefaultRedirectSettings();
 }
 
-const SNAPSHOT_VERSION = 2;
+export const SNAPSHOT_VERSION = 3;
 
 interface SettingRecord {
   key: string;
@@ -40,6 +42,7 @@ export interface RedirectSettingsSnapshot {
   defaultBang: string;
   luckyProvider: string;
   luckyUrl: UrlParts | null;
+  locale?: string;
   syntax?: TriggerSyntax;
 }
 
@@ -110,7 +113,8 @@ function isBundleRecord(
     Boolean(snapshot.custom) &&
     typeof snapshot.custom === "object" &&
     (snapshot.luckyUrl === null || Array.isArray(snapshot.luckyUrl)) &&
-    (snapshot.syntax === undefined || Array.isArray(snapshot.syntax))
+    (snapshot.syntax === undefined || Array.isArray(snapshot.syntax)) &&
+    (snapshot.locale === undefined || typeof snapshot.locale === "string")
   );
 }
 
@@ -154,6 +158,9 @@ function compileRedirectSettingsSnapshot(
   );
   const luckyProvider = settingsMap["lucky-provider"] ?? "default";
   const syntax = compileTriggerSyntax(bangPrefix, snapPrefix);
+  const locale = settingsMap["content-language"]
+    ? normalizeLocaleSetting(settingsMap["content-language"])
+    : null;
   return {
     custom,
     defaultBang,
@@ -162,6 +169,7 @@ function compileRedirectSettingsSnapshot(
       luckyProvider === "custom" && settingsMap["lucky-url"]
         ? splitUrl(settingsMap["lucky-url"])
         : null,
+    ...(locale ? { locale } : {}),
     ...(syntax ? { syntax } : {}),
   };
 }
@@ -170,9 +178,16 @@ export function defaultRedirectSettingsSnapshot(): RedirectSettingsSnapshot {
   return compileRedirectSettingsSnapshot([], []);
 }
 
+function localizeParts(parts: UrlParts): UrlParts {
+  return parts[0].indexOf("{") === -1
+    ? parts
+    : [substituteLocale(parts[0]), parts[1]];
+}
+
 export function materializeRedirectSettings(
   snapshot: RedirectSettingsSnapshot
 ): RedirectSettings {
+  setActiveLocale(snapshot.locale ?? null);
   const customDefault = snapshot.custom[snapshot.defaultBang];
   let defaultEntry: UrlParts | null;
   if (customDefault) {
@@ -187,7 +202,7 @@ export function materializeRedirectSettings(
       ? [builtInDefault[0], builtInDefault[1]]
       : null;
   }
-  const defaultUrl = defaultEntry || splitUrl(DEFAULT_URL);
+  const defaultUrl = localizeParts(defaultEntry || splitUrl(DEFAULT_URL));
   const effectiveDefaultBang = defaultEntry ? snapshot.defaultBang : "g";
   let luckyUrl: UrlParts | null;
   switch (snapshot.luckyProvider) {
@@ -216,7 +231,7 @@ export function materializeRedirectSettings(
   return {
     defaultUrl,
     custom: snapshot.custom,
-    luckyUrl,
+    luckyUrl: luckyUrl && localizeParts(luckyUrl),
     ...(snapshot.syntax ? { syntax: snapshot.syntax } : {}),
   };
 }

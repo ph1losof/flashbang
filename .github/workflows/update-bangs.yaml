@@ -35,7 +35,7 @@ jobs:
       - name: Check for changes
         id: diff
         run: |
-          git add data/bangs.json
+          git add data/bangs.json data/bang-canonical.json
           if git diff --staged --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else

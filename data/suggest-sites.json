@@ -38,7 +38,7 @@
     },
     "wikipedia.org": {
       "shape": "opensearch",
-      "url": "https://en.wikipedia.org/w/api.php?action=opensearch&search={}&format=json&limit=8"
+      "url": "https://{lang}.wikipedia.org/w/api.php?action=opensearch&search={}&format=json&limit=8"
     },
     "www.amazon.com": {
       "shape": "amazon",

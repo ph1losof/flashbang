@@ -11,6 +11,7 @@ benchmark-results/
 !data/bang-suffixes.txt
 !data/bang-strings-meta.json
 !data/custom-bangs.json
+!data/bang-canonical.json
 !data/suggest-sites.json
 node_modules/
 build/target/

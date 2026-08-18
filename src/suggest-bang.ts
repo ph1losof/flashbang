@@ -36,6 +36,12 @@ import {
   SITE_SUGGESTION_SHAPE,
   TOP_K,
 } from "./shared/constants";
+import {
+  LOCALE_PATTERNS,
+  type LocaleSplit,
+  localeSplitOf,
+  resolveLocaleValue,
+} from "./shared/locale-table";
 
 interface Candidate {
   terminalIndex: number;
@@ -199,9 +205,43 @@ export function findBangSuggestionTerminal(trigger: string): number {
   return findTerminalIndex(trigger);
 }
 
+function substituteLocaleWithChain(
+  url: string,
+  chain: readonly string[]
+): string {
+  if (url.indexOf("{") === -1) {
+    return url;
+  }
+  const split = localeSplitOf(url);
+  return split === null
+    ? url
+    : split.head + resolveForChain(split, chain) + split.tail;
+}
+
+const resolvedByChain = new WeakMap<
+  readonly string[],
+  (string | undefined)[]
+>();
+
+function resolveForChain(split: LocaleSplit, chain: readonly string[]): string {
+  let byGroup = resolvedByChain.get(chain);
+  if (byGroup === undefined) {
+    byGroup = new Array(LOCALE_PATTERNS.length);
+    resolvedByChain.set(chain, byGroup);
+  }
+  const cached = byGroup[split.group];
+  if (cached !== undefined) {
+    return cached;
+  }
+  const value = resolveLocaleValue(split.pattern, chain);
+  byGroup[split.group] = value;
+  return value;
+}
+
 export function resolveSiteSuggestionUrl(
   terminalIndex: number,
-  encodedQuery: string
+  encodedQuery: string,
+  chain: readonly string[] = []
 ): string | null {
   const kind = TERM_E_KIND[terminalIndex];
   if (kind === 0) {
@@ -227,7 +267,7 @@ export function resolveSiteSuggestionUrl(
     ENDPOINT_SUFFIX_CACHE,
     index
   );
-  return prefix + encodedQuery + suffix;
+  return substituteLocaleWithChain(prefix, chain) + encodedQuery + suffix;
 }
 
 export function siteSuggestionShape(terminalIndex: number): number {

@@ -6,6 +6,7 @@ import { firefoxSuggestionUrl } from "../firefox-suggest";
 import type { SettingsWriter } from "./write";
 
 interface FirefoxSuggestionControls {
+  getContentLanguage: () => string;
   getPrefixes: () => readonly [TriggerPrefix, TriggerPrefix];
   onProviderChange: (provider: string) => void;
   suggestSelect: HTMLSelectElement;
@@ -14,6 +15,7 @@ interface FirefoxSuggestionControls {
 
 export function setupFirefoxSuggestions(
   {
+    getContentLanguage,
     getPrefixes,
     onProviderChange,
     suggestSelect,
@@ -35,6 +37,7 @@ export function setupFirefoxSuggestions(
     const [bangPrefix, snapPrefix] = getPrefixes();
     return firefoxSuggestionUrl(location.origin, {
       bangPrefix,
+      contentLanguage: getContentLanguage(),
       provider,
       snapPrefix,
     });

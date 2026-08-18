@@ -10,6 +10,7 @@ import {
   materializeRedirectSettings,
   type PreparedRedirectSettings,
   type RedirectSettingsSnapshot,
+  SNAPSHOT_VERSION,
 } from "../src/sw/redirect-settings";
 import { loadTestBangData } from "./helpers/bang-data";
 import { installFakeIndexedDb } from "./helpers/fake-indexeddb";
@@ -362,7 +363,7 @@ describe("sw/idb redirect settings", () => {
     const settings = await (await loadSwIdb()).readRedirectSettings();
     expect(settings.defaultUrl[0]).toContain("duckduckgo.com");
     const rebuilt = await readSettingRecord(REDIRECT_SETTINGS_SNAPSHOT_KEY);
-    expect(rebuilt?.version).toBe(2);
+    expect(rebuilt?.version).toBe(SNAPSHOT_VERSION);
   });
 
   test("rebuilds a bundle when the bang catalog changes", async () => {

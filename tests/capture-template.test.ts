@@ -131,4 +131,22 @@ describe("capture templates", () => {
       "Invalid URL template"
     );
   });
+
+  test("rejects locale markers unless the caller opts in", () => {
+    const marked = "https://{lang}.wikipedia.org/w/index.php?search={}";
+    expect(new URL(marked.replace("{}", "test")).hostname).toBe(
+      "{lang}.wikipedia.org"
+    );
+    expect(validateSimpleBangUrl(marked)).toContain("only contain the {}");
+    expect(validateSimpleBangUrl(marked, true)).toBeNull();
+    expect(validateSimpleBangUrl("https://amazon.{region}/s?k={}")).toContain(
+      "only contain the {}"
+    );
+    expect(
+      validateSimpleBangUrl("https://amazon.{region}/s?k={}", true)
+    ).toBeNull();
+    expect(
+      validateCaptureBang("https://{lang}.example.com/$1", "(.*)")
+    ).toContain("only contain capture placeholders");
+  });
 });

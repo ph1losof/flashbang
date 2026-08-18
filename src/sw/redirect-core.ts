@@ -13,6 +13,7 @@ import {
   type TriggerPrefix,
 } from "../shared/trigger-prefix";
 import { type BuiltinUrlParts, lookupBang } from "./bang-data";
+import { localeSnapDomain, onLocaleChange, substituteLocale } from "./locale";
 import {
   buildUrl,
   compileTriggerMarker as compileMarker,
@@ -299,8 +300,8 @@ function findUrlTail(prefix: string, start: number): number {
   return end;
 }
 
-const builtInBangOriginCache: Record<string, string> = Object.create(null);
-const builtInSnapOriginCache: Record<string, string> = Object.create(null);
+let builtInBangOriginCache: Record<string, string> = Object.create(null);
+let builtInSnapOriginCache: Record<string, string> = Object.create(null);
 const customBangOriginCache = new WeakMap<
   Record<string, CustomUrlParts>,
   Record<string, string>
@@ -356,7 +357,7 @@ function resolveBangFill(
   const entry = lookupBang(bang, hash);
   if (entry) {
     let mode = (entry as FilledUrlParts).m;
-    if (mode === undefined && entry[1] !== null) {
+    if (mode === undefined) {
       mode = compileUrlMode(entry[0], entry[1]);
       (entry as FilledUrlParts).m = mode;
     }
@@ -395,7 +396,8 @@ function resolveSnapOrigin(
   if (!entry) {
     return null;
   }
-  const origin = customSnapTarget(entry)?.[1] ?? originOfPrefix(entry[0]);
+  const origin =
+    customSnapTarget(entry)?.[1] ?? originOfPrefix(substituteLocale(entry[0]));
   if (origin) {
     builtInSnapOriginCache[bang] = origin;
   }
@@ -428,7 +430,7 @@ function resolveBangOrigin(
   if (!resolved) {
     return null;
   }
-  const origin = originOfPrefix(resolved[0]);
+  const origin = originOfPrefix(substituteLocale(resolved[0]));
   builtInBangOriginCache[bang] = origin;
   return origin;
 }
@@ -444,11 +446,19 @@ function domainOfPrefix(prefix: string): string | null {
   return (host.startsWith("www.") ? host.substring(4) : host).toLowerCase();
 }
 
-const builtInSnapSiteFilterCache: Record<string, string> = Object.create(null);
+let builtInSnapSiteFilterCache: Record<string, string> = Object.create(null);
 const customSnapDomainCache = new WeakMap<
   Record<string, CustomUrlParts>,
   Record<string, string>
 >();
+
+export function resetLocaleDerivedCaches(): void {
+  builtInBangOriginCache = Object.create(null);
+  builtInSnapOriginCache = Object.create(null);
+  builtInSnapSiteFilterCache = Object.create(null);
+}
+
+onLocaleChange(resetLocaleDerivedCaches);
 
 function getCustomDomainCache(
   custom: Record<string, CustomUrlParts>
@@ -500,7 +510,11 @@ function resolveSnapSiteFilter(
     builtInSnapSiteFilterCache[bang] = snap[0];
     return snap[0];
   }
-  const domain = domainOfPrefix(resolved[0]);
+  const prefix = resolved[0];
+  const domain =
+    prefix.indexOf("{") === -1
+      ? domainOfPrefix(prefix)
+      : (localeSnapDomain(prefix) ?? domainOfPrefix(substituteLocale(prefix)));
   if (!domain) {
     return null;
   }

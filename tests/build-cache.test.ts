@@ -69,7 +69,7 @@ describe("build cache version", () => {
     ).not.toThrow();
     expect(() =>
       assertCatalogPerformanceBudgets({
-        coldFallbackBrotli: 7 * 1024 + 1,
+        coldFallbackBrotli: 9.25 * 1024 + 1,
         indexPackBrotli: [4_000],
         monolithBrotli: 200_000,
         serviceWorkerBrotli: 19 * 1024,

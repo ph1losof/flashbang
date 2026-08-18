@@ -21,6 +21,7 @@ async function syncSuggestCookie() {
       "suggest-url",
       "bang-prefix",
       "snap-prefix",
+      "content-language",
     ]),
     readCustomBangs(db),
   ]);
@@ -35,7 +36,8 @@ async function syncSuggestCookie() {
     settings[2] || "",
     custom,
     bangPrefix,
-    snapPrefix
+    snapPrefix,
+    settings[5] || ""
   );
 }
 
