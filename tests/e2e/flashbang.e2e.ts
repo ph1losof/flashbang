@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { expect, type Page, test } from "@playwright/test";
+import { type BrowserContext, expect, type Page, test } from "@playwright/test";
 import { DB_VERSION } from "../../src/shared/constants";
 import { HOT_BOOT_VERSION } from "../../src/shared/hot-boot";
 import { encodeSuggestCookieValue } from "../../src/shared/suggest-cookie";
@@ -26,14 +26,17 @@ function skipWebKitServiceWorker(browserName: string): void {
 }
 
 async function mockGoogleSearchRoute(page: Page): Promise<void> {
-  await page.context().route(`${GOOGLE_HOST}/**`, (route) => {
-    const url = route.request().url();
-    route.fulfill({
-      status: 200,
-      contentType: "text/plain",
-      body: `mocked ${url}`,
+  // Any google.com subdomain, for the reason described on `stubDestination`.
+  await page
+    .context()
+    .route(/^https:\/\/([a-z0-9-]+\.)*google\.com\//, (route) => {
+      const url = route.request().url();
+      route.fulfill({
+        status: 200,
+        contentType: "text/plain",
+        body: `mocked ${url}`,
+      });
     });
-  });
   page.on("framenavigated", async (frame) => {
     if (frame !== page.mainFrame()) {
       return;
@@ -64,6 +67,26 @@ async function mockCustomHostRoute(page: Page): Promise<void> {
       body: `custom ${url}`,
     });
   });
+}
+
+/**
+ * Stub a redirect destination for every subdomain of `domain`.
+ *
+ * An exact-host pattern is a trap here: the canonical overlay rewrote `!sp`
+ * from `startpage.com` to `www.startpage.com`, the route quietly stopped
+ * matching, and the navigation went to the real site — which answers a CI
+ * runner with a captcha page rather than the expected URL.
+ */
+async function stubDestination(
+  context: BrowserContext,
+  domain: string,
+  body = domain
+): Promise<void> {
+  const host = domain.replaceAll(".", "\\.");
+  await context.route(
+    new RegExp(`^https://([a-z0-9-]+\\.)*${host}/`),
+    (route) => route.fulfill({ body, contentType: "text/plain", status: 200 })
+  );
 }
 
 async function ensureWarmController(page: Page): Promise<void> {
@@ -1486,9 +1509,7 @@ test("newly activated worker redirects from a shard while the full catalog warms
       fullCatalogReleased = true;
       await route.continue();
     });
-    await context.route("https://github.com/**", (route) =>
-      route.fulfill({ status: 200, contentType: "text/plain", body: "github" })
-    );
+    await stubDestination(context, "github.com", "github");
     context.on("request", (request) => {
       const pathname = new URL(request.url()).pathname;
       if (BANG_COLD_ASSET_RE.test(pathname)) {
@@ -1746,13 +1767,7 @@ test("first installation falls through to advanced redirect machinery", async ({
   const context = await browser.newContext();
   try {
     const page = await context.newPage();
-    await context.route("https://translate.kagi.com/**", (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: "text/plain",
-        body: "translate",
-      })
-    );
+    await stubDestination(context, "kagi.com", "translate");
     await page.goto("/health", { waitUntil: "domcontentloaded" });
     await navigateAndWaitForRedirect(
       page,
@@ -1772,12 +1787,8 @@ test("fresh fallback uses canonical syntax without loading the full catalog", as
     const page = await context.newPage();
     await page.addInitScript(disableServiceWorkers);
     await mockGoogleSearchRoute(page);
-    await context.route("https://www.npmjs.com/**", (route) =>
-      route.fulfill({ body: "npm", contentType: "text/plain", status: 200 })
-    );
-    await context.route("https://developer.mozilla.org/**", (route) =>
-      route.fulfill({ body: "mdn", contentType: "text/plain", status: 200 })
-    );
+    await stubDestination(context, "npmjs.com", "npm");
+    await stubDestination(context, "mozilla.org", "mdn");
     const catalogRequests: string[] = [];
     context.on("request", (request) => {
       const pathname = new URL(request.url()).pathname;
@@ -1968,9 +1979,7 @@ test("first fallback seeds the worker for the next offline redirect", async ({
   const context = await browser.newContext();
   try {
     const page = await context.newPage();
-    await context.route("https://github.com/**", (route) =>
-      route.fulfill({ status: 200, contentType: "text/plain", body: "github" })
-    );
+    await stubDestination(context, "github.com", "github");
     const bangDataRequests: string[] = [];
     let coldFallbackFinished = false;
     let shardStartedBeforeColdFallbackFinished = false;
@@ -2214,15 +2223,9 @@ test("rich hot boot redirects without IndexedDB or bang data", async ({
     "Playwright only exposes service worker handles in Chromium"
   );
   await mockCustomHostRoute(page);
-  await context.route("https://startpage.com/**", (route) =>
-    route.fulfill({ body: "ok", contentType: "text/plain", status: 200 })
-  );
-  await context.route("https://www.npmjs.com/**", (route) =>
-    route.fulfill({ body: "ok", contentType: "text/plain", status: 200 })
-  );
-  await context.route("https://github.com/**", (route) =>
-    route.fulfill({ body: "ok", contentType: "text/plain", status: 200 })
-  );
+  await stubDestination(context, "startpage.com", "ok");
+  await stubDestination(context, "npmjs.com", "ok");
+  await stubDestination(context, "github.com", "ok");
   await ensureWarmController(page);
   await seedCustomBangs(page, [
     {
