@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { compileCaptureUrl } from "../src/shared/capture-template";
+import {
+  encodeSuggestCookieValue,
+  parseSuggestCookieValue,
+} from "../src/shared/suggest-cookie";
 import { resetBangDataForTests } from "../src/sw/bang-data";
 import {
   createHotBootState,
@@ -1242,6 +1246,60 @@ describe("sw runtime with real modules", () => {
     expect(
       redirectRawUrl("!npm+router", record.settings!, record.hotBangLookup)
     ).toBe(redirectRawUrl("!npm+router", record.settings!));
+  });
+
+  test("frecency cookie sync keeps every section the page wrote", async () => {
+    await loadSwRuntime([], false, { enabled: false, headerValue: "true" });
+
+    const activate = createExtendableEvent();
+    await handlers.activate?.(activate.event);
+    await Promise.all(activate.waits);
+
+    const existing = encodeSuggestCookieValue(
+      "ddg",
+      "b",
+      "",
+      ["mine"],
+      null,
+      "$",
+      "~",
+      "de"
+    );
+    const writes: string[] = [];
+    (globalThis as { cookieStore?: unknown }).cookieStore = {
+      get: (name: string) =>
+        Promise.resolve(
+          name === "suggest" ? { name, value: existing } : undefined
+        ),
+      set: (options: { value: string }) => {
+        writes.push(options.value);
+        return Promise.resolve();
+      },
+    };
+
+    const fetchEvt = createFetchEvent(
+      "https://flashbang.local/?q=!npm+react",
+      "",
+      "navigate"
+    );
+    await handlers.fetch?.(fetchEvt.event);
+    const response = await fetchEvt.response();
+    expect(response.headers.get("Location")).toContain("npmjs.com");
+    await Promise.all(fetchEvt.waits);
+
+    expect(writes).toHaveLength(1);
+    const written = parseSuggestCookieValue(writes[0], true);
+    expect(written.frecent).toHaveProperty("npm");
+    // The sync only produces the frecency section, so everything else has to
+    // survive being re-encoded — a dropped language would leave site-specific
+    // suggestions in a different edition than the redirect until the page is
+    // opened again.
+    expect(written.lang).toBe("de");
+    expect(written.custom).toEqual(["mine"]);
+    expect(written.provider).toBe("ddg");
+    expect(written.trigger).toBe("b");
+    expect(written.bangPrefix).toBe("$");
+    expect(written.snapPrefix).toBe("~");
   });
 
   test("keeps frecency work out of the redirect dispatch task", async () => {

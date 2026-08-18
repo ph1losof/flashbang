@@ -774,6 +774,10 @@ function queueBangSideEffects(e: FetchEvent, trigger: string): void {
             const parsed = parseSuggestCookieValue(cookie.value, true);
             return cookieStore.set({
               name: "suggest",
+              // Every section the page wrote has to be carried through, not
+              // just the ones this sync produces: a dropped `l:` would leave
+              // site-specific suggestions answering in a different language
+              // than the redirect lands in until the page is opened again.
               value: encodeSuggestCookieValue(
                 parsed.provider,
                 parsed.trigger,
@@ -781,7 +785,8 @@ function queueBangSideEffects(e: FetchEvent, trigger: string): void {
                 parsed.custom,
                 frecency,
                 parsed.bangPrefix,
-                parsed.snapPrefix
+                parsed.snapPrefix,
+                parsed.lang
               ),
               path: "/",
               expires: Date.now() + COOKIE_MAX_AGE_S * 1000,
