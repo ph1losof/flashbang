@@ -1,0 +1,55 @@
+{
+  "approved": {
+    "http://maps.google.com/maps?q={}": {
+      "snap": "maps.google.com",
+      "url": "https://www.google.com/maps?q={}"
+    },
+    "https://google.com/maps?q={}": {
+      "url": "https://www.google.com/maps?q={}"
+    },
+    "https://google.com/search?tbm=isch&q={}&tbs=imgo:1": {
+      "url": "https://www.google.com/search?q={}&tbs=imgo:1&udm=2"
+    },
+    "https://maps.google.com/maps?q={}": {
+      "snap": "maps.google.com",
+      "url": "https://www.google.com/maps?q={}"
+    },
+    "https://old.reddit.com/r/{}": {
+      "url": "https://old.reddit.com/r/{}/"
+    },
+    "https://startpage.com/do/metasearch.pl?query={}": {
+      "url": "https://www.startpage.com/do/metasearch.pl?query={}"
+    },
+    "https://twitter.com/search?q={}": {
+      "snap": "x.com",
+      "url": "https://x.com/search?q={}"
+    },
+    "https://wikipedia.org/w/index.php?search={}": {
+      "snap": "wikipedia.org",
+      "url": "https://{lang}.wikipedia.org/w/index.php?search={}"
+    },
+    "https://www.ebay.com/sch/items/?_nkw={}": {
+      "url": "https://www.ebay.com/sch/i.html?_nkw={}"
+    },
+    "https://www.reddit.com/r/{}": {
+      "url": "https://www.reddit.com/r/{}/"
+    }
+  },
+  "auto": {
+    "http://1001boom.com/?s={}": "https://1001boom.com/?s={}",
+    "http://tureng.com/tr/turkce-ingilizce/{}": "https://tureng.com/tr/turkce-ingilizce/{}",
+    "http://www.larousse.fr/dictionnaires/francais/{}": "https://www.larousse.fr/dictionnaires/francais/{}",
+    "https://bing.com/search?q={}": "https://www.bing.com/search?q={}",
+    "https://boxofficemojo.com/search/?q={}": "https://www.boxofficemojo.com/search/?q={}",
+    "https://google.com/search?q={}": "https://www.google.com/search?q={}",
+    "https://google.ru/search?hl=ru&q={}": "https://www.google.ru/search?hl=ru&q={}",
+    "https://ilmatieteenlaitos.fi/saa/{}": "https://www.ilmatieteenlaitos.fi/saa/{}",
+    "https://lcsc.com/search?q={}": "https://www.lcsc.com/search?q={}",
+    "https://nuget.org/packages?q={}&sortOrder=package-download-count": "https://www.nuget.org/packages?q={}&sortOrder=package-download-count",
+    "https://personality-database.com/search?q={}": "https://www.personality-database.com/search?q={}",
+    "https://pinterest.com/search/pins/?q={}": "https://www.pinterest.com/search/pins/?q={}",
+    "https://wolframalpha.com/input?i={}": "https://www.wolframalpha.com/input?i={}",
+    "https://www.wikifeet.com/search/{}": "https://wikifeet.com/search/{}"
+  },
+  "version": 1
+}

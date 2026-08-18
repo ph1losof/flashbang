@@ -108,7 +108,7 @@ export function summarizeBangUpdate(
     "",
     "## How",
     "",
-    "The workflow fetches DuckDuckGo and Kagi, applies Flashbang's custom bangs, merges entries by trigger, and validates the generated data. Auto-merge is enabled only after the required checks pass.",
+    "The workflow fetches DuckDuckGo and Kagi, applies Flashbang's custom bangs and the canonical-destination overlay, merges entries by trigger, and validates the generated data. Auto-merge is enabled only after the required checks pass.",
     "",
   ].join("\n");
 }

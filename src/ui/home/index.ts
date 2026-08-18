@@ -24,8 +24,10 @@ export function initHome(db: DB): HomeController {
   let bangPrefix = DEFAULT_BANG_PREFIX;
   let snapPrefix = DEFAULT_SNAP_PREFIX;
   let firefoxSuggestProvider = "google";
+  let contentLanguage = "";
   const addressBar = setupAddressBarSheet(() => ({
     bangPrefix,
+    contentLanguage,
     provider: firefoxSuggestProvider,
     snapPrefix,
   }));
@@ -40,9 +42,12 @@ export function initHome(db: DB): HomeController {
     addressBar.refreshSuggestionUrl();
   };
   setupHomeShortcuts(input, () => [bangPrefix, snapPrefix]);
-  void db.getMultipleSettings(["bang-prefix", "snap-prefix"]).then((values) => {
-    const [bang, snap] = resolveTriggerPrefixes(values[0], values[1]);
-    setPrefixes(bang, snap);
-  });
+  void db
+    .getMultipleSettings(["bang-prefix", "snap-prefix", "content-language"])
+    .then((values) => {
+      const [bang, snap] = resolveTriggerPrefixes(values[0], values[1]);
+      contentLanguage = values[2] || "";
+      setPrefixes(bang, snap);
+    });
   return { refreshCatalog: refresh, setFirefoxSuggestProvider, setPrefixes };
 }

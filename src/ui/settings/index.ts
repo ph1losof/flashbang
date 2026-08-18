@@ -8,6 +8,7 @@ import { $ } from "../dom";
 import { resolveSuggestProvider } from "../suggest-provider";
 import { setupCustomBangs } from "./custom-bangs";
 import { setupDefaultBangSetting } from "./default-bang";
+import { setupLocaleSettings } from "./locale";
 import { getProviderControls, setupProviderSettings } from "./providers";
 import { setupSyntaxSettings } from "./syntax";
 import { setupSettingsTransfer } from "./transfer";
@@ -21,6 +22,7 @@ const SETTINGS_KEYS = [
   "lucky-url",
   "bang-prefix",
   "snap-prefix",
+  "content-language",
 ];
 
 export async function initSettings(
@@ -35,6 +37,7 @@ export async function initSettings(
   const exportButton = $<HTMLButtonElement>("#export-btn");
   const bangPrefixSelect = $<HTMLSelectElement>("#bang-prefix");
   const snapPrefixSelect = $<HTMLSelectElement>("#snap-prefix");
+  const contentLanguageSelect = $<HTMLSelectElement>("#content-language");
   const providerControls = getProviderControls();
   const [rawSettings, initialCustom] = await Promise.all([
     db.getMultipleSettings(SETTINGS_KEYS),
@@ -56,6 +59,7 @@ export async function initSettings(
     luckyProvider: rawSettings[3] || "default",
     luckyUrl: rawSettings[4] || "",
     snapPrefix,
+    contentLanguage: rawSettings[7] || "",
   };
 
   const customFormControls = Array.from(
@@ -76,6 +80,7 @@ export async function initSettings(
     exportButton,
     bangPrefixSelect,
     snapPrefixSelect,
+    contentLanguageSelect,
     ...customFormControls,
   ]);
 
@@ -86,7 +91,8 @@ export async function initSettings(
       state.suggestUrl,
       state.custom,
       state.bangPrefix,
-      state.snapPrefix
+      state.snapPrefix,
+      state.contentLanguage
     );
   };
   const providers = setupProviderSettings({
@@ -105,6 +111,16 @@ export async function initSettings(
       providers.refresh();
       void refreshCustomBangs();
       onSyntaxChange?.(state.bangPrefix, state.snapPrefix);
+    },
+    state,
+    writer,
+  });
+  const locale = setupLocaleSettings({
+    db,
+    onChange: () => {
+      syncCookie();
+      providers.refresh();
+      onCatalogChange?.();
     },
     state,
     writer,
@@ -156,10 +172,12 @@ export async function initSettings(
         imported[5],
         imported[6]
       );
+      state.contentLanguage = imported[7] || "";
       await refreshCustomBangs();
       state.defaultBang = defaultBang.setCommitted(importedDefaultBang);
       providers.refresh();
       syntax.refresh();
+      locale.refresh();
       writer.clearErrors();
       syncCookie();
       onSyntaxChange?.(state.bangPrefix, state.snapPrefix);

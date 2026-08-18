@@ -36,6 +36,11 @@ import {
   SITE_SUGGESTION_SHAPE,
   TOP_K,
 } from "./shared/constants";
+import {
+  type LocaleSplit,
+  localeSplitOf,
+  resolveLocaleValue,
+} from "./shared/locale-table";
 
 interface Candidate {
   terminalIndex: number;
@@ -199,9 +204,91 @@ export function findBangSuggestionTerminal(trigger: string): number {
   return findTerminalIndex(trigger);
 }
 
+/**
+ * Whether an endpoint carries a marker is fixed by the generated table, so it
+ * is answered by an array read on the index already in hand rather than by a
+ * brace scan plus a string-keyed lookup on every request. `null` means "no
+ * marker", `undefined` means "not yet computed" -- the two have to stay
+ * distinguishable, which is why this is not a plain sparse array of splits.
+ *
+ * Only one of the fourteen curated endpoints is marked today, so this reduces
+ * the overwhelmingly common case to a single load and a branch.
+ */
+const ENDPOINT_SPLIT_CACHE = new Array<LocaleSplit | null | undefined>(
+  ENDPOINT_SHAPE.length
+);
+
+function endpointPrefix(index: number): string {
+  return readPackedStringCached(
+    ENDPOINT_P_BLOB,
+    ENDPOINT_P_LEN,
+    ENDPOINT_P_CP,
+    ENDPOINT_PREFIX_CACHE,
+    index
+  );
+}
+
+/**
+ * Reads the prefix itself rather than taking it as a parameter, so a marked
+ * endpoint never reads it at all: the split is cached and the substituted
+ * prefix is cached, leaving the raw one needed only to build the split once.
+ */
+function endpointLocaleSplit(index: number): LocaleSplit | null {
+  const cached = ENDPOINT_SPLIT_CACHE[index];
+  if (cached !== undefined) {
+    return cached;
+  }
+  const prefix = endpointPrefix(index);
+  const split = prefix.indexOf("{") === -1 ? null : localeSplitOf(prefix);
+  ENDPOINT_SPLIT_CACHE[index] = split;
+  return split;
+}
+
+/**
+ * The fully substituted prefix, memoized per reader chain and endpoint, so a
+ * request concatenates rather than rebuilding the host.
+ *
+ * Keyed on the chain's identity rather than on the language tag, so
+ * correctness never depends on how the chain was built: an unrecognized array
+ * simply misses and resolves as before. `suggestLanguageChain` returns the same
+ * array for the same reader language, which is what turns that miss into a hit
+ * across requests, and a `WeakMap` lets these drop with the chain rather than
+ * pinning entries for languages no longer being served.
+ *
+ * Reached only for a marked endpoint: an unmarked one is answered by the split
+ * cache above and never pays this lookup.
+ */
+const localizedPrefixByChain = new WeakMap<
+  readonly string[],
+  (string | undefined)[]
+>();
+
+function localizedEndpointPrefix(
+  index: number,
+  split: LocaleSplit,
+  chain: readonly string[]
+): string {
+  let byIndex = localizedPrefixByChain.get(chain);
+  if (byIndex === undefined) {
+    byIndex = new Array(ENDPOINT_SHAPE.length);
+    localizedPrefixByChain.set(chain, byIndex);
+  }
+  const cached = byIndex[index];
+  if (cached !== undefined) {
+    return cached;
+  }
+  // Walks the site's supported list, which for Wikipedia is 340 codes. Doing
+  // that once per language instead of once per request is the whole point.
+  const value =
+    split.head + resolveLocaleValue(split.pattern, chain) + split.tail;
+  byIndex[index] = value;
+  return value;
+}
+
 export function resolveSiteSuggestionUrl(
   terminalIndex: number,
-  encodedQuery: string
+  encodedQuery: string,
+  chain: readonly string[] = []
 ): string | null {
   const kind = TERM_E_KIND[terminalIndex];
   if (kind === 0) {
@@ -213,13 +300,6 @@ export function resolveSiteSuggestionUrl(
   }
 
   const index = kind - 3;
-  const prefix = readPackedStringCached(
-    ENDPOINT_P_BLOB,
-    ENDPOINT_P_LEN,
-    ENDPOINT_P_CP,
-    ENDPOINT_PREFIX_CACHE,
-    index
-  );
   const suffix = readPackedStringCached(
     ENDPOINT_S_BLOB,
     ENDPOINT_S_LEN,
@@ -227,7 +307,19 @@ export function resolveSiteSuggestionUrl(
     ENDPOINT_SUFFIX_CACHE,
     index
   );
-  return prefix + encodedQuery + suffix;
+  // Loaded before the split lookup rather than inside the branch that uses it,
+  // so the two loads stay independent. Making the prefix wait on the split
+  // measurably lengthens the unmarked path, and unmarked is thirteen of the
+  // fourteen curated endpoints. Falls back to the reader because a cold split
+  // lookup is what populates this cache.
+  const cachedPrefix = ENDPOINT_PREFIX_CACHE[index];
+  // One concatenation on either branch. Substituting inside a helper and
+  // appending afterwards would build the host string only to throw it away into
+  // a second one.
+  const split = endpointLocaleSplit(index);
+  return split === null
+    ? (cachedPrefix ?? endpointPrefix(index)) + encodedQuery + suffix
+    : localizedEndpointPrefix(index, split, chain) + encodedQuery + suffix;
 }
 
 export function siteSuggestionShape(terminalIndex: number): number {

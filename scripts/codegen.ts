@@ -6,6 +6,7 @@ import { $ } from "bun";
 import {
   BANG_BINARY_HEADER_WORDS,
   BANG_BINARY_VERSION_INDEX,
+  CHECKPOINT_SIZE,
 } from "../src/shared/bang-binary-format";
 import {
   BANG_SHARD_COUNT,
@@ -25,6 +26,7 @@ import {
   type SiteSuggestionShape,
 } from "../src/shared/constants";
 import { hashFNV1a } from "../src/shared/hash";
+import { LOCALE_PATTERNS } from "../src/shared/locale-table";
 import {
   compileSnapTarget,
   type SnapTargetParts,
@@ -34,6 +36,7 @@ import { decodeBangData, decodeIndexBangData } from "../src/sw/bang-data";
 import { createBangStrings } from "../src/sw/bang-strings";
 import {
   assignGlobalStringIds,
+  emptyStringIdMap,
   encodeStringStore,
   loadStringIdMap,
   PREFIX_IDS_PATH,
@@ -100,6 +103,7 @@ const DDG_BANGS_PATH = `${DATA_DIR}/ddg.json`;
 const KAGI_BANGS_PATH = `${DATA_DIR}/kagi.json`;
 const CUSTOM_BANGS_PATH = `${DATA_DIR}/custom-bangs.json`;
 const MERGED_BANGS_PATH = `${DATA_DIR}/bangs.json`;
+const CANONICAL_URLS_PATH = `${DATA_DIR}/bang-canonical.json`;
 const SUGGEST_SITES_PATH = `${DATA_DIR}/suggest-sites.json`;
 const GENERATED_OUT_DIR = "src/generated";
 const HOT_BANG_LIMIT = 24;
@@ -422,6 +426,93 @@ export function mergeSources(sources: readonly NamedBangSource[]): Bang[] {
   return [...map.values()].sort((a, b) => a.trigger.localeCompare(b.trigger));
 }
 
+const LOCALE_MARKER = "{lang}";
+
+function authorityBounds(url: string): [number, number] {
+  const start = url.indexOf("://") + 3;
+  let end = url.length;
+  for (const delimiter of ["/", "?", "#"]) {
+    const index = url.indexOf(delimiter, start);
+    if (index !== -1 && index < end) {
+      end = index;
+    }
+  }
+  return [start, end];
+}
+
+function authorityResidue(url: string): string {
+  const [start, end] = authorityBounds(url);
+  let residue = url.substring(start, end).replaceAll("{}", "");
+  residue = residue.replaceAll(LOCALE_MARKER, "");
+  return residue;
+}
+
+export function assertLocaleMarkerUrl(
+  url: string,
+  fail: (reason: string) => never
+): void {
+  const marker = LOCALE_MARKER;
+  if (url.indexOf(marker) !== url.lastIndexOf(marker)) {
+    fail("at most one locale marker per URL");
+  }
+  const authorityStart = url.indexOf("://") + 3;
+  if (authorityStart < 3) {
+    fail("URL must be absolute");
+  }
+  let authorityEnd = url.length;
+  for (const delimiter of ["/", "?", "#"]) {
+    const index = url.indexOf(delimiter, authorityStart);
+    if (index !== -1 && index < authorityEnd) {
+      authorityEnd = index;
+    }
+  }
+  const at = url.indexOf(marker);
+  if (at < authorityStart || at + marker.length > authorityEnd) {
+    fail("locale markers must sit inside the authority");
+  }
+  if (at !== authorityStart || url[at + marker.length] !== ".") {
+    fail("{lang} must be the leading host label");
+  }
+  const host = url.substring(authorityStart, authorityEnd);
+  const pattern = LOCALE_PATTERNS.find((p) => p.host === host);
+  if (!pattern) {
+    fail(
+      `host pattern ${host} is not registered in src/shared/locale-table.ts`
+    );
+    return;
+  }
+  for (const value of [...pattern.supported.split(" "), pattern.fallback]) {
+    const parsed = new URL(url.replace(marker, value).replace("{}", "test"));
+    if (
+      parsed.hostname !== host.replace(marker, value) ||
+      parsed.port !== "" ||
+      parsed.username !== "" ||
+      parsed.password !== ""
+    ) {
+      fail(`substituting "${value}" changes the origin unexpectedly`);
+    }
+  }
+}
+
+export function assertLocaleMarkers(bangs: readonly Bang[]): void {
+  for (const bang of bangs) {
+    const url = bang.url;
+    const fail = (reason: string): never => {
+      throw new Error(`!${bang.trigger}: ${reason} (${url})`);
+    };
+    if (!url.includes(LOCALE_MARKER)) {
+      if (authorityResidue(url).includes("{")) {
+        fail("unrecognized placeholder in the authority");
+      }
+      continue;
+    }
+    if (bang.regex) {
+      fail("capture bangs cannot carry a locale marker");
+    }
+    assertLocaleMarkerUrl(url, fail);
+  }
+}
+
 export function validateBangs(bangs: Bang[]): Bang[] {
   return bangs.filter((b) => {
     if (!b.trigger) {
@@ -431,7 +522,7 @@ export function validateBangs(bangs: Bang[]): Bang[] {
     if (b.regex) {
       error = validateCaptureBang(b.url, b.regex);
     } else if (b.url !== "/settings") {
-      error = validateSimpleBangUrl(b.url);
+      error = validateSimpleBangUrl(b.url, true);
     }
     if (error) {
       console.error(`Warning: bang !${b.trigger} is invalid: ${error}`);
@@ -1589,6 +1680,35 @@ export function generateCatalog(
   };
 }
 
+export function rebuildStringIdMap(
+  bangs: readonly Bang[],
+  options: { bumpEpoch: boolean },
+  previous: StringIdMap = loadStringIdMap()
+): StringIdMap {
+  const prefixes: string[] = [];
+  const suffixes: string[] = [];
+  for (const bang of bangs) {
+    if (bang.regex) {
+      continue;
+    }
+    const [prefix, suffix] = splitTemplate(bang.url);
+    prefixes.push(prefix);
+    if (suffix !== null) {
+      suffixes.push(suffix);
+    }
+  }
+  const rebuilt = emptyStringIdMap();
+  assignGlobalStringIds(rebuilt, prefixes, suffixes);
+  rebuilt.meta.epoch = options.bumpEpoch
+    ? previous.meta.epoch + 1
+    : previous.meta.epoch;
+  rebuilt.meta.basePrefixCount =
+    Math.floor(rebuilt.prefixes.length / CHECKPOINT_SIZE) * CHECKPOINT_SIZE;
+  rebuilt.meta.baseSuffixCount =
+    Math.floor(rebuilt.suffixes.length / CHECKPOINT_SIZE) * CHECKPOINT_SIZE;
+  return rebuilt;
+}
+
 export function generateBinaryShards(
   bangs: readonly Bang[],
   router: Uint8Array = loadFrozenBangShardRouter()
@@ -2197,13 +2317,83 @@ async function parseBangSourcesFromDisk(): Promise<NamedBangSource[]> {
   return sources;
 }
 
-function mergeAndValidateSources(sources: readonly NamedBangSource[]): Bang[] {
+export interface CanonicalOverlay {
+  auto: Record<string, string>;
+  approved: Record<string, { snap?: string; url: string }>;
+  version: number;
+}
+
+export const EMPTY_CANONICAL_OVERLAY: CanonicalOverlay = {
+  approved: {},
+  auto: {},
+  version: 1,
+};
+
+function overlayDomain(url: string): string {
+  const [start, end] = authorityBounds(url);
+  const host = url.substring(start, end).toLowerCase();
+  return host.startsWith("www.") ? host.substring(4) : host;
+}
+
+export function applyCanonicalUrls(
+  bangs: readonly Bang[],
+  overlay: CanonicalOverlay
+): Bang[] {
+  return bangs.map((bang) => {
+    if (bang.regex) {
+      return bang;
+    }
+    const approved = overlay.approved[bang.url];
+    const url = approved?.url ?? overlay.auto[bang.url];
+    if (!url || url === bang.url) {
+      return bang;
+    }
+    const error = validateSimpleBangUrl(url, true);
+    if (error) {
+      console.error(
+        `Warning: canonical URL for !${bang.trigger} rejected: ${error}`
+      );
+      return bang;
+    }
+    const snap = approved?.snap ?? bang.snap;
+    if (!snap && overlayDomain(url) !== overlayDomain(bang.url)) {
+      throw new Error(
+        `!${bang.trigger}: canonical rewrite changes the snap domain ` +
+          `(${overlayDomain(bang.url)} -> ${overlayDomain(url)}) without a snap compensation`
+      );
+    }
+    return { ...bang, url, ...(snap ? { snap } : {}) };
+  });
+}
+
+function mergeAndValidateSources(
+  sources: readonly NamedBangSource[],
+  overlay: CanonicalOverlay
+): Bang[] {
   console.log("=== Merge + validate ===");
   const merged = mergeSources(sources);
   console.log(`Merged: ${merged.length} unique bangs`);
-  const valid = validateBangs(merged);
+  const canonical = applyCanonicalUrls(merged, overlay);
+  const rewritten = canonical.filter(
+    (bang, index) => bang.url !== merged[index].url
+  ).length;
+  console.log(`Canonical rewrites applied: ${rewritten}`);
+  const valid = validateBangs(canonical);
   console.log(`Valid: ${valid.length} bangs after validation`);
   return valid;
+}
+
+async function loadCanonicalOverlay(): Promise<CanonicalOverlay> {
+  const file = Bun.file(CANONICAL_URLS_PATH);
+  if (!(await file.exists())) {
+    return EMPTY_CANONICAL_OVERLAY;
+  }
+  const raw = (await file.json()) as Partial<CanonicalOverlay>;
+  return {
+    approved: raw.approved ?? {},
+    auto: raw.auto ?? {},
+    version: raw.version ?? 1,
+  };
 }
 
 async function saveMergedBangs(bangs: readonly Bang[]): Promise<void> {
@@ -2226,7 +2416,10 @@ async function loadBangs(options: CodegenOptions): Promise<Bang[]> {
     await fetchBangSources();
   }
   const parsedSources = await parseBangSourcesFromDisk();
-  const valid = mergeAndValidateSources(parsedSources);
+  const valid = mergeAndValidateSources(
+    parsedSources,
+    await loadCanonicalOverlay()
+  );
   await saveMergedBangs(valid);
   return valid;
 }
@@ -2454,14 +2647,20 @@ export function verifyCatalogRoundTrip(
 
 export async function runCodegen(options: CodegenOptions = {}): Promise<void> {
   const bangs = await loadBangs(options);
+  assertLocaleMarkers(bangs);
   const suggestionSites: SuggestionSiteRegistry =
     await Bun.file(SUGGEST_SITES_PATH).json();
   for (const [domain, suggestionSite] of Object.entries(
     suggestionSites.curated
   )) {
-    const error = validateSimpleBangUrl(suggestionSite.url);
+    const error = validateSimpleBangUrl(suggestionSite.url, true);
     if (error) {
       throw new Error(`Invalid suggestion endpoint for ${domain}: ${error}`);
+    }
+    if (suggestionSite.url.includes(LOCALE_MARKER)) {
+      assertLocaleMarkerUrl(suggestionSite.url, (reason) => {
+        throw new Error(`Invalid suggestion endpoint for ${domain}: ${reason}`);
+      });
     }
   }
   for (const [domain, path] of Object.entries(suggestionSites.mediawiki)) {
@@ -2513,9 +2712,79 @@ export async function runCodegen(options: CodegenOptions = {}): Promise<void> {
   console.log(`Generated ${bangs.length} bangs in ${GENERATED_OUT_DIR}/`);
 }
 
+async function compactStringIds(options: {
+  bootstrap: boolean;
+  confirm: boolean;
+}): Promise<void> {
+  const bangs = await loadBangs({ fromMerged: true, noFetch: true });
+  const previous = options.bootstrap ? emptyStringIdMap() : loadStringIdMap();
+  const rebuilt = rebuildStringIdMap(
+    bangs,
+    { bumpEpoch: !options.bootstrap },
+    previous
+  );
+  const reclaimedPrefixes = previous.prefixes.length - rebuilt.prefixes.length;
+  const reclaimedSuffixes = previous.suffixes.length - rebuilt.suffixes.length;
+  const reclaimed = reclaimedPrefixes + reclaimedSuffixes;
+  const total = previous.prefixes.length + previous.suffixes.length;
+
+  console.log(
+    `epoch ${previous.meta.epoch} -> ${rebuilt.meta.epoch}; ` +
+      `prefixes ${previous.prefixes.length} -> ${rebuilt.prefixes.length}, ` +
+      `suffixes ${previous.suffixes.length} -> ${rebuilt.suffixes.length} ` +
+      `(${reclaimed} reclaimed)`
+  );
+
+  if (!options.bootstrap) {
+    if (process.env.CI) {
+      throw new Error(
+        "Refusing to compact in CI: this is a human-triggered epoch event"
+      );
+    }
+    if (reclaimed < 0) {
+      throw new Error("Refusing to compact: the rebuilt map is larger");
+    }
+    if (reclaimed < Math.max(256, total * 0.02)) {
+      throw new Error(
+        `Refusing to burn an epoch to reclaim ${reclaimed} of ${total} IDs ` +
+          "(needs at least max(256, 2%)). Canonicalize destinations first."
+      );
+    }
+    if (!options.confirm) {
+      console.log(
+        "\nEvery installed client re-downloads the string store and its index " +
+          "shards.\nRe-run with --confirm-epoch-bump to proceed."
+      );
+      process.exit(1);
+    }
+  }
+
+  const catalog = generateCatalog(bangs, rebuilt);
+  verifyCatalogRoundTrip(bangs, catalog, rebuilt);
+
+  const serialized = serializeStringIdMap(rebuilt);
+  await Bun.write(PREFIX_IDS_PATH, serialized.prefixes);
+  await Bun.write(SUFFIX_IDS_PATH, serialized.suffixes);
+  await Bun.write(STRING_META_PATH, serialized.meta);
+  console.log(
+    `Wrote ${PREFIX_IDS_PATH}, ${SUFFIX_IDS_PATH}, ${STRING_META_PATH}. ` +
+      "Run `bun run build` to regenerate src/generated/."
+  );
+}
+
 async function main(): Promise<void> {
   const noFetch = process.argv.includes("--no-fetch");
   const fromMerged = process.argv.includes("--from-merged");
+  if (
+    process.argv.includes("--compact-string-ids") ||
+    process.argv.includes("--bootstrap-string-ids")
+  ) {
+    await compactStringIds({
+      bootstrap: process.argv.includes("--bootstrap-string-ids"),
+      confirm: process.argv.includes("--confirm-epoch-bump"),
+    });
+    return;
+  }
   if (process.argv.includes("--rebalance-router")) {
     // Separate command: rebalancing reassigns cells to shards, rewriting every
     // shard and forcing a full re-download for every installed client. An epoch

@@ -19,7 +19,9 @@ import {
 import { validateCustomTrigger } from "../shared/custom-trigger";
 import { hashFNV1a } from "../shared/hash";
 import { HOT_BOOT_SENTINEL, HOT_BOOT_VERSION } from "../shared/hot-boot";
+import { normalizeLocaleSetting } from "../shared/locale-table";
 import { lookupBang } from "./bang-data";
+import { onLocaleChange, substituteLocale } from "./locale";
 import {
   type CustomUrlParts,
   compileTriggerMarker,
@@ -41,6 +43,7 @@ export type HotFrecencyEntry = readonly [string, UrlParts];
 
 export interface HotBootRecord {
   baseComplete: boolean;
+  locale: string | null;
   compactSettings: RedirectSettings | null;
   defaultBang: string;
   frecency: Readonly<Record<string, UrlParts>> | null;
@@ -52,10 +55,28 @@ export interface HotBootRecord {
 
 const hotBangUrlCache: Array<UrlParts | undefined> = [];
 
+let hotPrefixes: readonly string[] = HOT_PREFIXES;
+
+export function refreshHotLocalePrefixes(): void {
+  let next: string[] | null = null;
+  for (let id = 0; id < HOT_PREFIXES.length; id++) {
+    if (HOT_PREFIXES[id].indexOf("{") === -1) {
+      continue;
+    }
+    next ??= HOT_PREFIXES.slice();
+    next[id] = substituteLocale(HOT_PREFIXES[id]);
+  }
+  hotPrefixes = next ?? HOT_PREFIXES;
+  hotBangUrlCache.length = 0;
+}
+
+onLocaleChange(refreshHotLocalePrefixes);
+refreshHotLocalePrefixes();
+
 function hotBangParts(id: number): UrlParts {
   let parts = hotBangUrlCache[id];
   if (!parts) {
-    parts = [HOT_PREFIXES[id], HOT_SUFFIXES[id]];
+    parts = [hotPrefixes[id], HOT_SUFFIXES[id]];
     hotBangUrlCache[id] = parts;
   }
   return parts;
@@ -105,7 +126,7 @@ function makeHotBangLookup(
     }
     return rawQuery === undefined
       ? hotBangParts(id)
-      : HOT_PREFIXES[id] +
+      : hotPrefixes[id] +
           rawQuery.substring(termStart as number, termEnd) +
           HOT_SUFFIXES[id];
   }) as HotBangLookup;
@@ -381,6 +402,7 @@ function decodeCustomEntry(value: unknown): CustomUrlParts | null {
 function decodeBootSettings(encoded: string): {
   defaultBang: string;
   frecency: Readonly<Record<string, UrlParts>>;
+  locale: string | null;
   settings: RedirectSettings;
 } | null {
   const decoded = decodeBase64Url(encoded);
@@ -393,11 +415,25 @@ function decodeBootSettings(encoded: string): {
   } catch {
     return null;
   }
-  if (!Array.isArray(value) || value.length !== 6) {
+  if (!Array.isArray(value) || value.length !== 7) {
     return null;
   }
-  const [defaultBang, defaultUrl, luckyUrl, markers, entries, frecencyEntries] =
-    value;
+  const [
+    defaultBang,
+    defaultUrl,
+    luckyUrl,
+    markers,
+    entries,
+    frecencyEntries,
+    rawLocale,
+  ] = value;
+  if (!(rawLocale === null || typeof rawLocale === "string")) {
+    return null;
+  }
+  const locale = rawLocale === null ? null : normalizeLocaleSetting(rawLocale);
+  if (rawLocale !== null && locale === null) {
+    return null;
+  }
   if (
     typeof defaultBang !== "string" ||
     !defaultBang ||
@@ -463,6 +499,7 @@ function decodeBootSettings(encoded: string): {
   return {
     defaultBang,
     frecency,
+    locale,
     settings: {
       custom,
       defaultUrl,
@@ -509,20 +546,26 @@ function encodeBootSettings(
       markers,
       custom,
       frecency.slice(0, TOP_FRECENCY_ENTRIES),
+      snapshot.locale ?? null,
     ])
   );
 }
 
-function encodeCompactBaseSettings(settings: RedirectSettings): string {
+function encodeCompactBaseSettings(
+  settings: RedirectSettings,
+  locale: string | null
+): string {
   const markers = settings.syntax
     ? [settings.syntax[0] & 0xff, settings.syntax[1] & 0xff]
     : [33, 64];
   return encodeBase64Url(
-    JSON.stringify([settings.defaultUrl, settings.luckyUrl, markers])
+    JSON.stringify([settings.defaultUrl, settings.luckyUrl, markers, locale])
   );
 }
 
-function decodeCompactBaseSettings(encoded: string): RedirectSettings | null {
+function decodeCompactBaseSettings(
+  encoded: string
+): { locale: string | null; settings: RedirectSettings } | null {
   const decoded = decodeBase64Url(encoded);
   if (decoded === null) {
     return null;
@@ -533,10 +576,17 @@ function decodeCompactBaseSettings(encoded: string): RedirectSettings | null {
   } catch {
     return null;
   }
-  if (!Array.isArray(value) || value.length !== 3) {
+  if (!Array.isArray(value) || value.length !== 4) {
     return null;
   }
-  const [defaultUrl, luckyUrl, markers] = value;
+  const [defaultUrl, luckyUrl, markers, rawLocale] = value;
+  if (!(rawLocale === null || typeof rawLocale === "string")) {
+    return null;
+  }
+  const locale = rawLocale === null ? null : normalizeLocaleSetting(rawLocale);
+  if (rawLocale !== null && locale === null) {
+    return null;
+  }
   if (!isUrlParts(defaultUrl)) {
     return null;
   }
@@ -561,7 +611,10 @@ function decodeCompactBaseSettings(encoded: string): RedirectSettings | null {
       typeof compileTriggerSyntax
     >[1]
   );
-  return baseSettings(defaultUrl, luckyUrl, syntax);
+  return {
+    locale,
+    settings: baseSettings(defaultUrl, luckyUrl, syntax),
+  };
 }
 
 export function materializeHotFrecency(
@@ -579,7 +632,7 @@ export function materializeHotFrecency(
     }
     const parts = lookupBang(trigger, hashFNV1a(trigger));
     if (parts && isUrlParts(parts)) {
-      entries.push([trigger, [parts[0], parts[1]]]);
+      entries.push([trigger, [substituteLocale(parts[0]), parts[1]]]);
     }
   }
   return entries;
@@ -601,14 +654,15 @@ export function encodeHotBootRecord(
   state: number,
   snapshot?: RedirectSettingsSnapshot,
   settings?: RedirectSettings,
-  frecency: readonly HotFrecencyEntry[] = []
+  frecency: readonly HotFrecencyEntry[] = [],
+  locale: string | null = null
 ): string {
   const compact = `${HOT_BOOT_VERSION}|${cacheName}|${state.toString(36)}`;
   if (!settings) {
     return compact;
   }
   if (!snapshot) {
-    return `${compact}|c${encodeCompactBaseSettings(settings)}`;
+    return `${compact}|c${encodeCompactBaseSettings(settings, locale)}`;
   }
   return `${compact}|${encodeBootSettings(snapshot, settings, frecency)}`;
 }
@@ -641,6 +695,7 @@ export function decodeHotBootRecord(
       defaultBang: "",
       frecency: null,
       hotBangLookup: createCompactHotBangLookup(packed),
+      locale: null,
       payloadComplete: false,
       settings: null,
       state: packed,
@@ -648,16 +703,17 @@ export function decodeHotBootRecord(
   }
   const payload = raw.substring(payloadStart + 1);
   if (payload.charCodeAt(0) === 99) {
-    const compactSettings = decodeCompactBaseSettings(payload.substring(1));
-    if (!compactSettings) {
+    const compact = decodeCompactBaseSettings(payload.substring(1));
+    if (!compact) {
       return null;
     }
     return {
       baseComplete: true,
-      compactSettings,
+      compactSettings: compact.settings,
       defaultBang: "",
       frecency: null,
       hotBangLookup: createCompactHotBangLookup(packed),
+      locale: compact.locale,
       payloadComplete: false,
       settings: null,
       state: packed,
@@ -673,6 +729,7 @@ export function decodeHotBootRecord(
     defaultBang: decoded.defaultBang,
     frecency: decoded.frecency,
     hotBangLookup: createFrecencyHotBangLookup(decoded.frecency),
+    locale: decoded.locale,
     payloadComplete: true,
     settings: decoded.settings,
     state: packed,

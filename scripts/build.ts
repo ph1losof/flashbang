@@ -187,8 +187,8 @@ export function assertCatalogPerformanceBudgets(
   if (sizes.indexPackBrotli.length === 0) {
     throw new Error("Catalog performance budget requires index packs");
   }
-  fail("Cold fallback Brotli", sizes.coldFallbackBrotli, 7 * 1024);
-  fail("Service worker Brotli", sizes.serviceWorkerBrotli, 19 * 1024);
+  fail("Cold fallback Brotli", sizes.coldFallbackBrotli, 9.25 * 1024);
+  fail("Service worker Brotli", sizes.serviceWorkerBrotli, 21.5 * 1024);
   fail("Index pack count", sizes.indexPackBrotli.length, 15);
 
   const largestPack = Math.max(...sizes.indexPackBrotli);

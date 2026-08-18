@@ -2,6 +2,7 @@ import {
   parseFrecencyCompact,
   serializeFrecencyCompact,
 } from "./frecency-serial";
+import { normalizeLocaleSetting } from "./locale-table";
 import {
   DEFAULT_BANG_PREFIX,
   DEFAULT_SNAP_PREFIX,
@@ -13,6 +14,7 @@ import {
 const SECTION_SEPARATOR = "|";
 const FREQUENCY_PREFIX = "f:";
 const CUSTOM_PREFIX = "c:";
+const LANGUAGE_PREFIX = "l:";
 
 interface ParsedSuggestCookieCore {
   bangPrefix: TriggerPrefix;
@@ -25,6 +27,7 @@ interface ParsedSuggestCookieCore {
 interface ParsedSuggestCookieContext {
   custom: string[];
   frecent: Record<string, number>;
+  lang: string | null;
 }
 
 export interface ParsedSuggestCookie
@@ -100,7 +103,8 @@ function parseSuggestCookieContext(
   raw: string,
   firstPipe: number,
   forCleanup: boolean,
-  target: ParsedSuggestCookieContext
+  target: ParsedSuggestCookieContext,
+  includeBangContext: boolean
 ): boolean {
   let hasInvalidContext = false;
 
@@ -116,6 +120,10 @@ function parseSuggestCookieContext(
       if (sectionEnd > sectionStart) {
         const section = raw.substring(sectionStart, sectionEnd);
         if (section.startsWith(FREQUENCY_PREFIX)) {
+          if (!includeBangContext) {
+            sectionStart = sectionEnd + 1;
+            continue;
+          }
           const sectionVal = section.substring(2);
           const result = parseFrecencyCompactSection(sectionVal, forCleanup);
           target.frecent = result.value;
@@ -124,9 +132,20 @@ function parseSuggestCookieContext(
             break;
           }
         } else if (section.startsWith(CUSTOM_PREFIX)) {
+          if (!includeBangContext) {
+            sectionStart = sectionEnd + 1;
+            continue;
+          }
           const result = parseCustom(section.substring(2), forCleanup);
           target.custom = result.value;
           if (forCleanup && !result.valid) {
+            hasInvalidContext = true;
+            break;
+          }
+        } else if (section.startsWith(LANGUAGE_PREFIX)) {
+          const value = normalizeLocaleSetting(section.substring(2));
+          target.lang = value;
+          if (forCleanup && value === null) {
             hasInvalidContext = true;
             break;
           }
@@ -155,12 +174,14 @@ export function parseSuggestCookieContextValueWithValidation(
     custom: [],
     frecent: {},
     hasInvalidContext: false,
+    lang: null,
   };
   context.hasInvalidContext = parseSuggestCookieContext(
     raw,
     raw.indexOf(SECTION_SEPARATOR),
     forCleanup,
-    context
+    context,
+    true
   );
   return context;
 }
@@ -221,14 +242,16 @@ export function parseSuggestCookieValueWithValidation(
     customUrl: customUrl ? safeDecodeURIComponent(customUrl) : null,
     frecent: {},
     custom: [],
+    lang: null,
   };
   let hasInvalidContext = false;
-  if (includeBangContext && firstPipe !== -1) {
+  if (firstPipe !== -1) {
     hasInvalidContext = parseSuggestCookieContext(
       raw,
       firstPipe,
       forCleanup,
-      settings
+      settings,
+      includeBangContext
     );
   }
 
@@ -245,7 +268,8 @@ export function encodeSuggestCookieValue(
   custom: string[] = [],
   frecent: Record<string, number> | null = null,
   bangPrefix: TriggerPrefix = DEFAULT_BANG_PREFIX,
-  snapPrefix: TriggerPrefix = DEFAULT_SNAP_PREFIX
+  snapPrefix: TriggerPrefix = DEFAULT_SNAP_PREFIX,
+  lang: string | null = null
 ): string {
   let value = `${provider},${trigger},${encodeURIComponent(customUrl)}`;
   if (
@@ -264,6 +288,11 @@ export function encodeSuggestCookieValue(
     value += `${SECTION_SEPARATOR}${CUSTOM_PREFIX}${encodeURIComponent(
       JSON.stringify(custom)
     )}`;
+  }
+
+  const normalized = lang === null ? null : normalizeLocaleSetting(lang);
+  if (normalized) {
+    value += `${SECTION_SEPARATOR}${LANGUAGE_PREFIX}${normalized}`;
   }
 
   return value;

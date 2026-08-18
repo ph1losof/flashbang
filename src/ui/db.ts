@@ -11,6 +11,7 @@ import {
 } from "../shared/constants";
 import { validateCustomTrigger } from "../shared/custom-trigger";
 import { idbWrap, openDB } from "../shared/idb";
+import { normalizeLocaleSetting } from "../shared/locale-table";
 import { validateSnapTarget } from "../shared/snap-target";
 import {
   DEFAULT_BANG_PREFIX,
@@ -18,7 +19,7 @@ import {
   isTriggerPrefix,
 } from "../shared/trigger-prefix";
 
-export const SETTINGS_SCHEMA_VERSION = 2;
+export const SETTINGS_SCHEMA_VERSION = 3;
 
 const VALID_SETTING_KEYS = new Map([
   ["defaultBang", "default-bang"],
@@ -28,6 +29,7 @@ const VALID_SETTING_KEYS = new Map([
   ["luckyUrl", "lucky-url"],
   ["bangPrefix", "bang-prefix"],
   ["snapPrefix", "snap-prefix"],
+  ["contentLanguage", "content-language"],
 ]);
 const CONFIGURABLE_SETTING_KEYS = [...VALID_SETTING_KEYS.values()];
 
@@ -103,8 +105,10 @@ function prepareImport(data: unknown): PreparedImport {
   const versioned = Object.hasOwn(data, "schemaVersion");
   if (
     versioned &&
-    data.schemaVersion !== 1 &&
-    data.schemaVersion !== SETTINGS_SCHEMA_VERSION
+    (typeof data.schemaVersion !== "number" ||
+      !Number.isInteger(data.schemaVersion) ||
+      data.schemaVersion < 1 ||
+      data.schemaVersion > SETTINGS_SCHEMA_VERSION)
   ) {
     throw new Error("Unsupported settings schema version");
   }
@@ -173,6 +177,10 @@ function prepareImport(data: unknown): PreparedImport {
         const error = value ? validateSimpleBangUrl(value) : null;
         if (error) {
           throw new Error(`Invalid lucky URL template: ${error}`);
+        }
+      } else if (exportKey === "contentLanguage") {
+        if (!normalizeLocaleSetting(value)) {
+          throw new Error("Invalid content language");
         }
       } else if (exportKey === "bangPrefix") {
         if (!isTriggerPrefix(value)) {
@@ -372,6 +380,7 @@ export class DB {
       luckyUrl,
       bangPrefix,
       snapPrefix,
+      contentLanguage,
       customBangs,
     ] = await Promise.all([
       idbWrap<{ key: string; value: string } | undefined>(
@@ -395,6 +404,9 @@ export class DB {
       idbWrap<{ key: string; value: string } | undefined>(
         settingsStore.get("snap-prefix")
       ),
+      idbWrap<{ key: string; value: string } | undefined>(
+        settingsStore.get("content-language")
+      ),
       idbWrap<CustomBangRecord[]>(tx.objectStore("custom-bangs").getAll()),
     ]);
     const result = {
@@ -407,6 +419,7 @@ export class DB {
         luckyUrl: luckyUrl?.value ?? null,
         bangPrefix: bangPrefix?.value ?? null,
         snapPrefix: snapPrefix?.value ?? null,
+        contentLanguage: contentLanguage?.value ?? null,
       },
       customBangs,
       exported: new Date().toISOString(),

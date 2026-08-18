@@ -9,6 +9,11 @@ import {
   SUGGEST_URLS,
   TOP_K,
 } from "./shared/constants";
+import {
+  LOCALE_DISABLED,
+  localeChain,
+  normalizeLocaleSetting,
+} from "./shared/locale-table";
 import { readQueryParam } from "./shared/raw-query";
 import { parsePartialSnapChain } from "./shared/snap-chain";
 import {
@@ -37,6 +42,7 @@ const JSON_HEADERS_INIT = { headers: JSON_HEADERS };
 export interface SuggestCoreSettings {
   bangPrefix: TriggerPrefix;
   customUrl: string | null;
+  lang: string | null;
   provider: string;
   snapPrefix: TriggerPrefix;
   trigger: string;
@@ -269,6 +275,27 @@ function fillTemplate(url: string, encodedQuery: string): string {
     return url;
   }
   return parts[0] + encodedQuery + parts[1];
+}
+
+const NO_LANGUAGE_CHAIN: readonly string[] = [];
+
+const LANGUAGE_CHAIN_LIMIT = 64;
+const languageChains = new Map<string, readonly string[]>();
+
+function suggestLanguageChain(lang: string | null): readonly string[] {
+  if (!lang || lang === LOCALE_DISABLED) {
+    return NO_LANGUAGE_CHAIN;
+  }
+  const cached = languageChains.get(lang);
+  if (cached !== undefined) {
+    return cached;
+  }
+  if (languageChains.size >= LANGUAGE_CHAIN_LIMIT) {
+    languageChains.clear();
+  }
+  const chain = localeChain([lang]);
+  languageChains.set(lang, chain);
+  return chain;
 }
 
 function empty(query: string): Response {
@@ -631,7 +658,8 @@ function parseCookieInternalWithRewrite(
     [],
     {},
     settings.bangPrefix,
-    settings.snapPrefix
+    settings.snapPrefix,
+    settings.lang
   );
 
   return {
@@ -677,7 +705,8 @@ export function parseBangSettingsFromRequestWithCleanup(
       [],
       {},
       cookieSettings.bangPrefix,
-      cookieSettings.snapPrefix
+      cookieSettings.snapPrefix,
+      cookieSettings.lang
     ),
   };
 }
@@ -707,11 +736,23 @@ export function parseSettingsFromRawUrlWithCleanup(
     bangPrefixOverride,
     snapPrefixOverride
   );
+  applyLanguageOverride(rawUrl, settings);
 
   return {
     settings,
     rewrittenSuggestCookie,
   };
+}
+
+function applyLanguageOverride(
+  rawUrl: string,
+  settings: SuggestSettings
+): void {
+  if (settings.lang) {
+    return;
+  }
+  const raw = readQueryParam(rawUrl, "lang");
+  settings.lang = raw ? normalizeLocaleSetting(raw) : null;
 }
 
 export function parseSettingsFromRawUrl(
@@ -739,6 +780,7 @@ export function parseSettingsFromRawUrl(
     bangPrefixOverride,
     snapPrefixOverride
   );
+  applyLanguageOverride(rawUrl, settings);
 
   return settings;
 }
@@ -754,6 +796,7 @@ function defaultSettings(): SuggestSettings {
     snapPrefix: DEFAULT_SNAP_PREFIX,
     trigger: "g",
     customUrl: null,
+    lang: null,
     frecent: {},
     custom: [],
   };
@@ -866,7 +909,11 @@ export async function suggest(
     bangTerminal = providerBangTerminal(providerQuery, settings);
     if (bangTerminal >= 0) {
       encodedQuery = encodeURIComponent(queryValue);
-      siteUrl = resolveSiteSuggestionUrl(bangTerminal, encodedQuery);
+      siteUrl = resolveSiteSuggestionUrl(
+        bangTerminal,
+        encodedQuery,
+        suggestLanguageChain(settings.lang)
+      );
       if (siteUrl) {
         if (
           !hasMinimumCodePoints(queryValue, SITE_SUGGESTION_MIN_CODE_POINTS)

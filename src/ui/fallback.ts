@@ -4,6 +4,7 @@ import {
   lookupGeneratedHotBang,
   materializeCompactBaseSettings,
 } from "../sw/hot-redirect";
+import { setActiveLocale } from "../sw/locale";
 import {
   type RedirectSettings,
   redirectRawUrl,
@@ -18,6 +19,8 @@ import {
 } from "../sw/redirect-settings";
 
 declare const __BANG_DATA_ASSET__: string;
+
+setActiveLocale(null);
 
 async function prepareFallbackSettings(): Promise<PreparedRedirectSettings> {
   if (typeof indexedDB.databases === "function") {

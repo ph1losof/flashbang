@@ -925,6 +925,64 @@ describe("sw runtime with real modules", () => {
     );
   });
 
+  test("applies the stored content language to catalog redirects", async () => {
+    await seedDb({
+      settings: [{ key: "content-language", value: "de-DE" }],
+    });
+    await loadSwRuntime();
+
+    const german: unknown[] = [];
+    const germanEvt = createMessageEvent(
+      { type: "redirect", rawQuery: "%21w%20quantum" },
+      { postMessage: (message) => german.push(message) }
+    );
+    await handlers.message?.(germanEvt.event);
+    await Promise.all(germanEvt.waits);
+    expect(String(german[0])).toContain("de.wikipedia.org");
+    expect(String(german[0])).not.toContain("{");
+
+    await seedDb({
+      settings: [{ key: "content-language", value: "fr-FR" }],
+    });
+    await handlers.message?.(createMessageEvent({ type: "invalidate" }).event);
+
+    const french: unknown[] = [];
+    const frenchEvt = createMessageEvent(
+      { type: "redirect", rawQuery: "%21w%20quantum" },
+      { postMessage: (message) => french.push(message) }
+    );
+    await handlers.message?.(frenchEvt.event);
+    await Promise.all(frenchEvt.waits);
+    expect(String(french[0])).toContain("fr.wikipedia.org");
+  });
+
+  test("the content language can be switched off", async () => {
+    await seedDb({ settings: [{ key: "content-language", value: "de-DE" }] });
+    await loadSwRuntime();
+
+    const german: unknown[] = [];
+    const g = createMessageEvent(
+      { type: "redirect", rawQuery: "%21w%20quantum" },
+      { postMessage: (m) => german.push(m) }
+    );
+    await handlers.message?.(g.event);
+    await Promise.all(g.waits);
+    expect(String(german[0])).toContain("de.wikipedia.org");
+
+    await seedDb({ settings: [{ key: "content-language", value: "none" }] });
+    await handlers.message?.(createMessageEvent({ type: "invalidate" }).event);
+
+    const off: unknown[] = [];
+    const o = createMessageEvent(
+      { type: "redirect", rawQuery: "%21w%20quantum" },
+      { postMessage: (m) => off.push(m) }
+    );
+    await handlers.message?.(o.event);
+    await Promise.all(o.waits);
+    expect(String(off[0])).toContain("en.wikipedia.org");
+    expect(String(off[0])).not.toContain("{");
+  });
+
   test("publishes and safely updates registration hot-boot metadata", async () => {
     await seedDb({
       settings: [

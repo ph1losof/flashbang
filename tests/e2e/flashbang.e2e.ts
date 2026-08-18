@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { expect, type Page, test } from "@playwright/test";
 import { DB_VERSION } from "../../src/shared/constants";
+import { HOT_BOOT_VERSION } from "../../src/shared/hot-boot";
 import { encodeSuggestCookieValue } from "../../src/shared/suggest-cookie";
 import { SETTINGS_SCHEMA_VERSION } from "../../src/ui/db";
 import { closeServiceWorkerTarget, disableServiceWorkers } from "./helpers";
@@ -2269,7 +2270,7 @@ test("rich hot boot redirects without IndexedDB or bang data", async ({
         return state.headerValue;
       })
     )
-    .toMatch(/^h1\|fb-[^|]+\|[^|]+\|/);
+    .toMatch(new RegExp(`^${HOT_BOOT_VERSION}\\|fb-[^|]+\\|[^|]+\\|`));
 
   const headerBeforeFrecency = await page.evaluate(async () => {
     const state = await (

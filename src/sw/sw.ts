@@ -47,6 +47,7 @@ import {
   trackBangUsage,
   waitForRedirectSettingsPersistence,
 } from "./idb";
+import { setActiveLocale } from "./locale";
 import {
   type HotBangLookup,
   isHotBangLookupBlocked,
@@ -186,6 +187,9 @@ function readInitialHotBoot(): Promise<HotBootRecord | null> {
             return currentHotBoot;
           }
           currentHotBoot = record;
+          if (record) {
+            setActiveLocale(record.locale);
+          }
           if (record?.settings) {
             seedRedirectSettings(record.settings);
           }
@@ -309,7 +313,8 @@ async function publishHotBoot(includeSettings = false): Promise<void> {
     state,
     settings ? snapshot : undefined,
     settings ?? compactSettings ?? undefined,
-    frecency
+    frecency,
+    snapshot.locale ?? null
   );
   try {
     await navigationPreload.disable();
@@ -1577,5 +1582,7 @@ export function resetSwStateForTests(): void {
   workerShardRuntime?.reset();
   workerIndexRuntime?.reset();
 }
+
+setActiveLocale(null);
 
 registerServiceWorker();

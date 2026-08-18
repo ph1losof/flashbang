@@ -19,6 +19,7 @@ export interface ProviderControls {
 
 export interface ProviderSettingsState {
   bangPrefix: import("../../shared/trigger-prefix").TriggerPrefix;
+  contentLanguage: string;
   defaultBang: string;
   luckyProvider: string;
   luckyUrl: string;
@@ -256,6 +257,7 @@ export function setupProviderSettings({
       {
         ...controls,
         getPrefixes: () => [state.bangPrefix, state.snapPrefix],
+        getContentLanguage: () => state.contentLanguage,
         onProviderChange: onFirefoxSuggestProviderChange,
       },
       writer

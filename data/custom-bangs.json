@@ -199,6 +199,11 @@
     "url": "https://www.phrases.org.uk/search.html?q={}",
     "domain": "www.phrases.org.uk"
   },
+  "quotes": {
+    "name": "Wikiquote",
+    "url": "https://{lang}.wikiquote.org/wiki/Special:Search?search={}",
+    "domain": "wikiquote.org"
+  },
   "rpcs3": {
     "name": "RPCS3 Wiki",
     "url": "https://wiki.rpcs3.net/index.php?title=Special%3ASearch&search={}",
@@ -294,6 +299,16 @@
     "name": "Virtus",
     "url": "https://www.virtus.com/search?q={}",
     "domain": "www.virtus.com"
+  },
+  "w": {
+    "name": "Wikipedia",
+    "url": "https://{lang}.wikipedia.org/w/index.php?search={}",
+    "domain": "wikipedia.org"
+  },
+  "wb": {
+    "name": "Wikibooks",
+    "url": "https://{lang}.wikibooks.org/wiki/Special:Search?search={}",
+    "domain": "wikibooks.org"
   },
   "webtender": {
     "name": "Webtender",
@@ -930,10 +945,55 @@
     "url": "https://wiby.me/?q={}",
     "domain": "wiby.me"
   },
+  "wiki": {
+    "name": "Wikipedia",
+    "url": "https://{lang}.wikipedia.org/w/index.php?search={}",
+    "domain": "wikipedia.org"
+  },
+  "wikibooks": {
+    "name": "Wikibooks",
+    "url": "https://{lang}.wikibooks.org/wiki/Special:Search?search={}",
+    "domain": "wikibooks.org"
+  },
+  "wikipedia": {
+    "name": "Wikipedia",
+    "url": "https://{lang}.wikipedia.org/w/index.php?search={}",
+    "domain": "wikipedia.org"
+  },
+  "wikiquote": {
+    "name": "Wikiquote",
+    "url": "https://{lang}.wikiquote.org/w/index.php?search={}",
+    "domain": "wikiquote.org"
+  },
+  "wikisource": {
+    "name": "Wikisource",
+    "url": "https://{lang}.wikisource.org/w/index.php?search={}&title=Special:Search&go=Go",
+    "domain": "wikisource.org"
+  },
+  "wikiversity": {
+    "name": "Wikiversity",
+    "url": "https://{lang}.wikiversity.org/w/index.php?search={}",
+    "domain": "wikiversity.org"
+  },
+  "wikivoyage": {
+    "name": "Wikivoyage",
+    "url": "https://{lang}.wikivoyage.org/w/index.php?search={}",
+    "domain": "wikivoyage.org"
+  },
+  "wikt": {
+    "name": "Wiktionary",
+    "url": "https://{lang}.wiktionary.org/wiki/Special:Search?search={}&go=Define",
+    "domain": "wiktionary.org"
+  },
   "wkmn": {
     "name": "Wikimini",
     "url": "https://fr.wikimini.org/w/index.php?search={}&title=Sp%C3%A9cial%3ASearch&fulltext=Search",
     "domain": "fr.wikimini.org"
+  },
+  "wku": {
+    "name": "Wikiversity",
+    "url": "https://{lang}.wikiversity.org/w/index.php?search={}",
+    "domain": "wikiversity.org"
   },
   "wnik": {
     "name": "Wordnik",
@@ -945,10 +1005,35 @@
     "url": "https://synonyme.woxikon.de/synonyme/{}.php",
     "domain": "synonyme.woxikon.de"
   },
+  "wq": {
+    "name": "Wikiquote",
+    "url": "https://{lang}.wikiquote.org/wiki/Special:Search?search={}",
+    "domain": "wikiquote.org"
+  },
+  "ws": {
+    "name": "Wikisource",
+    "url": "https://{lang}.wikisource.org/w/index.php?search={}&title=Special:Search&go=Go",
+    "domain": "wikisource.org"
+  },
   "wsp": {
     "name": "Wikispecies",
     "url": "https://species.wikimedia.org/w/index.php?search={}",
     "domain": "species.wikimedia.org"
+  },
+  "wt": {
+    "name": "Wiktionary",
+    "url": "https://{lang}.wiktionary.org/w/index.php?search={}&title=Special:Search&go=Go",
+    "domain": "wiktionary.org"
+  },
+  "wv": {
+    "name": "Wikivoyage",
+    "url": "https://{lang}.wikivoyage.org/w/index.php?search={}",
+    "domain": "wikivoyage.org"
+  },
+  "wvers": {
+    "name": "Wikiversity",
+    "url": "https://{lang}.wikiversity.org/w/index.php?search={}",
+    "domain": "wikiversity.org"
   },
   "xo": {
     "name": "Xonaly",

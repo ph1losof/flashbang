@@ -36,6 +36,23 @@ export interface SettingsWriter {
   ) => void;
 }
 
+export const HOT_BOOT_SETTING_KEYS = [
+  "bang-prefix",
+  "content-language",
+  "custom-bangs",
+  "default-bang",
+  "lucky-provider",
+  "lucky-url",
+  "snap-prefix",
+] as const;
+
+export function writeAffectsHotBoot(key: string): boolean {
+  return (
+    key === "import" ||
+    (HOT_BOOT_SETTING_KEYS as readonly string[]).includes(key)
+  );
+}
+
 export function createSettingsWriter(
   controls: readonly SettingControl[]
 ): SettingsWriter {
@@ -92,14 +109,7 @@ export function createSettingsWriter(
 
   const run: RunWrite = (write, options = {}) => {
     const key = options.key || "custom-bangs";
-    const affectsHotBoot =
-      key === "custom-bangs" ||
-      key === "bang-prefix" ||
-      key === "snap-prefix" ||
-      key === "default-bang" ||
-      key === "lucky-provider" ||
-      key === "lucky-url" ||
-      key === "import";
+    const affectsHotBoot = writeAffectsHotBoot(key);
     const wasIdle = pendingWrites === 0;
     pendingWrites++;
     if (wasIdle) {

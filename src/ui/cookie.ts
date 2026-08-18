@@ -12,7 +12,8 @@ export function setSuggestCookie(
   customUrl: string,
   custom?: string[],
   bangPrefix: TriggerPrefix = DEFAULT_BANG_PREFIX,
-  snapPrefix: TriggerPrefix = DEFAULT_SNAP_PREFIX
+  snapPrefix: TriggerPrefix = DEFAULT_SNAP_PREFIX,
+  contentLanguage = ""
 ) {
   const value = encodeSuggestCookieValue(
     provider,
@@ -21,7 +22,8 @@ export function setSuggestCookie(
     custom,
     null,
     bangPrefix,
-    snapPrefix
+    snapPrefix,
+    contentLanguage || null
   );
   document.cookie = `suggest=${value};path=/;max-age=${COOKIE_MAX_AGE_S};SameSite=Lax;Secure`;
 }

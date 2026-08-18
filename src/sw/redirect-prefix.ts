@@ -1,4 +1,5 @@
 import { CH_0, CH_2, CH_f, CH_PERCENT, CH_PLUS } from "../shared/chars";
+import { localeGeneration, substituteLocale } from "./locale";
 
 export type UrlParts = readonly [string, string | null];
 type UrlEntry = readonly [string, string | null, ...unknown[]];
@@ -178,9 +179,48 @@ export function parsePrefixBang(
 
 const ENTRY_QUERY_SAFE = 1;
 const ENTRY_REPEATED_PLACEHOLDER = 2;
+const ENTRY_LOCALE = 4;
+const ENTRY_SLOW = ENTRY_REPEATED_PLACEHOLDER | ENTRY_LOCALE;
 const entryFlagsCache = new WeakMap<object, number>();
 
-export function compileUrlMode(prefix: string, suffix: string): number {
+interface LocalizedEntry {
+  lg?: number;
+  lp?: string;
+}
+
+function authorityHasBrace(prefix: string): boolean {
+  let brace = prefix.indexOf("{");
+  if (brace === -1) {
+    return false;
+  }
+  const protocolEnd = prefix.indexOf("://");
+  if (protocolEnd === -1) {
+    return false;
+  }
+  const start = protocolEnd + 3;
+  if (brace < start) {
+    brace = prefix.indexOf("{", start);
+    if (brace === -1) {
+      return false;
+    }
+  }
+  let end = prefix.length;
+  const slash = prefix.indexOf("/", start);
+  if (slash !== -1) {
+    end = slash;
+  }
+  const query = prefix.indexOf("?", start);
+  if (query !== -1 && query < end) {
+    end = query;
+  }
+  const fragment = prefix.indexOf("#", start);
+  if (fragment !== -1 && fragment < end) {
+    end = fragment;
+  }
+  return brace < end;
+}
+
+export function compileUrlMode(prefix: string, suffix: string | null): number {
   const query = prefix.indexOf("?");
   let flags = 0;
   if (query !== -1) {
@@ -189,8 +229,11 @@ export function compileUrlMode(prefix: string, suffix: string): number {
       flags |= ENTRY_QUERY_SAFE;
     }
   }
-  if (suffix.includes("{}")) {
+  if (suffix?.includes("{}")) {
     flags |= ENTRY_REPEATED_PLACEHOLDER;
+  }
+  if (authorityHasBrace(prefix)) {
+    flags |= ENTRY_LOCALE;
   }
   return flags;
 }
@@ -200,9 +243,21 @@ function entryFlags(entry: UrlEntry): number {
   if (cached !== undefined) {
     return cached;
   }
-  const flags = compileUrlMode(entry[0], entry[1] as string);
+  const flags = compileUrlMode(entry[0], entry[1]);
   entryFlagsCache.set(entry, flags);
   return flags;
+}
+
+function localizedPrefix(entry: UrlEntry): string {
+  const stamped = entry as LocalizedEntry;
+  const generation = localeGeneration();
+  if (stamped.lg === generation) {
+    return stamped.lp as string;
+  }
+  const value = substituteLocale(entry[0]);
+  stamped.lp = value;
+  stamped.lg = generation;
+  return value;
 }
 
 function fixupForPath(raw: string): string {
@@ -244,9 +299,11 @@ export function buildUrl(
 ): string {
   const suffix = entry[1];
   if (suffix === null) {
-    return entry[0];
+    return ((mode ?? entryFlags(entry)) & ENTRY_LOCALE) === 0
+      ? entry[0]
+      : localizedPrefix(entry);
   }
-  const prefix = entry[0];
+  let prefix = entry[0];
   const raw =
     termStart === 0 && termEnd === value.length
       ? value
@@ -254,8 +311,14 @@ export function buildUrl(
   const flags = mode ?? entryFlags(entry);
   const querySafe = (flags & ENTRY_QUERY_SAFE) !== 0;
   const encoded = querySafe ? raw : fixupForPath(raw);
-  if ((flags & ENTRY_REPEATED_PLACEHOLDER) === 0) {
+  if ((flags & ENTRY_SLOW) === 0) {
     return prefix + encoded + suffix;
+  }
+  if ((flags & ENTRY_LOCALE) !== 0) {
+    prefix = localizedPrefix(entry);
+    if ((flags & ENTRY_REPEATED_PLACEHOLDER) === 0) {
+      return prefix + encoded + suffix;
+    }
   }
 
   const pathEncoded = querySafe ? null : encoded;

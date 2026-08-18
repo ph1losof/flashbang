@@ -26,6 +26,7 @@ export const MAX_CAPTURE_PATTERN_LENGTH = 512;
 export const MAX_CAPTURE_TEMPLATE_LENGTH = 4096;
 const MAX_CAPTURE_GROUPS = 32;
 const CAPTURE_PLACEHOLDER = /\$([1-9]\d*)/g;
+const LOCALE_MARKER = /\{(?!\})/;
 
 export function captureEncodingCode(
   encoding: CaptureEncoding | undefined
@@ -194,6 +195,9 @@ export function validateCaptureBang(
   if (template.includes("{}")) {
     return "Use either {} or capture placeholders, not both";
   }
+  if (LOCALE_MARKER.test(template)) {
+    return "URL may only contain capture placeholders such as $1";
+  }
   const parsed = parseCaptureTemplate(template);
   if (!parsed) {
     return "Regex URL must contain a capture placeholder such as $1";
@@ -256,9 +260,15 @@ export function compileCaptureUrl(
   ];
 }
 
-export function validateSimpleBangUrl(url: string): string | null {
+export function validateSimpleBangUrl(
+  url: string,
+  allowLocale = false
+): string | null {
   if (!url.includes("{}")) {
     return "URL must contain {} for the query";
+  }
+  if (!allowLocale && LOCALE_MARKER.test(url)) {
+    return "URL may only contain the {} placeholder";
   }
   try {
     const parsed = new URL(url.replace("{}", "test"));

@@ -101,6 +101,46 @@ describe("custom bang import and export", () => {
     expect(await db.getAllCustomBangs()).toHaveLength(1);
   });
 
+  test("imports documents exported under every earlier schema version", async () => {
+    for (let version = 1; version <= SETTINGS_SCHEMA_VERSION; version++) {
+      const db = new DB();
+      const result = await db.importAll({
+        schemaVersion: version,
+        settings: { defaultBang: "ddg" },
+        customBangs: [],
+      });
+      expect(result.replaced).toBe(true);
+      expect(await db.getSetting("default-bang")).toBe("ddg");
+    }
+  });
+
+  test("validates the content language on import", async () => {
+    const db = new DB();
+    await expect(
+      db.importAll({
+        schemaVersion: SETTINGS_SCHEMA_VERSION,
+        settings: { contentLanguage: "de/evil.com" },
+        customBangs: [],
+      })
+    ).rejects.toThrow("Invalid content language");
+
+    const result = await db.importAll({
+      schemaVersion: SETTINGS_SCHEMA_VERSION,
+      settings: { contentLanguage: "de-DE" },
+      customBangs: [],
+    });
+    expect(result.replaced).toBe(true);
+    expect(await db.getSetting("content-language")).toBe("de-DE");
+
+    const off = await db.importAll({
+      schemaVersion: SETTINGS_SCHEMA_VERSION,
+      settings: { contentLanguage: "none" },
+      customBangs: [],
+    });
+    expect(off.replaced).toBe(true);
+    expect(await db.getSetting("content-language")).toBe("none");
+  });
+
   test("rejects invalid settings and versions before replacing data", async () => {
     const db = new DB();
     await db.setSetting("suggest-provider", "ddg");
@@ -251,6 +291,7 @@ describe("custom bang import and export", () => {
       ...legacy.settings,
       bangPrefix: null,
       snapPrefix: null,
+      contentLanguage: null,
     });
   });
 
