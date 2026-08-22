@@ -106,7 +106,33 @@ const MERGED_BANGS_PATH = `${DATA_DIR}/bangs.json`;
 const CANONICAL_URLS_PATH = `${DATA_DIR}/bang-canonical.json`;
 const SUGGEST_SITES_PATH = `${DATA_DIR}/suggest-sites.json`;
 const GENERATED_OUT_DIR = "src/generated";
+// 24 is the uint32 boundary of the hot-boot record, not a tuning knob.
+// hot-redirect.ts packs that record as `marker * 2**HOT_BANG_COUNT + overrides`:
+// an 8-bit trigger marker above a per-hot-bang override bitmask occupying the
+// low HOT_BANG_COUNT bits. At 24 that is 8 + 24 = 32 bits, so the packed state
+// is exactly a uint32 and MAX_PACKED_STATE lands precisely on UINT32_MAX
+// (256 * 2**24 - 1 === 4294967295). Introduced that way in 4d3037b.
+//
+// Raising it is not free even though nothing breaks immediately. At 31 the
+// state becomes 39 bits: still a safe integer and still correct today, but the
+// uint32 invariant is gone, and one `>>> 0` or Uint32Array added later would
+// silently truncate the marker. 31 is the absolute correctness ceiling —
+// `overrides |= 1 << i` and `state & (MASK_BASE - 1)` are 32-bit signed
+// operations, so at 32 the mask coerces to -1 and stops masking. Past that the
+// hot-boot restore degrades silently rather than throwing, costing the
+// worker-restart path where Flashbang's measured margin is largest.
+//
+// What the extra entries would buy, measured against data/bangs.json on
+// 2026-08-22 by each trigger's `relevance` share: top-24 covers 84.20% of that
+// weight, top-31 would cover 85.54% — about 0.40 ms of expected cold-start
+// time, on a lifecycle a profile reaches once. That is inside the noise of the
+// model, since `relevance` is DuckDuckGo's ranking standing in for real query
+// frequency. Not worth trading a designed 32-bit alignment for; revisit only
+// with real frecency data and a deliberate decision to give up uint32.
 const HOT_BANG_LIMIT = 24;
+// Enforces the uint32 invariant above. Anything in 25..31 is still correct but
+// abandons it, so raising this should be a conscious edit, not a bump.
+const HOT_BANG_LIMIT_CEILING = 24;
 const BANG_BINARY_MAGIC = 0x31424246;
 const BANG_BINARY_VERSION = 10;
 
@@ -2434,6 +2460,14 @@ interface GeneratedArtifacts {
 }
 
 function generateHotBangs(bangs: readonly Bang[]): string {
+  if (HOT_BANG_LIMIT > HOT_BANG_LIMIT_CEILING) {
+    throw new Error(
+      `HOT_BANG_LIMIT is ${HOT_BANG_LIMIT}, above the ${HOT_BANG_LIMIT_CEILING} that keeps the ` +
+        "hot-boot record inside a uint32 (8-bit marker + 24-bit override mask). Values up to 31 " +
+        "still decode correctly but give up that invariant; above 31 the mask silently stops " +
+        "masking and hot-boot restore degrades without erroring. See the constant's comment."
+    );
+  }
   const hot = bangs
     .filter((bang) => {
       if (bang.regex) {
