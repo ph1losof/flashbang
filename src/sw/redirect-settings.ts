@@ -13,6 +13,7 @@ import {
 import { hashFNV1a } from "../shared/hash";
 import { idbWrap, openDB } from "../shared/idb";
 import { normalizeLocaleSetting } from "../shared/locale-table";
+import { withPathSeparator } from "../shared/raw-url";
 import { compileSnapTarget, type SnapTargetParts } from "../shared/snap-target";
 import { resolveTriggerPrefixes } from "../shared/trigger-prefix";
 import { lookupBang } from "./bang-data";
@@ -65,7 +66,8 @@ interface StoredRedirectSettingsBundle {
   version: number;
 }
 
-function splitUrl(url: string): UrlParts {
+function splitUrl(rawUrl: string): UrlParts {
+  const url = withPathSeparator(rawUrl);
   const idx = url.indexOf("{}");
   return idx === -1
     ? [url, null]

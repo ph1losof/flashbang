@@ -361,7 +361,27 @@ function resolvePrefixSnap(
   return buildSnapUrl(settings.defaultUrl, term, resolved.filter);
 }
 
-export function referenceRedirectRawUrl(
+// Mirrors withPathSeparator() in src/sw/redirect-core.ts. Kept as an
+// independent copy on purpose: this file is the differential oracle, so it
+// restates the rule rather than importing the implementation under test.
+function withPathSeparator(url: string): string {
+  const schemeEnd = url.indexOf("://");
+  if (schemeEnd === -1) {
+    return url;
+  }
+  for (let i = schemeEnd + 3; i < url.length; i++) {
+    const c = url[i];
+    if (c === "/") {
+      return url;
+    }
+    if (c === "?" || c === "#") {
+      return `${url.slice(0, i)}/${url.slice(i)}`;
+    }
+  }
+  return `${url}/`;
+}
+
+function referenceResolveRawUrl(
   raw: string,
   settings: RedirectSettings
 ): string {
@@ -553,6 +573,13 @@ function encodeForRedirect(query: string): string {
       .replaceAll("%20", "+");
   }
   return query.replaceAll(" ", "+");
+}
+
+export function referenceRedirectRawUrl(
+  raw: string,
+  settings: RedirectSettings
+): string {
+  return withPathSeparator(referenceResolveRawUrl(raw, settings));
 }
 
 export function referenceRedirectUrl(

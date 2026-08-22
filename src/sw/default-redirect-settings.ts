@@ -1,6 +1,8 @@
+import { withPathSeparator } from "../shared/raw-url";
 import type { RedirectSettings, UrlParts } from "./redirect-core";
 
-function splitUrl(url: string): UrlParts {
+function splitUrl(rawUrl: string): UrlParts {
+  const url = withPathSeparator(rawUrl);
   const idx = url.indexOf("{}");
   return idx === -1
     ? [url, null]

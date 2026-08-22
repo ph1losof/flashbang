@@ -494,10 +494,10 @@ describe("service worker hot redirects", () => {
     const fullSettings = settings();
     const resolve = (raw: string) =>
       redirectRawUrl(raw, fullSettings, lookupGeneratedHotBang);
-    expect(resolve(";gh")).toBe("https://github.com");
+    expect(resolve(";gh")).toBe("https://github.com/");
     expect(resolve(";GH+test")).toContain("q=test");
     expect(resolve("test+;gh")).toContain("q=test");
-    expect(resolve("%3Bgh")).toBe("https://github.com");
+    expect(resolve("%3Bgh")).toBe("https://github.com/");
     expect(resolve("@gh+test")).toContain("site:github.com");
   });
 

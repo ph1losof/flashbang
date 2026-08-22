@@ -355,7 +355,9 @@ export function originOfPrefix(prefix: string): string {
       tailStart = position;
     }
   }
-  return tailStart === prefix.length ? prefix : prefix.substring(0, tailStart);
+  // Origins are path-less by construction, so they always take the "/" a
+  // spec-compliant serializer would add. Callers cache this result per bang.
+  return `${prefix.substring(0, tailStart)}/`;
 }
 
 export function encodeForRedirect(query: string): string {

@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- [Bun](https://bun.sh) 1.3.14 (runtime, package manager, and bundler; the version is pinned in `package.json`, CI, and Docker)
+- [Bun](https://bun.sh) 1.4.0 (runtime, package manager, and bundler; the version is pinned in `package.json`, CI, and Docker)
 - [Git](https://git-scm.com)
 
 Playwright browsers are required for end-to-end tests (`bunx playwright install`). Maintainers also need the [GitHub CLI](https://cli.github.com) for releases and Docker for image/health-check work.

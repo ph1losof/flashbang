@@ -1,4 +1,6 @@
 const CH_SLASH = 47; // /
+const CH_QUESTION = 63; // ?
+const CH_HASH = 35; // #
 
 export function readPathname(rawUrl: string): string {
   const schemePos = rawUrl.indexOf("://");
@@ -38,4 +40,30 @@ export function readOrigin(rawUrl: string): string {
     return rawUrl;
   }
   return rawUrl.substring(0, slashPos);
+}
+
+// A URL with no path segment ("https://example.com", "https://example.com?q=")
+// is not what a spec-compliant serializer emits: it inserts the missing "/"
+// ("https://example.com/?q="). Bun >=1.4 made Response.redirect do exactly
+// that, so the Response the service worker returns and the raw string the
+// server writes into Location would otherwise disagree for bare bangs.
+//
+// Call this where a URL prefix is *compiled* — settings load, codegen, origin
+// caches — never per redirect: normalizing the handful of path-less prefixes
+// once keeps the redirect hot path free of this scan.
+export function withPathSeparator(url: string): string {
+  const schemePos = url.indexOf("://");
+  if (schemePos === -1) {
+    return url;
+  }
+  for (let i = schemePos + 3; i < url.length; i++) {
+    const c = url.charCodeAt(i);
+    if (c === CH_SLASH) {
+      return url;
+    }
+    if (c === CH_QUESTION || c === CH_HASH) {
+      return `${url.substring(0, i)}/${url.substring(i)}`;
+    }
+  }
+  return `${url}/`;
 }

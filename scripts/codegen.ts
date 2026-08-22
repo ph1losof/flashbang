@@ -2392,6 +2392,35 @@ export function applyCanonicalUrls(
   });
 }
 
+// Bun >=1.4 makes Response.redirect spec-compliant: it parses the Location URL
+// and reserializes it. The service worker returns a Response, while the server
+// writes the raw string into the header, so any URL the parser would rewrite —
+// non-ASCII paths, mixed-case hosts, stray whitespace, a missing path "/" —
+// makes those two paths disagree. Normalizing the templates here settles it
+// once at build time instead of on every redirect.
+//
+// The sentinel stands in for "{}" while the URL is parsed. It is lowercase and
+// alphanumeric so it survives host lowercasing for the handful of bangs whose
+// placeholder sits in the hostname ("https://{}.wordpress.com/").
+const URL_PLACEHOLDER_SENTINEL = "zqfbphxk";
+
+export function normalizeBangUrl(raw: string): string {
+  if (raw.indexOf("://") === -1) {
+    return raw; // relative target such as "/settings"
+  }
+  const placeholders = raw.split("{}").length - 1;
+  let normalized: string;
+  try {
+    normalized = new URL(raw.replaceAll("{}", URL_PLACEHOLDER_SENTINEL)).href
+      .replaceAll(URL_PLACEHOLDER_SENTINEL, "{}")
+      .replaceAll(encodeURIComponent(URL_PLACEHOLDER_SENTINEL), "{}");
+  } catch {
+    return raw;
+  }
+  // Refuse the rewrite unless every placeholder survived it intact.
+  return normalized.split("{}").length - 1 === placeholders ? normalized : raw;
+}
+
 function mergeAndValidateSources(
   sources: readonly NamedBangSource[],
   overlay: CanonicalOverlay
@@ -2406,7 +2435,17 @@ function mergeAndValidateSources(
   console.log(`Canonical rewrites applied: ${rewritten}`);
   const valid = validateBangs(canonical);
   console.log(`Valid: ${valid.length} bangs after validation`);
-  return valid;
+  let normalizedCount = 0;
+  const normalized = valid.map((bang) => {
+    const url = normalizeBangUrl(bang.url);
+    if (url === bang.url) {
+      return bang;
+    }
+    normalizedCount++;
+    return { ...bang, url };
+  });
+  console.log(`URL normalization applied: ${normalizedCount} bangs`);
+  return normalized;
 }
 
 async function loadCanonicalOverlay(): Promise<CanonicalOverlay> {

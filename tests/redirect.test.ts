@@ -94,7 +94,7 @@ describe("parse — bang syntax patterns", () => {
 
   test('"!g" → prefix bang, no term → google.com origin', () => {
     const r = redirect("!g", settings());
-    expectRedirect(r, "https://www.google.com");
+    expectRedirect(r, "https://www.google.com/");
   });
 
   test('"g! cats" → prefix suffix-bang', () => {
@@ -104,7 +104,7 @@ describe("parse — bang syntax patterns", () => {
 
   test('"g!" → suffix-bang alone → google.com origin', () => {
     const r = redirect("g!", settings());
-    expectRedirect(r, "https://www.google.com");
+    expectRedirect(r, "https://www.google.com/");
   });
 
   test('"cats !g" → trailing prefix-bang', () => {
@@ -278,7 +278,7 @@ describe("redirect — routing logic", () => {
 
   test("empty term → origin extraction via new URL().origin", () => {
     const r = redirect("!gh", settings());
-    expectRedirect(r, "https://github.com");
+    expectRedirect(r, "https://github.com/");
   });
 
   test("empty term with unparseable URL → fallback to replace", () => {
@@ -296,7 +296,7 @@ describe("redirect — routing logic", () => {
         custom: { g: splitUrlTemplate("https://custom.search?q={}") },
       })
     );
-    expect(loc(r)).toBe("https://custom.search");
+    expect(loc(r)).toBe("https://custom.search/");
   });
 });
 
@@ -319,7 +319,7 @@ describe("redirect — capture bangs", () => {
   });
 
   test("capture bang without a term opens its origin", () => {
-    expect(redirectUrl("!ktr", settings())).toBe("https://translate.kagi.com");
+    expect(redirectUrl("!ktr", settings())).toBe("https://translate.kagi.com/");
   });
 
   test("capture no-match falls back to the full default query", () => {
@@ -408,7 +408,7 @@ describe("redirectRaw — bang syntax patterns (+ as space)", () => {
 
   test('"!g" → prefix bang, no term → google.com origin', () => {
     const r = redirectRaw("!g", settings());
-    expectRedirect(r, "https://www.google.com");
+    expectRedirect(r, "https://www.google.com/");
   });
 
   test('"g!+cats" → prefix suffix-bang', () => {
@@ -418,7 +418,7 @@ describe("redirectRaw — bang syntax patterns (+ as space)", () => {
 
   test('"g!" → suffix-bang alone → google.com origin', () => {
     const r = redirectRaw("g!", settings());
-    expectRedirect(r, "https://www.google.com");
+    expectRedirect(r, "https://www.google.com/");
   });
 
   test('"cats+!g" → trailing prefix-bang', () => {
@@ -527,7 +527,7 @@ describe("redirectRaw — routing logic", () => {
 
   test("empty term → origin extraction via new URL().origin", () => {
     const r = redirectRaw("!gh", settings());
-    expectRedirect(r, "https://github.com");
+    expectRedirect(r, "https://github.com/");
   });
 
   test("empty term with unparseable URL → fallback to replace", () => {
@@ -629,7 +629,7 @@ describe("redirectRaw — leading/trailing space trimming", () => {
 describe("redirectRaw — %21 encoded bang", () => {
   test('"%21gh" → prefix bang → github.com', () => {
     const r = redirectRaw("%21gh", settings());
-    expectRedirect(r, "https://github.com");
+    expectRedirect(r, "https://github.com/");
   });
 
   test('"%21g+cats" → prefix bang with term', () => {
@@ -764,12 +764,12 @@ describe("snap — prefix @trigger patterns", () => {
 
   test('"@w" → bare snap, no query → origin redirect', () => {
     const r = redirect("@w", settings());
-    expectRedirect(r, "https://en.wikipedia.org");
+    expectRedirect(r, "https://en.wikipedia.org/");
   });
 
   test('"@g" → bare snap → google.com origin (www stripped from domain, but origin preserved)', () => {
     const r = redirect("@g", settings());
-    expectRedirect(r, "https://www.google.com");
+    expectRedirect(r, "https://www.google.com/");
   });
 
   test('"@zzz cats" → unknown trigger → default search', () => {
@@ -942,7 +942,7 @@ describe("snap — raw URL-encoded patterns", () => {
 
   test('"%40w" → bare encoded snap → origin', () => {
     const r = redirectRaw("%40w", settings());
-    expectRedirect(r, "https://en.wikipedia.org");
+    expectRedirect(r, "https://en.wikipedia.org/");
   });
 });
 
@@ -972,7 +972,7 @@ describe("snap — custom bangs work as snaps", () => {
       Object.create(null);
     custom.mysite = splitUrlTemplate("https://mysite.com/s?q={}");
     const r = redirect("@mysite", settings({ custom }));
-    expectRedirect(r, "https://mysite.com");
+    expectRedirect(r, "https://mysite.com/");
   });
 
   test("custom snap extracts a host before query parameters", () => {
@@ -986,7 +986,7 @@ describe("snap — custom bangs work as snaps", () => {
   test("custom snap target overrides the URL-derived domain and path", () => {
     const snap = compileSnapTarget("docs.example.com/reference")!;
     const custom: Record<string, CustomUrlParts> = {
-      docs: ["https://search.example.com?q=", "", snap],
+      docs: ["https://search.example.com/?q=", "", snap],
     };
     const s = settings({ custom });
     expect(loc(redirect("@docs arrays", s))).toBe(
@@ -996,9 +996,9 @@ describe("snap — custom bangs work as snaps", () => {
       "https://docs.example.com/reference"
     );
     expect(loc(redirect("!docs arrays", s))).toBe(
-      "https://search.example.com?q=arrays"
+      "https://search.example.com/?q=arrays"
     );
-    expect(loc(redirect("!docs", s))).toBe("https://search.example.com");
+    expect(loc(redirect("!docs", s))).toBe("https://search.example.com/");
   });
 
   test("custom capture and snap metadata share one compiled tuple", () => {
@@ -1025,11 +1025,11 @@ describe("snap — Kagi alternate domains", () => {
       "https://www.google.com/search?q=story+site:news.ycombinator.com"
     );
     expect(loc(redirect("@hn", settings()))).toBe(
-      "https://news.ycombinator.com"
+      "https://news.ycombinator.com/"
     );
-    expect(loc(redirect("!hn", settings()))).toBe("https://hn.algolia.com");
+    expect(loc(redirect("!hn", settings()))).toBe("https://hn.algolia.com/");
     expect(loc(redirect("@hn", settings()))).toBe(
-      "https://news.ycombinator.com"
+      "https://news.ycombinator.com/"
     );
   });
 

@@ -1,3 +1,4 @@
+import { withPathSeparator } from "../../src/shared/raw-url";
 import type {
   CustomUrlParts,
   RedirectSettings,
@@ -14,7 +15,11 @@ export const DEFAULT_LUCKY_URL: UrlParts = [
   "",
 ];
 
-export function splitUrlTemplate(template: string): UrlParts {
+export function splitUrlTemplate(rawTemplate: string): UrlParts {
+  // Mirrors splitUrl() in src/sw/redirect-settings.ts, which normalizes every
+  // user-supplied URL as it is compiled. Without this the fixture would build
+  // prefixes production can never produce.
+  const template = withPathSeparator(rawTemplate);
   const placeholder = template.indexOf("{}");
   return placeholder === -1
     ? [template, null]

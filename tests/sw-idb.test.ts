@@ -447,7 +447,7 @@ describe("sw/idb redirect settings", () => {
     const mod = await loadSwIdb();
     const settings = await mod.readRedirectSettings();
     expect(settings.custom.docs).toEqual([
-      "https://search.example.com?q=",
+      "https://search.example.com/?q=",
       "",
       [
         "+site:docs.example.com/reference",

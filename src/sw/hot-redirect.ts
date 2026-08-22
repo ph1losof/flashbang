@@ -20,6 +20,7 @@ import { validateCustomTrigger } from "../shared/custom-trigger";
 import { hashFNV1a } from "../shared/hash";
 import { HOT_BOOT_SENTINEL, HOT_BOOT_VERSION } from "../shared/hot-boot";
 import { normalizeLocaleSetting } from "../shared/locale-table";
+import { withPathSeparator } from "../shared/raw-url";
 import { lookupBang } from "./bang-data";
 import { onLocaleChange, substituteLocale } from "./locale";
 import {
@@ -55,28 +56,34 @@ export interface HotBootRecord {
 
 const hotBangUrlCache: Array<UrlParts | undefined> = [];
 
-let hotPrefixes: readonly string[] = HOT_PREFIXES;
+// Substituted lazily, per id. Resolving a locale means negotiating against
+// `navigator.languages` and walking the locale table, and only six of the hot
+// prefixes carry a `{lang}` placeholder at all. Doing it eagerly put that work
+// in front of every worker start, so a restarted worker answering `!gh` paid to
+// resolve a Wikipedia language it never used.
+const hotPrefixCache: Array<string | undefined> = [];
+
+function hotPrefix(id: number): string {
+  let prefix = hotPrefixCache[id];
+  if (prefix === undefined) {
+    const raw = HOT_PREFIXES[id];
+    prefix = raw.indexOf("{") === -1 ? raw : substituteLocale(raw);
+    hotPrefixCache[id] = prefix;
+  }
+  return prefix;
+}
 
 export function refreshHotLocalePrefixes(): void {
-  let next: string[] | null = null;
-  for (let id = 0; id < HOT_PREFIXES.length; id++) {
-    if (HOT_PREFIXES[id].indexOf("{") === -1) {
-      continue;
-    }
-    next ??= HOT_PREFIXES.slice();
-    next[id] = substituteLocale(HOT_PREFIXES[id]);
-  }
-  hotPrefixes = next ?? HOT_PREFIXES;
+  hotPrefixCache.length = 0;
   hotBangUrlCache.length = 0;
 }
 
 onLocaleChange(refreshHotLocalePrefixes);
-refreshHotLocalePrefixes();
 
 function hotBangParts(id: number): UrlParts {
   let parts = hotBangUrlCache[id];
   if (!parts) {
-    parts = [hotPrefixes[id], HOT_SUFFIXES[id]];
+    parts = [hotPrefix(id), HOT_SUFFIXES[id]];
     hotBangUrlCache[id] = parts;
   }
   return parts;
@@ -126,7 +133,7 @@ function makeHotBangLookup(
     }
     return rawQuery === undefined
       ? hotBangParts(id)
-      : hotPrefixes[id] +
+      : hotPrefix(id) +
           rawQuery.substring(termStart as number, termEnd) +
           HOT_SUFFIXES[id];
   }) as HotBangLookup;
@@ -168,7 +175,8 @@ function createCompactSettings(state: number): RedirectSettings {
   };
 }
 
-function splitUrl(value: string): UrlParts {
+function splitUrl(raw: string): UrlParts {
+  const value = withPathSeparator(raw);
   const placeholder = value.indexOf("{}");
   return placeholder === -1
     ? [value, null]

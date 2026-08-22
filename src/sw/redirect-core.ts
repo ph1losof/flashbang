@@ -5,6 +5,7 @@ import {
   MAX_CAPTURE_INPUT_LENGTH,
 } from "../shared/capture-template";
 import { CH_0, CH_2, CH_BSLASH, CH_PERCENT, CH_PLUS } from "../shared/chars";
+import { withPathSeparator } from "../shared/raw-url";
 import { MAX_SNAP_CHAIN_TARGETS } from "../shared/snap-chain";
 import type { SnapTargetParts } from "../shared/snap-target";
 import {
@@ -386,7 +387,12 @@ function resolveSnapOrigin(
   const customEntry = custom[bang];
   if (customEntry) {
     const snap = customSnapTarget(customEntry);
-    return snap ? snap[1] : resolveBangOrigin(bang, custom, hash);
+    // Snap targets are stored path-less ("https://docs.example.com"), and the
+    // stored shape is what validation round-trips, so normalize on read rather
+    // than at compile time. Only the term-less snap path lands here.
+    return snap
+      ? withPathSeparator(snap[1])
+      : resolveBangOrigin(bang, custom, hash);
   }
   const cached = builtInSnapOriginCache[bang];
   if (cached !== undefined) {
@@ -396,8 +402,10 @@ function resolveSnapOrigin(
   if (!entry) {
     return null;
   }
-  const origin =
-    customSnapTarget(entry)?.[1] ?? originOfPrefix(substituteLocale(entry[0]));
+  const snap = customSnapTarget(entry)?.[1];
+  const origin = snap
+    ? withPathSeparator(snap)
+    : originOfPrefix(substituteLocale(entry[0]));
   if (origin) {
     builtInSnapOriginCache[bang] = origin;
   }
