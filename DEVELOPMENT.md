@@ -89,7 +89,9 @@ flashbang/
 │   │   ├── frecency-serial.ts # Compact frecency serialization
 │   │   ├── hash.ts            # Shared FNV-1a hash
 │   │   ├── hot-boot.ts        # Hot-boot metadata protocol constants
+│   │   ├── locale-tag.ts      # Locale tags, setting validation, and the lazily filled table slot
 │   │   ├── locale-table.ts    # Registered `{lang}` host patterns and their supported editions
+│   │   ├── locale-table-install.ts # Eager table wiring for runtimes that already hold the catalog
 │   │   ├── idb.ts             # Shared IndexedDB open helper
 │   │   ├── raw-query.ts       # Raw query string parsing
 │   │   ├── raw-url.ts         # Raw URL pathname and origin parsing
@@ -117,7 +119,7 @@ flashbang/
 │   │   ├── default-redirect-settings.ts # I/O-free default redirect settings
 │   │   ├── redirect-core.ts    # Shared allocation-free redirect resolver
 │   │   ├── redirect-prefix.ts  # Shared prefix parsing and URL assembly
-│   │   ├── locale.ts         # Resolves `{lang}` markers from the reader's language
+│   │   ├── locale.ts         # Resolves `{lang}` markers from the reader's language, loading the table on demand
 │   │   ├── redirect-settings.ts # Redirect settings loading and compilation
 │   │   ├── redirect.ts        # Bang/snap parsing & redirect logic (zero-copy raw + decoded paths)
 │   │   ├── idb.ts             # IndexedDB access, settings cache & in-memory frecency
@@ -224,6 +226,7 @@ Unit, integration, performance, and docs tests:
 - `tests/locale-catalog.test.ts` — Locale table shape and the editions each registered pattern hosts
 - `tests/locale-codegen.test.ts` — Build-time marker rules for catalog and suggestion endpoints
 - `tests/locale-init.test.ts` — Substitution resolves from the browser without an explicit initialization call
+- `tests/locale-lazy.test.ts` — The edition table stays unloaded until a `{lang}` destination needs it
 - `tests/codegen-transform.test.ts` — Codegen transformation and domain extraction
 - `tests/codegen-roundtrip.test.ts` — Generated lookup round trips
 - `tests/codegen-input-stamp.test.ts` — Generated-data staleness detection against the recorded input digests
@@ -325,7 +328,7 @@ On **self-hosted** (Docker/Railway via `start.ts`), the Bun server sets headers 
 6. **Generate static-host headers** — Writes `dist/_headers` with shared security headers, per-page inline-script hashes, the stricter Service Worker CSP, and the OpenSearch content type
 7. **Pre-compress** — Eligible static assets, including the full bang catalogs and first-page shards, are compressed with Brotli (max quality) and written as `.br` files alongside the originals. The production server serves these automatically when the client supports it, falling back to uncompressed. Cloudflare Pages builds (`CF_PAGES=1`) instead promote the redirect catalog's Brotli bytes to its canonical content-hashed path and declare `Content-Encoding: br` plus `no-transform` in `_headers`; this prevents the platform from replacing the max-quality artifact with a larger dynamic encoding. Other static and self-hosted builds retain the ordinary identity file and `.br` sidecar.
 
-The build fails closed on catalog performance budgets, so a regression on the first-search path cannot ship quietly. The absolute limits are 9.25 KiB Brotli for the cold fallback module (currently 9.0 KiB), 21.5 KiB Brotli for the Service Worker bundle (currently 21.1 KiB), and at most 15 index packs. Both cold-fallback and worker limits were raised from their original 7 KiB and 19 KiB to absorb locale substitution and the 790-edition table, which costs about 965 B Brotli. Two ratio budgets scale with catalog growth instead: the string store plus the largest index pack must stay under 75% of the monolithic catalog's Brotli size, and the store plus every pack must stay under 110% of it.
+The build fails closed on catalog performance budgets, so a regression on the first-search path cannot ship quietly. The absolute limits are 9.25 KiB Brotli for the cold fallback module (currently 7.7 KiB), 21.5 KiB Brotli for the Service Worker bundle (currently 21.1 KiB), and at most 15 index packs. Both cold-fallback and worker limits were raised from their original 7 KiB and 19 KiB to absorb locale substitution and the edition table. The cold module has since given that table back: it is built as its own `locale-table-*.js` asset and imported only when a destination carries `{lang}`, which returned about 1.3 KiB Brotli to the budget. Two ratio budgets scale with catalog growth instead: the string store plus the largest index pack must stay under 75% of the monolithic catalog's Brotli size, and the store plus every pack must stay under 110% of it.
 
 If generated bang artifacts are missing, carry an outdated schema, or no longer match the data files recorded in `src/generated/bangs-inputs.json`, `bun run build`, `bun run dev`, `bun run profile`, and `bun test` automatically run `bun run codegen --from-merged` first.
 
@@ -334,6 +337,17 @@ If generated bang artifacts are missing, carry an outdated schema, or no longer 
 `src/shared/locale-table.ts` is committed static data: which host patterns carry
 a `{lang}` marker, and exactly which editions each site actually hosts.
 Nothing is inferred at runtime and no build step reaches the network.
+
+That data is the heavy half, so it is kept out of anything that may not need it.
+`src/shared/locale-tag.ts` holds the parts that are always cheap — tag
+canonicalization, setting validation, the pattern shapes — plus a one-slot
+registry the table fills. Runtimes that hold the whole catalog anyway import
+`src/shared/locale-table-install.ts` once and never think about it. The cold
+first-redirect bundle does not: it is built as its own content-addressed asset,
+and `substituteLocale` throws a recognizable sentinel when a `{lang}` host needs
+data that is not loaded, which the cold fallback catches in the same retry loop
+it already runs for missing catalog shards. A cold `!gh` therefore never fetches
+the table; a cold `!w` fetches it once and retries.
 
 The Wikimedia families are regenerated by hand with
 `bun scripts/build-locale-table.ts`, which reads the published SiteMatrix — one

@@ -366,7 +366,9 @@ describe("build cache version", () => {
       logSpy.mockRestore();
       buildSpy.mockRestore();
     }
-  });
+    // Mocked bundlers, but the catalog generation and Brotli passes are real:
+    // 5s is the default and CI runners do not finish this inside it.
+  }, 60_000);
   test("maps a content-hashed binary asset", () => {
     expect(precacheFileInputs([], "/bangs-0123456789ab.bin")[0]).toEqual([
       "/bangs-0123456789ab.bin",
