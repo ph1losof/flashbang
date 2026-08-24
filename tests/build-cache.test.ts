@@ -234,6 +234,13 @@ describe("build cache version", () => {
     const buildSpy = spyOn(Bun, "build")
       .mockResolvedValueOnce(
         buildOutput({
+          outputs: [
+            { kind: "entry-point", path: "dist/locale-table-10ca1e70.js" },
+          ],
+        })
+      )
+      .mockResolvedValueOnce(
+        buildOutput({
           outputs: [{ kind: "chunk", path: "dist/chunk-12345678.js" }],
         })
       )
@@ -259,12 +266,13 @@ describe("build cache version", () => {
       );
       expect(result.fallbackAsset).toBe("/fallback-abcdef12.js");
       expect(result.coldFallbackAsset).toBe("/cold-fallback-12345678.js");
+      expect(result.localeTableAsset).toBe("/locale-table-10ca1e70.js");
       expect(result.appOutputs).toHaveLength(2);
       expect(result.appOutputs[0]).toMatchObject({
         kind: "chunk",
         path: "dist/chunk-12345678.js",
       });
-      expect(buildSpy).toHaveBeenCalledTimes(4);
+      expect(buildSpy).toHaveBeenCalledTimes(5);
     } finally {
       buildSpy.mockRestore();
     }
@@ -303,6 +311,11 @@ describe("build cache version", () => {
         await Bun.write(path, "console.log('fallback')");
         return buildOutput({ outputs: [{ kind: "entry-point", path }] });
       }
+      if (entry === "src/shared/locale-table.ts") {
+        const path = `${outdir}/${String(naming).replace("[hash]", "10ca1e70").replace("[ext]", "js")}`;
+        await Bun.write(path, "console.log('locale table')");
+        return buildOutput({ outputs: [{ kind: "entry-point", path }] });
+      }
       if (entry === "src/ui/cold-fallback.ts") {
         const path = `${outdir}/${String(naming).replace("[hash]", "12345678").replace("[ext]", "js")}`;
         await Bun.write(path, "console.log('cold fallback')");
@@ -326,7 +339,7 @@ describe("build cache version", () => {
     const logSpy = spyOn(console, "log").mockImplementation(() => undefined);
     try {
       await buildProductionAssets();
-      expect(buildSpy).toHaveBeenCalledTimes(7);
+      expect(buildSpy).toHaveBeenCalledTimes(8);
       const headers = await Bun.file("dist/_headers").text();
       expect(headers).toContain("/sw.js");
       // The preload hint belongs to both shell paths and nowhere else: a

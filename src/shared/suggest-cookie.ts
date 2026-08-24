@@ -2,7 +2,7 @@ import {
   parseFrecencyCompact,
   serializeFrecencyCompact,
 } from "./frecency-serial";
-import { normalizeLocaleSetting } from "./locale-table";
+import { normalizeLocaleSetting } from "./locale-tag";
 import {
   DEFAULT_BANG_PREFIX,
   DEFAULT_SNAP_PREFIX,

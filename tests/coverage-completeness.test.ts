@@ -10,8 +10,10 @@ import { dirname, posix, relative, resolve } from "node:path";
  * which keeps the coverage denominator honest as new modules land.
  */
 
+// The trailing `import\s+` alternative catches bare side-effect imports, which
+// carry no `from` clause but still pull a module into the graph.
 const IMPORT_SPECIFIER =
-  /(?:from\s*|import\s*\(\s*|require\s*\(\s*)["'`](\.[^"'`]+)["'`]/g;
+  /(?:from\s*|import\s*\(\s*|require\s*\(\s*|import\s+)["'`](\.[^"'`]+)["'`]/g;
 /** Mirrors `coveragePathIgnorePatterns` in `bunfig.toml`. */
 const NOT_MEASURED = ["src/generated/", "src/ui/"];
 

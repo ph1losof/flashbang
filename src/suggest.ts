@@ -9,11 +9,8 @@ import {
   SUGGEST_URLS,
   TOP_K,
 } from "./shared/constants";
-import {
-  LOCALE_DISABLED,
-  localeChain,
-  normalizeLocaleSetting,
-} from "./shared/locale-table";
+import { localeChain } from "./shared/locale-table";
+import { LOCALE_DISABLED, normalizeLocaleSetting } from "./shared/locale-tag";
 import { readQueryParam } from "./shared/raw-query";
 import { parsePartialSnapChain } from "./shared/snap-chain";
 import {

@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { HOT_PREFIXES, HOT_TRIGGERS } from "../src/generated/bangs-hot.js";
 import { compileCaptureUrl } from "../src/shared/capture-template";
 import { HOT_BOOT_VERSION } from "../src/shared/hot-boot";
+import "../src/shared/locale-table-install";
 import { TRIGGER_PREFIXES } from "../src/shared/trigger-prefix";
 import {
   createHotBootState,

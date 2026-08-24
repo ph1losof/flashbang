@@ -1,31 +1,18 @@
-const TAG_PATTERN = /^[a-z]{2,3}(?:-[a-z0-9]{2,8}){0,3}$/;
+/**
+ * Per-language edition data for hosts that carry a {lang} marker.
+ *
+ * Kept apart from locale-tag.ts because this module is the only heavy half:
+ * loading it is what the cold fallback defers until a destination needs it.
+ */
+import type { LocalePattern, LocaleSplit } from "./locale-tag";
 
-export function canonicalLocaleTag(value: string): string | null {
-  return canonicalizeLowered(value.trim().toLowerCase());
-}
+export type { LocalePattern, LocaleSplit };
 
-function canonicalizeLowered(lowered: string): string | null {
-  const tag =
-    lowered.indexOf("_") === -1 ? lowered : lowered.replaceAll("_", "-");
-  return TAG_PATTERN.test(tag) ? tag : null;
-}
-
-export const LOCALE_DISABLED = "none";
-
-export function normalizeLocaleSetting(value: string): string | null {
-  const trimmed = value.trim().toLowerCase();
-  return trimmed === LOCALE_DISABLED
-    ? LOCALE_DISABLED
-    : canonicalizeLowered(trimmed);
-}
-
-export interface LocalePattern {
-  readonly aliases: string;
-  readonly fallback: string;
-  readonly host: string;
-  readonly snap: string;
-  readonly supported: string;
-}
+// Deliberately not imported from locale-tag: a runtime edge to that module
+// makes the bundler hoist it into a chunk shared with the cold entry, which
+// costs the cold path an extra request. This module must stay standalone so
+// its dynamic import is one self-contained file.
+const LOCALE_MARKER = "{lang}";
 
 export const LOCALE_PATTERNS: readonly LocalePattern[] = [
   {
@@ -84,8 +71,6 @@ export const LOCALE_PATTERNS: readonly LocalePattern[] = [
     supported: "ar cs de el en es fi fr hi it ja ko pt ru sl sv zh",
   },
 ];
-
-export const LOCALE_MARKER = "{lang}";
 
 export function localeChain(tags: readonly string[]): string[] {
   const chain: string[] = [];
@@ -169,13 +154,6 @@ function authorityEnd(prefix: string, start: number): number {
     end = fragment;
   }
   return end;
-}
-
-export interface LocaleSplit {
-  readonly head: string;
-  readonly group: number;
-  readonly pattern: LocalePattern;
-  readonly tail: string;
 }
 
 const splitCache = new Map<string, LocaleSplit | null>();

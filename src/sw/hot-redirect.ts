@@ -19,7 +19,7 @@ import {
 import { validateCustomTrigger } from "../shared/custom-trigger";
 import { hashFNV1a } from "../shared/hash";
 import { HOT_BOOT_SENTINEL, HOT_BOOT_VERSION } from "../shared/hot-boot";
-import { normalizeLocaleSetting } from "../shared/locale-table";
+import { normalizeLocaleSetting } from "../shared/locale-tag";
 import { withPathSeparator } from "../shared/raw-url";
 import { lookupBang } from "./bang-data";
 import { onLocaleChange, substituteLocale } from "./locale";

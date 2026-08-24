@@ -5,17 +5,26 @@ import {
 } from "../shared/bang-shards";
 import { hashFNV1a } from "../shared/hash";
 import { DB_NAME } from "../shared/idb";
+import { installLocaleTable, type LocaleTable } from "../shared/locale-tag";
 import {
   configureBangFallbackLookup,
   createBangShardRuntime,
 } from "../sw/bang-data";
 import { defaultRedirectSettings } from "../sw/default-redirect-settings";
 import { lookupGeneratedHotBang } from "../sw/hot-redirect";
-import { setActiveLocale } from "../sw/locale";
+import { localeTableUnavailable, setActiveLocale } from "../sw/locale";
 import { redirectUrl } from "../sw/redirect";
 
 declare const __BANG_SHARD_ROUTER__: readonly number[];
 declare const __BANG_SHARD_ASSETS__: readonly string[];
+declare const __LOCALE_TABLE_ASSET__: string;
+
+// Held in a variable so the bundler leaves the specifier alone: a literal here
+// would be resolved and inlined at build time, putting the edition table back
+// on the critical path. Bun's `splitting` would emit the chunk but also a
+// shared runtime shim the entry has to fetch, which is the request this
+// avoids in the first place.
+const localeTableAsset = __LOCALE_TABLE_ASSET__;
 
 setActiveLocale(null);
 
@@ -63,13 +72,20 @@ export async function resolveColdFallback(
   configureBangFallbackLookup(shardRuntime.lookup);
   const settings = defaultRedirectSettings();
   let prefetchedData = bangData;
-  for (let attempt = 0; attempt <= BANG_SHARD_COUNT; attempt++) {
+  // One attempt per shard, plus the single retry a `{lang}` destination costs.
+  for (let attempt = 0; attempt <= BANG_SHARD_COUNT + 1; attempt++) {
     try {
       return {
         settings,
         url: redirectUrl(query, settings, lookupGeneratedHotBang),
       };
     } catch (error) {
+      if (localeTableUnavailable(error)) {
+        // Only destinations with a per-language edition reach this, so the
+        // edition table stays off the critical path for every other bang.
+        installLocaleTable((await import(localeTableAsset)) as LocaleTable);
+        continue;
+      }
       const shardId = shardRuntime.unavailableShardId(error);
       if (shardId === null) {
         throw error;

@@ -1,4 +1,7 @@
 import { DB_NAME, resetDB } from "../shared/idb";
+// This path already fetches the whole catalog, so the edition table costs
+// nothing it does not pay for already.
+import "../shared/locale-table-install";
 import { initializeBangData } from "../sw/bang-data";
 import {
   lookupGeneratedHotBang,

@@ -1,13 +1,19 @@
 import {
+  activeLocaleTable,
   canonicalLocaleTag,
   LOCALE_DISABLED,
   type LocaleSplit,
-  localeChain,
-  localeSplitOf,
-  resolveLocaleValue,
-} from "../shared/locale-table";
+  type LocaleTable,
+} from "../shared/locale-tag";
 
 export { canonicalLocaleTag };
+
+interface LocaleTableUnavailableError extends Error {
+  readonly localeTableUnavailable: true;
+}
+
+let pendingTags: readonly string[] | null = null;
+let unavailable: LocaleTableUnavailableError | null = null;
 
 let generation = 1;
 let langChain: readonly string[] = [];
@@ -23,6 +29,12 @@ const listeners: Array<() => void> = [];
 
 export function onLocaleChange(listener: () => void): void {
   listeners.push(listener);
+}
+
+function notifyLocaleChange(): void {
+  for (const listener of listeners) {
+    listener();
+  }
 }
 
 function browserLanguages(): readonly string[] {
@@ -48,7 +60,7 @@ function sameChain(a: readonly string[], b: readonly string[]): boolean {
   return true;
 }
 
-function applyTags(raw: readonly string[]): boolean {
+function applyTags(raw: readonly string[], loaded: LocaleTable): boolean {
   const tags: string[] = [];
   for (const value of raw) {
     const tag = canonicalLocaleTag(value);
@@ -56,7 +68,7 @@ function applyTags(raw: readonly string[]): boolean {
       tags.push(tag);
     }
   }
-  const nextLang = localeChain(tags);
+  const nextLang = loaded.localeChain(tags);
   if (initialized && sameChain(nextLang, langChain)) {
     return false;
   }
@@ -67,34 +79,63 @@ function applyTags(raw: readonly string[]): boolean {
   return true;
 }
 
-export function setActiveLocale(override: string | null): boolean {
-  let tags: readonly string[];
+function requestedTags(override: string | null): readonly string[] {
   if (override === LOCALE_DISABLED) {
-    tags = [];
-  } else if (override) {
-    tags = [override];
-  } else {
-    tags = browserLanguages();
+    return [];
   }
-  if (!applyTags(tags)) {
+  return override ? [override] : browserLanguages();
+}
+
+export function localeTableUnavailable(error: unknown): boolean {
+  return (
+    !!error &&
+    typeof error === "object" &&
+    error === unavailable &&
+    (error as Partial<LocaleTableUnavailableError>).localeTableUnavailable ===
+      true
+  );
+}
+
+function requireTable(): LocaleTable {
+  const loaded = activeLocaleTable();
+  if (loaded) {
+    return loaded;
+  }
+  if (!unavailable) {
+    unavailable = Object.assign(new Error("Locale table is not installed"), {
+      localeTableUnavailable: true as const,
+    });
+  }
+  throw unavailable;
+}
+
+export function setActiveLocale(override: string | null): boolean {
+  const tags = requestedTags(override);
+  const loaded = activeLocaleTable();
+  if (!loaded) {
+    // Nothing can have been substituted yet, so there is no cache to drop and
+    // no listener to run. The first substitution applies these tags instead.
+    pendingTags = tags;
     return false;
   }
-  for (const listener of listeners) {
-    listener();
+  if (!applyTags(tags, loaded)) {
+    return false;
   }
+  notifyLocaleChange();
   return true;
 }
 
-function resolveForSplit(split: LocaleSplit): string {
+function resolveForSplit(split: LocaleSplit, loaded: LocaleTable): string {
   if (!initialized) {
-    applyTags(browserLanguages());
+    applyTags(pendingTags ?? browserLanguages(), loaded);
+    pendingTags = null;
   }
   const group = split.group;
   const cached = resolvedValues[group];
   if (cached !== undefined) {
     return cached;
   }
-  const value = resolveLocaleValue(split.pattern, langChain);
+  const value = loaded.resolveLocaleValue(split.pattern, langChain);
   resolvedValues[group] = value;
   return value;
 }
@@ -103,15 +144,16 @@ export function substituteLocale(prefix: string): string {
   if (prefix.indexOf("{") === -1) {
     return prefix;
   }
-  const split = localeSplitOf(prefix);
+  const loaded = requireTable();
+  const split = loaded.localeSplitOf(prefix);
   return split === null
     ? prefix
-    : split.head + resolveForSplit(split) + split.tail;
+    : split.head + resolveForSplit(split, loaded) + split.tail;
 }
 
 export function localeSnapDomain(prefix: string): string | null {
   if (prefix.indexOf("{") === -1) {
     return null;
   }
-  return localeSplitOf(prefix)?.pattern.snap ?? null;
+  return requireTable().localeSplitOf(prefix)?.pattern.snap ?? null;
 }

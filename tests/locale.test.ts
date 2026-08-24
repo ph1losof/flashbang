@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import "../src/shared/locale-table-install";
+import { LOCALE_PATTERNS } from "../src/shared/locale-table";
 import {
   LOCALE_DISABLED,
-  LOCALE_PATTERNS,
   normalizeLocaleSetting,
-} from "../src/shared/locale-table";
+} from "../src/shared/locale-tag";
 import {
   canonicalLocaleTag,
   localeSnapDomain,

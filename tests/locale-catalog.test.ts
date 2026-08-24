@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { LOCALE_DISABLED, LOCALE_PATTERNS } from "../src/shared/locale-table";
+import "../src/shared/locale-table-install";
+import { LOCALE_PATTERNS } from "../src/shared/locale-table";
+import { LOCALE_DISABLED } from "../src/shared/locale-tag";
 import { setActiveLocale } from "../src/sw/locale";
 import { redirectRawUrl } from "../src/sw/redirect";
 import { loadTestBangData } from "./helpers/bang-data";

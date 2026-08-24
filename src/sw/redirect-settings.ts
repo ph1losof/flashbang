@@ -12,7 +12,7 @@ import {
 } from "../shared/constants";
 import { hashFNV1a } from "../shared/hash";
 import { idbWrap, openDB } from "../shared/idb";
-import { normalizeLocaleSetting } from "../shared/locale-table";
+import { normalizeLocaleSetting } from "../shared/locale-tag";
 import { withPathSeparator } from "../shared/raw-url";
 import { compileSnapTarget, type SnapTargetParts } from "../shared/snap-target";
 import { resolveTriggerPrefixes } from "../shared/trigger-prefix";

@@ -1,4 +1,4 @@
-import { canonicalLocaleTag } from "../src/shared/locale-table";
+import { canonicalLocaleTag } from "../src/shared/locale-tag";
 
 const SITEMATRIX_URL =
   "https://meta.wikimedia.org/w/api.php?action=sitematrix&format=json&formatversion=2&smlimit=max&smsiteprop=url|code";

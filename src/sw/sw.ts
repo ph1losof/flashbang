@@ -47,6 +47,9 @@ import {
   trackBangUsage,
   waitForRedirectSettingsPersistence,
 } from "./idb";
+// The worker owns the full catalog anyway, so there is nothing to gain by
+// deferring the edition table the way the cold page path does.
+import "../shared/locale-table-install";
 import { setActiveLocale } from "./locale";
 import {
   type HotBangLookup,

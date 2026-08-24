@@ -135,6 +135,26 @@ export async function bundleUI(
   bangShardRouter: ArrayLike<number> = new Uint8Array(BANG_SHARD_ROUTER_SIZE),
   bangShardAssets: readonly string[] = []
 ) {
+  // Built first: the cold fallback imports it by URL at runtime, so its
+  // content-addressed name has to exist before that bundle is defined.
+  const localeTableBuild = await Bun.build({
+    entrypoints: ["src/shared/locale-table.ts"],
+    outdir: DIST_DIR,
+    naming: "locale-table-[hash].[ext]",
+    minify: true,
+    target: "browser",
+    format: "esm",
+  });
+  if (!localeTableBuild.success) {
+    throw new AggregateError(localeTableBuild.logs, "Failed to bundle UI");
+  }
+  const localeTableEntry = localeTableBuild.outputs.find(
+    (output) => output.kind === "entry-point"
+  );
+  if (!localeTableEntry) {
+    throw new Error("Locale table build did not emit an entry point");
+  }
+  const localeTableAsset = `/${basename(localeTableEntry.path)}`;
   const [appBuild, benchBuild, fallbackBuild, coldFallbackBuild] =
     await Promise.all([
       Bun.build({
@@ -181,6 +201,7 @@ export async function bundleUI(
         define: {
           __BANG_SHARD_ROUTER__: JSON.stringify(Array.from(bangShardRouter)),
           __BANG_SHARD_ASSETS__: JSON.stringify(bangShardAssets),
+          __LOCALE_TABLE_ASSET__: JSON.stringify(localeTableAsset),
         },
       }),
     ]);
@@ -208,6 +229,7 @@ export async function bundleUI(
     appOutputs: [...appBuild.outputs, ...coldFallbackBuild.outputs],
     fallbackAsset: `/${basename(fallbackEntry.path)}`,
     coldFallbackAsset: `/${basename(coldFallbackEntry.path)}`,
+    localeTableAsset,
   };
 }
 

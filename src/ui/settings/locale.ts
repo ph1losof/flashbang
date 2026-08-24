@@ -1,4 +1,5 @@
-import { LOCALE_DISABLED, LOCALE_PATTERNS } from "../../shared/locale-table";
+import { LOCALE_PATTERNS } from "../../shared/locale-table";
+import { LOCALE_DISABLED } from "../../shared/locale-tag";
 import type { DB } from "../db";
 import { $ } from "../dom";
 import type { SettingsWriter } from "./write";

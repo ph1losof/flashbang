@@ -328,18 +328,20 @@ export async function main(): Promise<void> {
   await Bun.write(`${DIST_DIR}${bangMetaAsset}`, bangMetaBytes);
 
   console.log("=== Bundle app + bench (to discover chunks) ===");
-  const { appOutputs, fallbackAsset, coldFallbackAsset } = await bundleUI(
-    allowUnsafeCustomSuggestUrls,
-    bangMetaAsset,
-    "fallback-[hash].[ext]",
-    bangDataAsset,
-    bangShardRouter,
-    bangShardAssets
-  );
+  const { appOutputs, fallbackAsset, coldFallbackAsset, localeTableAsset } =
+    await bundleUI(
+      allowUnsafeCustomSuggestUrls,
+      bangMetaAsset,
+      "fallback-[hash].[ext]",
+      bangDataAsset,
+      bangShardRouter,
+      bangShardAssets
+    );
   const requiredAppAssets = [
     ...requiredAppAssetPaths(appOutputs),
     bangMetaAsset,
     coldFallbackAsset,
+    localeTableAsset,
   ].sort();
 
   if (requiredAppAssets.length) {
@@ -485,6 +487,9 @@ export async function main(): Promise<void> {
       "  Cache-Control: public, max-age=31536000, immutable",
       "",
       coldFallbackAsset,
+      "  Cache-Control: public, max-age=31536000, immutable",
+      "",
+      localeTableAsset,
       "  Cache-Control: public, max-age=31536000, immutable",
       "",
       "/opensearch.xml",

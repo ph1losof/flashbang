@@ -10,6 +10,7 @@ const GOOGLE_REDIRECT = /google\.com\/search\?q=hello/;
 const GOOGLE_HOST = "https://www.google.com";
 const CUSTOM_HOST = "https://example.com";
 const BANG_COLD_ASSET_RE = /^\/bangs-s(?:[0-9a-z]|1[0-6])-[a-f0-9]{8}\.bin$/;
+const LOCALE_TABLE_ASSET_RE = /^\/locale-table-[a-z0-9_-]{8,}\.js$/i;
 const BANG_INDEX_ASSET_RE = /^\/bangs-ip[0-9a-e]-[a-f0-9]{8}\.bin$/;
 const BANG_STORE_ASSET_RE = /\/bangs-g-[a-f0-9]{8}\.bin$/;
 const WEBKIT_SERVICE_WORKER_SKIP =
@@ -1968,6 +1969,48 @@ test("first hot redirect warms the full catalog without waiting", async ({
   } finally {
     releaseFullCatalog();
     await context.close();
+  }
+});
+
+test("cold redirect loads the locale table only for a per-language destination", async ({
+  browser,
+  browserName,
+}) => {
+  skipWebKitServiceWorker(browserName);
+  // The cold bundle reaches the edition table through a dynamic import of a
+  // build-time asset URL, so a wrong URL or a chunk that quietly folded back
+  // into the entry both survive every in-process test. Only a real navigation
+  // shows either one.
+  for (const { query, destination, expected, wantsTable } of [
+    {
+      query: "/?q=%21w%20quantum",
+      destination: "wikipedia.org",
+      expected: /wikipedia\.org\/w\/index\.php\?search=quantum/,
+      wantsTable: true,
+    },
+    {
+      query: "/?q=%21gh%20quantum",
+      destination: "github.com",
+      expected: /github\.com\/search\?q=quantum/,
+      wantsTable: false,
+    },
+  ]) {
+    const context = await browser.newContext();
+    try {
+      await stubDestination(context, destination);
+      const localeTableRequests: string[] = [];
+      context.on("request", (request) => {
+        const { pathname } = new URL(request.url());
+        if (LOCALE_TABLE_ASSET_RE.test(pathname)) {
+          localeTableRequests.push(pathname);
+        }
+      });
+      const page = await context.newPage();
+      await navigateAndWaitForRedirect(page, query, expected);
+      expect(localeTableRequests.length > 0).toBe(wantsTable);
+    } finally {
+      await context.close();
+    }
   }
 });
 

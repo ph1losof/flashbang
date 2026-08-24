@@ -11,7 +11,7 @@ import {
 } from "../shared/constants";
 import { validateCustomTrigger } from "../shared/custom-trigger";
 import { idbWrap, openDB } from "../shared/idb";
-import { normalizeLocaleSetting } from "../shared/locale-table";
+import { normalizeLocaleSetting } from "../shared/locale-tag";
 import { validateSnapTarget } from "../shared/snap-target";
 import {
   DEFAULT_BANG_PREFIX,
