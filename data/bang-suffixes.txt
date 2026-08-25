@@ -1638,3 +1638,4 @@
 "&scty=Montr%C3%A9al,%20QC&icty=6185&ipc=0&sil=&sjdpl=&sdl=&imc1=0&imc2=0&flat=45.509828&flng=-73.6715&mfil=byCity&ipg=1&clr=1"
 "&sort=date%20desc&datefilter=lastyear&form_build_id=form-OccakxlLTXnbavxnbgZGoqHzkT0bEeOrjy3PPlFais4&form_id=dpidamwidgets_damsimplesearch_content_type_search_form"
 "&from=&via_in=&via=&via_time=0&to_in=%20{}&to=&hour=15&minute=39&timetype=departure&date_cb=on&day=7&month=7&year=2015&cmargin=3&wspeed=70&method=1&stz=0&mc1=0&mc2=0&mc3=0&mc4=0&mc5=0&mc6=0&mc0=1&nroutes=3&gotoHash="
+"&type=pullrequests"
