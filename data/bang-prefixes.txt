@@ -11425,3 +11425,6 @@
 "https://pricespy.co.uk/search?query="
 "https://liquipedia.net/dota2/index.php?search="
 "https://downloads.khinsider.com/search?search="
+"https://map.kakao.com/?q="
+"https://developers.cloudflare.com//?q="
+"https://www.cloudflare.com/domains/search?q="
