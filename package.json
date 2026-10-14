@@ -29,7 +29,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
     "@minify-html/node": "^0.18.1",
-    "@playwright/test": "^1.63.0",
+    "@playwright/test": "^1.64.0",
     "@types/bun": "^1.4.2",
     "@unocss/cli": "^66.10.5",
     "@unocss/core": "^66.10.5",
