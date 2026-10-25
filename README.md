@@ -1,23 +1,76 @@
 # flashbang
 
 <p>
-  <a href="https://dash.cloudflare.com/?to=/:account/workers-and-pages"><img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare"></a>
-  <a href="https://railway.com/deploy/flashbang?referralCode=cxTxcH&amp;utm_medium=integration&amp;utm_source=template&amp;utm_campaign=generic"><img src="https://railway.com/button.svg" alt="Deploy on Railway"></a>
+  <a href="https://dash.cloudflare.com/?to=/:account/workers-and-pages"
+    ><img
+      src="https://deploy.workers.cloudflare.com/button"
+      alt="Deploy to Cloudflare"
+    ></a
+  >
+  <a
+    href="https://railway.com/deploy/flashbang?referralCode=cxTxcH&amp;utm_medium=integration&amp;utm_source=template&amp;utm_campaign=generic"
+    ><img src="https://railway.com/button.svg" alt="Deploy on Railway"></a
+  >
 </p>
 
 <p>
-  <a href="https://github.com/ph1losof/flashbang/releases/latest"><img src="https://img.shields.io/github/v/release/ph1losof/flashbang?style=plastic&amp;label=release&amp;labelColor=14141e&amp;color=6e6e8a" alt="Latest release"></a>
-  <a href="https://github.com/ph1losof/flashbang/actions/workflows/ci.yaml"><img src="https://img.shields.io/github/actions/workflow/status/ph1losof/flashbang/ci.yaml?branch=master&amp;style=plastic&amp;label=build&amp;labelColor=14141e&amp;color=238636" alt="Build status"></a>
-  <a href="https://github.com/ph1losof/flashbang/actions/workflows/ci.yaml"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fph1losof%2Fflashbang%2Fbadges%2Fcoverage.json&amp;style=plastic&amp;labelColor=14141e" alt="Test coverage"></a>
-  <a href="https://github.com/ph1losof/flashbang/actions/workflows/codeql.yaml"><img src="https://img.shields.io/github/actions/workflow/status/ph1losof/flashbang/codeql.yaml?branch=master&amp;style=plastic&amp;label=security&amp;labelColor=14141e&amp;color=238636" alt="CodeQL security status"></a>
-  <a href="https://github.com/ph1losof/flashbang/actions/workflows/update-bangs.yaml"><img src="https://img.shields.io/github/actions/workflow/status/ph1losof/flashbang/update-bangs.yaml?branch=master&amp;event=schedule&amp;style=plastic&amp;label=daily%20bangs&amp;labelColor=14141e&amp;color=238636" alt="Daily bang data update status"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/ph1losof/flashbang?style=plastic&amp;label=license&amp;labelColor=14141e&amp;color=6e6e8a" alt="AGPL-3.0 license"></a>
-  <a href="package.json"><img src="https://img.shields.io/badge/runtime%20deps-0-238636?style=plastic&amp;labelColor=14141e" alt="Zero runtime dependencies"></a>
+  <a href="https://github.com/ph1losof/flashbang/releases/latest"
+    ><img
+      src="https://img.shields.io/github/v/release/ph1losof/flashbang?style=plastic&amp;label=release&amp;labelColor=14141e&amp;color=6e6e8a"
+      alt="Latest release"
+    ></a
+  >
+  <a href="https://github.com/ph1losof/flashbang/actions/workflows/ci.yaml"
+    ><img
+      src="https://img.shields.io/github/actions/workflow/status/ph1losof/flashbang/ci.yaml?branch=master&amp;style=plastic&amp;label=build&amp;labelColor=14141e&amp;color=238636"
+      alt="Build status"
+    ></a
+  >
+  <a href="https://github.com/ph1losof/flashbang/actions/workflows/ci.yaml"
+    ><img
+      src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fph1losof%2Fflashbang%2Fbadges%2Fcoverage.json&amp;style=plastic&amp;labelColor=14141e"
+      alt="Test coverage"
+    ></a
+  >
+  <a href="https://github.com/ph1losof/flashbang/actions/workflows/codeql.yaml"
+    ><img
+      src="https://img.shields.io/github/actions/workflow/status/ph1losof/flashbang/codeql.yaml?branch=master&amp;style=plastic&amp;label=security&amp;labelColor=14141e&amp;color=238636"
+      alt="CodeQL security status"
+    ></a
+  >
+  <a
+    href="https://github.com/ph1losof/flashbang/actions/workflows/update-bangs.yaml"
+    ><img
+      src="https://img.shields.io/github/actions/workflow/status/ph1losof/flashbang/update-bangs.yaml?branch=master&amp;event=schedule&amp;style=plastic&amp;label=daily%20bangs&amp;labelColor=14141e&amp;color=238636"
+      alt="Daily bang data update status"
+    ></a
+  >
+  <a href="LICENSE"
+    ><img
+      src="https://img.shields.io/github/license/ph1losof/flashbang?style=plastic&amp;label=license&amp;labelColor=14141e&amp;color=6e6e8a"
+      alt="AGPL-3.0 license"
+    ></a
+  >
+  <a href="package.json"
+    ><img
+      src="https://img.shields.io/badge/runtime%20deps-0-238636?style=plastic&amp;labelColor=14141e"
+      alt="Zero runtime dependencies"
+    ></a
+  >
 </p>
 
 ![Flashbang](.github/images/landing.png)
 
-<p align="center"><a href="#features">Features</a> &nbsp;|&nbsp; <a href="#bang-syntax">Bang syntax</a> &nbsp;|&nbsp; <a href="#snap-syntax">Snap syntax</a> &nbsp;|&nbsp; <a href="#setup-as-search-engine">Setup</a> &nbsp;|&nbsp; <a href="#deploy-your-own">Self-host</a> &nbsp;|&nbsp; <a href="#how-it-works">How it works</a> &nbsp;|&nbsp; <a href="#comparison-with-other-bang-tools">Comparison</a> &nbsp;|&nbsp; <a href="#contributing">Contributing</a></p>
+<p align="center">
+  <a href="#features">Features</a>
+  &nbsp;|&nbsp; <a href="#bang-syntax">Bang syntax</a> &nbsp;|&nbsp;
+  <a href="#snap-syntax">Snap syntax</a> &nbsp;|&nbsp;
+  <a href="#setup-as-search-engine">Setup</a> &nbsp;|&nbsp;
+  <a href="#deploy-your-own">Self-host</a> &nbsp;|&nbsp;
+  <a href="#how-it-works">How it works</a> &nbsp;|&nbsp;
+  <a href="#comparison-with-other-bang-tools">Comparison</a> &nbsp;|&nbsp;
+  <a href="#contributing">Contributing</a>
+</p>
 
 Turn your browser's address bar into a shortcut launcher. Type `!g kittens` to search Google, `!w dogs` for Wikipedia, `!gh react` for GitHub — over 14,000 shortcuts (called "bangs") that take you straight to the right site, instantly. No extra tabs, no round-trips, no waiting for a page to load. Or use **snaps** — type `@w quantum` to search your default engine restricted to Wikipedia, `@gh api` for GitHub-only results.
 
@@ -77,8 +130,8 @@ If the query is just a bang with no search term (e.g. `!g`), Flashbang redirects
 
 By default, snaps use `@` instead of `!` to perform a **site-restricted search** — your query goes to your default search engine with `site:domain` appended. Any bang trigger with a resolvable web domain works as a snap. All snaps are case-insensitive.
 
-| Format      | Example      | Result                                                    |
-| ----------- | ------------ | --------------------------------------------------------- |
+| Format      | Example      | Result                                                 |
+| ----------- | ------------ | ------------------------------------------------------ |
 | Prefix snap | `@w quantum` | Default engine search for "quantum site:wikipedia.org" |
 | Suffix snap | `quantum @w` | Default engine search for "quantum site:wikipedia.org" |
 | Bare snap   | `@gh`        | Redirect to github.com homepage                        |
@@ -357,7 +410,7 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for build pipeline and project structure de
 | **Automatic bang updates**       | Daily                                                                                                                                                 | No                                                                                                                                               | Daily                                                                                                                                                                     | Monthly                                                                                                                                            | Daily                                                                                                                                                          | Daily pull request                                                                                                                                            |
 | **Build tool**                   | Bun                                                                                                                                                   | Vite                                                                                                                                             | Bun + Vite                                                                                                                                                                | Vite                                                                                                                                               | Bun + Vite                                                                                                                                                     | Bun + Vite                                                                                                                                                    |
 | **Bang data for redirects**      | 🥇 **~545 KiB packed trigger→URL lookup**                                                                                                             | 2.7 MB (full metadata)                                                                                                                           | 🥈 **~688 KiB packed trigger→URL lookup**                                                                                                                                 | 🥉 **~208 KB inline + 1.23 MB lazy-loaded**                                                                                                        | ~1,744–1,977 KiB JSON dataset                                                                                                                                  | ~1,560 KiB generated trigger map                                                                                                                              |
-| **Core client redirect assets¶** | 🥇 **First redirect: ~14.0 KiB hot / ~21.2 KiB other; complete offline: ~236 KiB transfer / ~656 KiB decoded**                                          | 🥉 ~466 KiB transfer / ~1,980 KiB decoded                                                                                                        | 🥈 **~191 KiB transfer / ~694 KiB decoded**; first redirect on the edge path                                                                                                                               | Edge path                                                                                                                                          | ~525 KiB transfer / ~2,295 KiB decoded                                                                                                                         | Edge path                                                                                                                                                     |
+| **Core client redirect assets¶** | 🥇 **First redirect: ~14.0 KiB hot / ~21.2 KiB other; complete offline: ~236 KiB transfer / ~656 KiB decoded**                                        | 🥉 ~466 KiB transfer / ~1,980 KiB decoded                                                                                                        | 🥈 **~191 KiB transfer / ~694 KiB decoded**; first redirect on the edge path                                                                                              | Edge path                                                                                                                                          | ~525 KiB transfer / ~2,295 KiB decoded                                                                                                                         | Edge path                                                                                                                                                     |
 | **Parsed on**                    | 🥇 **SW thread once per worker lifetime; main thread on cold fallback**                                                                               | Main thread (every page load)                                                                                                                    | 🥇 **SW thread once per worker lifetime; main thread on cold fallback**                                                                                                   | 🥈 **Edge worker or main-thread fallback**                                                                                                         | 🥉 **Main thread with cached index**                                                                                                                           | 🥈 **Edge worker or main-thread fallback**                                                                                                                    |
 | **License**                      | AGPL-3.0                                                                                                                                              | MIT                                                                                                                                              | MIT                                                                                                                                                                       | MIT                                                                                                                                                | MIT                                                                                                                                                            | MIT                                                                                                                                                           |
 | **GitHub stars**                 | [![Flashbang stars](https://img.shields.io/github/stars/ph1losof/flashbang?style=flat&label=stars)](https://github.com/ph1losof/flashbang/stargazers) | [![Unduck stars](https://img.shields.io/github/stars/T3-Content/unduck?style=flat&label=stars)](https://github.com/T3-Content/unduck/stargazers) | [![Unduckified stars](https://img.shields.io/github/stars/taciturnaxolotl/unduckified?style=flat&label=stars)](https://github.com/taciturnaxolotl/unduckified/stargazers) | [![ReBang stars](https://img.shields.io/github/stars/Void-n-Null/rebang?style=flat&label=stars)](https://github.com/Void-n-Null/rebang/stargazers) | [![bangs.fast stars](https://img.shields.io/github/stars/kristianvld/bangs.fast?style=flat&label=stars)](https://github.com/kristianvld/bangs.fast/stargazers) | [![cf-unduck stars](https://img.shields.io/github/stars/mynameistito/cf-unduck?style=flat&label=stars)](https://github.com/mynameistito/cf-unduck/stargazers) |
@@ -389,7 +442,7 @@ The August 22, 2026 campaign ran 60 randomized pairs in every category against t
 | -------------- | ----------------: | -------------------------: | ---------------------------: |
 | Live worker    | **5 wins, 1 tie** |           **0.39–0.40 ms** |                 0.41–0.50 ms |
 | Worker restart |        **3 wins** |           **3.14–3.18 ms** |                 3.68–3.95 ms |
-| New profile    | **1 tie, 1 loss** |             61.68–65.52 ms |                63.53–64.17 ms |
+| New profile    | **1 tie, 1 loss** |             61.68–65.52 ms |               63.53–64.17 ms |
 
 The live-worker margins remain small — 0.01–0.10 ms — and one of those six categories has a confidence interval spanning zero. The durable separation is still the restart path: Flashbang was 0.55–0.77 ms lower after a stopped worker restarted, taking 60 of 60 pairs in all three shapes at p < 0.0001.
 
@@ -402,19 +455,19 @@ Two deployment changes shape Flashbang's side of that path, and neither moves a 
 <details>
 <summary>Full 11-category results and benchmark methodology</summary>
 
-| Chromium 151, randomized pairs                 | **Flashbang** | **Unduckified** | Paired result                                                                       |
-| ---------------------------------------------- | ------------: | --------------: | ----------------------------------------------------------------------------------- |
-| Live worker, `!gh test`                        |   **0.39 ms** |         0.42 ms | **Flashbang won 49/60; mean advantage 0.03 ms** (95% CI 0.02–0.04, p < 0.0001) |
-| Live worker, full-catalog alias `!github test` |   **0.40 ms** |         0.41 ms | **Flashbang won 45/60; mean advantage 0.02 ms** (95% CI 0.01–0.03, p = 0.0025) |
-| Live worker, trailing `test !gh`               |   **0.39 ms** |         0.41 ms | **Flashbang won 44/60; mean advantage 0.02 ms** (95% CI 0.02–0.03, p < 0.0001) |
-| Live worker, suffix `test gh!`                 |   **0.40 ms** |         0.41 ms | Tie — 37/60 pairs but mean difference 0.01 ms (95% CI -0.00–0.01, p = 0.2764) |
-| Live worker, empty query `!gh`                 |   **0.39 ms** |         0.41 ms | **Flashbang won 45/60; mean advantage 0.02 ms** (95% CI 0.01–0.03, p < 0.0001) |
-| Live worker, 256-byte query                    |   **0.39 ms** |         0.50 ms | **Flashbang won 60/60; mean advantage 0.10 ms** (95% CI 0.09–0.11, p < 0.0001) |
-| Worker restart, `!gh test`                     |   **3.14 ms** |         3.69 ms | **Flashbang won 60/60; mean advantage 0.58 ms** (95% CI 0.53–0.63, p < 0.0001) |
-| Worker restart, full-catalog alias             |   **3.15 ms** |         3.68 ms | **Flashbang won 60/60; mean advantage 0.55 ms** (95% CI 0.50–0.60, p < 0.0001) |
-| Worker restart, 256-byte query                 |   **3.18 ms** |         3.95 ms | **Flashbang won 60/60; mean advantage 0.77 ms** (95% CI 0.72–0.82, p < 0.0001) |
+| Chromium 151, randomized pairs                 | **Flashbang** | **Unduckified** | Paired result                                                                                                                        |
+| ---------------------------------------------- | ------------: | --------------: | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Live worker, `!gh test`                        |   **0.39 ms** |         0.42 ms | **Flashbang won 49/60; mean advantage 0.03 ms** (95% CI 0.02–0.04, p < 0.0001)                                                       |
+| Live worker, full-catalog alias `!github test` |   **0.40 ms** |         0.41 ms | **Flashbang won 45/60; mean advantage 0.02 ms** (95% CI 0.01–0.03, p = 0.0025)                                                       |
+| Live worker, trailing `test !gh`               |   **0.39 ms** |         0.41 ms | **Flashbang won 44/60; mean advantage 0.02 ms** (95% CI 0.02–0.03, p < 0.0001)                                                       |
+| Live worker, suffix `test gh!`                 |   **0.40 ms** |         0.41 ms | Tie — 37/60 pairs but mean difference 0.01 ms (95% CI -0.00–0.01, p = 0.2764)                                                        |
+| Live worker, empty query `!gh`                 |   **0.39 ms** |         0.41 ms | **Flashbang won 45/60; mean advantage 0.02 ms** (95% CI 0.01–0.03, p < 0.0001)                                                       |
+| Live worker, 256-byte query                    |   **0.39 ms** |         0.50 ms | **Flashbang won 60/60; mean advantage 0.10 ms** (95% CI 0.09–0.11, p < 0.0001)                                                       |
+| Worker restart, `!gh test`                     |   **3.14 ms** |         3.69 ms | **Flashbang won 60/60; mean advantage 0.58 ms** (95% CI 0.53–0.63, p < 0.0001)                                                       |
+| Worker restart, full-catalog alias             |   **3.15 ms** |         3.68 ms | **Flashbang won 60/60; mean advantage 0.55 ms** (95% CI 0.50–0.60, p < 0.0001)                                                       |
+| Worker restart, 256-byte query                 |   **3.18 ms** |         3.95 ms | **Flashbang won 60/60; mean advantage 0.77 ms** (95% CI 0.72–0.82, p < 0.0001)                                                       |
 | New profile, `!gh test`                        |  **61.68 ms** |        64.17 ms | Tie — Flashbang holds the lower median, but the paired mean runs 5.34 ms the other way (95% CI -18.18–3.60, p = 0.4505, 28/60 pairs) |
-| New profile, full-catalog alias                |      65.52 ms |    **63.53 ms** | **Unduckified won 41/60; mean advantage 12.45 ms** (95% CI 4.09–24.29, p = 0.0009) |
+| New profile, full-catalog alias                |      65.52 ms |    **63.53 ms** | **Unduckified won 41/60; mean advantage 12.45 ms** (95% CI 4.09–24.29, p = 0.0009)                                                   |
 
 A category is awarded when the bootstrapped 95% confidence interval on the paired mean difference excludes zero. Pair counts and medians are reported alongside because they can disagree with that verdict, in both directions. On a live worker `test gh!` goes to Flashbang 37/60 by pair count, but its mean difference is 0.01 ms with an interval touching zero. On a new profile `!gh test` gives Flashbang the lower median while the paired mean and the pair count both go the other way, over an interval spanning -18.18–3.60 ms; a bolded median in that row is the campaign's point estimate, not a claimed win. Both are recorded as ties.
 
