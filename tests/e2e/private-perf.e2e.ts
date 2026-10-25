@@ -486,6 +486,10 @@ test("private hash redirect and public path performance profile", async ({
     };
 
     for (let i = 0; i < COLD_RUNS; i++) {
+      // Start same-origin, like the floor below. From the previous redirect's
+      // cross-site page, headless Chromium spawns a renderer for the worker,
+      // which adds ~20 ms to both workers and hides Flashbang's own cost.
+      await restartPage.goto("/health");
       await closeWorker();
       workerRestart.push(await measure(restartPage, "/?q=%21g%20profile"));
     }
