@@ -64,11 +64,16 @@
 <p align="center">
   <a href="#features">Features</a>
   &nbsp;|&nbsp; <a href="#bang-syntax">Bang syntax</a> &nbsp;|&nbsp;
-  <a href="#snap-syntax">Snap syntax</a> &nbsp;|&nbsp;
-  <a href="#setup-as-search-engine">Setup</a> &nbsp;|&nbsp;
-  <a href="#deploy-your-own">Self-host</a> &nbsp;|&nbsp;
-  <a href="#how-it-works">How it works</a> &nbsp;|&nbsp;
-  <a href="#comparison-with-other-bang-tools">Comparison</a> &nbsp;|&nbsp;
+  <a href="#snap-syntax">Snap syntax</a>
+  &nbsp;|&nbsp;
+  <a href="#setup-as-search-engine">Setup</a>
+  &nbsp;|&nbsp;
+  <a href="#deploy-your-own">Self-host</a>
+  &nbsp;|&nbsp;
+  <a href="#how-it-works">How it works</a>
+  &nbsp;|&nbsp;
+  <a href="#comparison-with-other-bang-tools">Comparison</a>
+  &nbsp;|&nbsp;
   <a href="#contributing">Contributing</a>
 </p>
 
