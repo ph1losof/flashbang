@@ -4,7 +4,7 @@
   "private": true,
   "version": "1.7.2",
   "type": "module",
-  "packageManager": "bun@1.4.0",
+  "packageManager": "bun@1.4.4",
   "scripts": {
     "codegen": "bun scripts/codegen.ts",
     "resolve:suggestions": "bun scripts/resolve-suggestions.ts",
@@ -27,10 +27,10 @@
     "test:e2e": "DIST_DIR=dist-e2e ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=true bun run build && DIST_DIR=dist-e2e ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=true bunx playwright test --workers=1"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.15",
+    "@biomejs/biome": "^2.6.3",
     "@minify-html/node": "^0.18.1",
     "@playwright/test": "^1.64.1",
-    "@types/bun": "^1.4.3",
+    "@types/bun": "^1.4.4",
     "@unocss/cli": "^66.11.0",
     "@unocss/core": "^66.11.0",
     "@unocss/preset-wind3": "^66.11.0",
