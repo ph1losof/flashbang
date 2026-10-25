@@ -71,6 +71,7 @@ describe("codegen round-trip", () => {
     expect(extractBangShardTriggers("cats @gh,mdn,gh")).toEqual(["gh", "mdn"]);
     expect(extractBangShardTriggers("$npm cats", "$", "~")).toEqual(["npm"]);
     expect(extractBangShardTriggers("plain query")).toEqual([]);
+    expect(extractBangShardTriggers("   ")).toEqual([]);
   });
 
   test("every 100th bang resolves to a non-null entry", () => {

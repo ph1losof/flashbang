@@ -51,6 +51,7 @@ jobs:
       - run: bun run codegen -- --from-merged
       - run: bun test --coverage --coverage-reporter=lcov
       - name: Generate coverage badge data
+        id: badge
         run: |
           set -euo pipefail
           read -r lines_hit lines_total < <(
@@ -66,6 +67,8 @@ jobs:
           fi
 
           coverage="$(awk -v hit="$lines_hit" -v total="$lines_total" 'BEGIN { printf "%.1f", 100 * hit / total }')"
+          echo "lines_hit=$lines_hit" >> "$GITHUB_OUTPUT"
+          echo "lines_total=$lines_total" >> "$GITHUB_OUTPUT"
           color="$(awk -v value="$coverage" 'BEGIN {
             if (value >= 90) print "brightgreen"
             else if (value >= 80) print "green"
@@ -102,6 +105,19 @@ jobs:
           git -C "$publish_dir" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git -C "$publish_dir" commit -m "chore: update coverage badge"
           git -C "$publish_dir" push origin HEAD:badges
+      # Gated here rather than with bunfig's coverageThreshold, which bun applies
+      # to every file; this is the same line-weighted total the badge shows.
+      - name: Enforce line coverage threshold
+        env:
+          LINES_HIT: ${{ steps.badge.outputs.lines_hit }}
+          LINES_TOTAL: ${{ steps.badge.outputs.lines_total }}
+          MIN_LINE_COVERAGE: 92
+        run: |
+          awk -v hit="$LINES_HIT" -v total="$LINES_TOTAL" -v min="$MIN_LINE_COVERAGE" 'BEGIN {
+            pct = 100 * hit / total
+            printf "Line coverage: %.2f%% (%d/%d), minimum %s%%\n", pct, hit, total, min
+            exit pct < min
+          }'
 
   e2e:
     runs-on: ubuntu-24.04

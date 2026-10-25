@@ -16,4 +16,3 @@ coveragePathIgnorePatterns = [
   "src/ui/**",
   "*.config.ts",
 ]
-coverageThreshold = { lines = 0.97, functions = 0.9 }

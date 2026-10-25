@@ -61,6 +61,19 @@ describe("handleSuggestRequest", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  test("ignores the default bang prefix when URL syntax overrides it", async () => {
+    fetchSpy.mockResolvedValue(new Response("[]", { headers: JSON_HEADERS }));
+
+    const response = await handleSuggestRequest(
+      requestWithCookie("http://localhost/suggest?q=%21gh&sp=ddg&bp=%24&np=~")
+    );
+
+    expect(response.status).toBe(200);
+    expect(String(fetchSpy.mock.calls[0][0])).toContain(
+      "duckduckgo.com/ac/?q=!gh&type=list"
+    );
+  });
+
   test("blocks custom suggest provider request by default", async () => {
     const custom = "https://example.com/suggest?q={}";
     const response = await handleSuggestRequest(
@@ -210,5 +223,15 @@ describe("handleOpenSearchRequest", () => {
 
     expect(response.status).toBe(500);
     expect(await response.text()).toBe("Invalid PUBLIC_ORIGIN");
+  });
+
+  test("fails closed for a non-http request origin", async () => {
+    const response = handleOpenSearchRequest(
+      requestWithCookie("file:///opensearch.xml"),
+      {}
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.text()).toBe("Invalid request origin");
   });
 });
