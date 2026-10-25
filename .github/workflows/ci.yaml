@@ -111,7 +111,7 @@ jobs:
         env:
           LINES_HIT: ${{ steps.badge.outputs.lines_hit }}
           LINES_TOTAL: ${{ steps.badge.outputs.lines_total }}
-          MIN_LINE_COVERAGE: 92
+          MIN_LINE_COVERAGE: 95
         run: |
           awk -v hit="$LINES_HIT" -v total="$LINES_TOTAL" -v min="$MIN_LINE_COVERAGE" 'BEGIN {
             pct = 100 * hit / total
