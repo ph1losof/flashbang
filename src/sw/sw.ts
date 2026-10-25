@@ -302,9 +302,17 @@ async function publishHotBoot(includeSettings = false): Promise<void> {
         RESOLVED_PROMISE
       ));
   }
-  const frecency = settings
-    ? materializeHotFrecency(getTopFrecencyRecord(), snapshot)
-    : undefined;
+  let frecency: ReturnType<typeof materializeHotFrecency> | undefined;
+  if (settings) {
+    const materialize = () =>
+      materializeHotFrecency(getTopFrecencyRecord(), snapshot);
+    // Index shards decode on demand, so a frequently used bang outside the
+    // decoded shards has to be loaded before its URL can be published.
+    frecency =
+      !isBangDataInitialized() && bangStrings && workerIndexRuntime
+        ? await runWithShardRuntime(workerIndexRuntime, materialize)
+        : materialize();
+  }
   const compactSettings = settings
     ? undefined
     : materializeCompactBaseSettings(snapshot, prepared.settings);
