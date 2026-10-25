@@ -592,15 +592,15 @@ function createShardRuntime(
     { length: BANG_SHARD_COUNT },
     () => null
   );
-  const unavailable = Array.from(
-    { length: BANG_SHARD_COUNT },
-    (_, shardId) =>
-      Object.freeze(
-        Object.assign(new Error(`Bang shard ${shardId} is not initialized`), {
-          shardId,
-        })
-      ) as BangShardUnavailableError
-  );
+  // Created on first miss, not up front: each Error captures a stack, and
+  // building all of them made up most of a restarted worker's startup work.
+  const unavailable: Array<BangShardUnavailableError | undefined> = [];
+  const unavailableError = (shardId: number): BangShardUnavailableError =>
+    (unavailable[shardId] ??= Object.freeze(
+      Object.assign(new Error(`Bang shard ${shardId} is not initialized`), {
+        shardId,
+      })
+    ) as BangShardUnavailableError);
   const promises: Array<Promise<void> | null> = Array.from(
     { length: BANG_SHARD_COUNT },
     () => null
@@ -610,7 +610,7 @@ function createShardRuntime(
     const shardId = bangShardIndex(hash, router);
     const resolved = lookups[shardId];
     if (!resolved) {
-      throw unavailable[shardId];
+      throw unavailableError(shardId);
     }
     return resolved(trigger, hash);
   };

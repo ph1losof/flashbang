@@ -240,6 +240,18 @@ describe("codegen round-trip", () => {
       unavailable = error;
     }
     expect(runtime.unavailableShardId(unavailable)).toBe(shardId);
+    let repeated: unknown;
+    try {
+      runtime.lookup(trigger, hash);
+    } catch (error) {
+      repeated = error;
+    }
+    expect(repeated).toBe(unavailable);
+    expect(
+      runtime.unavailableShardId(
+        Object.assign(new Error("forged"), { shardId })
+      )
+    ).toBeNull();
 
     const shard = shards[shardId];
     await runtime.ensure(
