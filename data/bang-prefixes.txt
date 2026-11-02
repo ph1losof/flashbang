@@ -11434,3 +11434,4 @@
 "https://deadlock.wiki/index.php?search="
 "https://osmand.net/map/search/result/?query="
 "https://caselaw.nationalarchives.gov.uk/search?query="
+"https://mys.post.ch/my-consignments/deeplink-search?formattedParcelCodes="
