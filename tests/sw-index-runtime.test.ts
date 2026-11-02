@@ -38,10 +38,12 @@ globals.__CACHE_VERSION__ = "index-test";
 // would share the worker other suites evaluated without these globals.
 const INDEX_RUNTIME_WORKER = "../src/sw/sw.ts?index-runtime";
 const sw: typeof import("../src/sw/sw") = await import(INDEX_RUNTIME_WORKER);
-// Later suites evaluate their own worker; keep it on the monolithic catalog.
+// Later suites evaluate their own worker; keep it on the monolithic catalog
+// and its default cache name, or their cache assertions depend on file order.
 globals.__BANG_INDEX_ASSETS__ = undefined;
 globals.__BANG_INDEX_SHARDS_PER_ASSET__ = undefined;
 globals.__BANG_STORE_ASSETS__ = undefined;
+globals.__CACHE_VERSION__ = undefined;
 
 const ORIGINAL_REQUEST = Request;
 const ORIGIN = "https://flashbang.local";
