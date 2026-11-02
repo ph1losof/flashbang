@@ -60,6 +60,8 @@ const QUERY_TYPES: readonly QueryType[] = [
 ];
 
 const WARMUP_PER_TYPE = 50;
+// Navigations one benchmark popup may make, below Firefox's 200 limit.
+const FIREFOX_NAVIGATION_BUDGET = 190;
 const FETCH_OPTIONS: RequestInit = {
   cache: "no-store",
   credentials: "same-origin",
@@ -298,7 +300,11 @@ async function runNavigationBenchmark(
   readonly [direct: Stats, redirected: Stats, delta: Stats, rounds: number]
 > {
   const warmupRounds = 5;
-  const measuredRounds = Math.min(iterations, 100);
+  // Firefox blocks a window after 200 navigations in 10 seconds
+  // (dom.navigation.navigationRateLimit), which a fast run reaches. Each
+  // round navigates twice, so stay under that budget with some headroom.
+  const maxRounds = Math.floor(FIREFOX_NAVIGATION_BUDGET / 2);
+  const measuredRounds = Math.min(iterations, maxRounds - warmupRounds);
   const totalRounds = warmupRounds + measuredRounds;
   const direct: number[] = [];
   const redirected: number[] = [];
