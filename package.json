@@ -27,13 +27,13 @@
     "test:e2e": "DIST_DIR=dist-e2e ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=true bun run build && DIST_DIR=dist-e2e ALLOW_UNSAFE_CUSTOM_SUGGEST_URLS=true bunx playwright test --workers=1"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.6.3",
+    "@biomejs/biome": "^2.6.4",
     "@minify-html/node": "^0.18.1",
     "@playwright/test": "^1.64.1",
     "@types/bun": "^1.4.4",
-    "@unocss/cli": "^66.11.0",
-    "@unocss/core": "^66.11.0",
-    "@unocss/preset-wind3": "^66.11.0",
+    "@unocss/cli": "^66.12.0",
+    "@unocss/core": "^66.12.0",
+    "@unocss/preset-wind3": "^66.12.0",
     "typescript": "^7.0.2"
   },
   "dependencies": {},
