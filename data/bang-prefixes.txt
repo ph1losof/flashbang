@@ -11449,3 +11449,4 @@
 "https://www.kleinanzeigen.de/s-muenchen/"
 "https://simkl.com/search/?type=all&q="
 "http://kleinanzeigen.ebay.de/anzeigen/s-berlin/"
+"https://bunpro.jp/search?query="
