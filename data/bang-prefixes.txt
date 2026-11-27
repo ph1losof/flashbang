@@ -11450,3 +11450,4 @@
 "https://simkl.com/search/?type=all&q="
 "http://kleinanzeigen.ebay.de/anzeigen/s-berlin/"
 "https://bunpro.jp/search?query="
+"https://aur.archlinux.org/packages?K="
